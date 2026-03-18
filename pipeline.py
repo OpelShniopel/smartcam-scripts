@@ -19,7 +19,7 @@ HTTP API (internal / debug only):
   GET  /status
   POST /score
 
-Class IDs (model v9):  0=BACKGROUND  1=HOOP  2=BASKETBALL
+Class IDs (model v9):  0=BASKET  2=BASKETBALL
 
 Score state (set_score / POST /score fields, all optional):
   home_name, away_name, home_points, away_points,
@@ -59,9 +59,9 @@ JETSON_HOST = os.environ.get("JETSON_HOST", "localhost")
 UNIX_SOCK = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
 HTTP_PORT = 9101  # kept for debug / score updates without Go
 
-CLASS_ID_RIM = 0
-CLASS_ID_BALL = 1
-CLASS_NAMES = {CLASS_ID_RIM: "RIM", CLASS_ID_BALL: "BALL"}
+CLASS_ID_BASKET = 0
+CLASS_ID_BASKETBALL = 1
+CLASS_NAMES = {CLASS_ID_BASKET: "BASKET", CLASS_ID_BASKETBALL: "BALL"}
 
 PROBE_EVERY_N_FRAMES = 1
 
