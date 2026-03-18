@@ -19,7 +19,7 @@ HTTP API (internal / debug only):
   GET  /status
   POST /score
 
-Class IDs (model v9):  0=BASKET  2=BASKETBALL
+Class IDs (model v9):  0=BASKET  1=BASKETBALL
 
 Score state (set_score / POST /score fields, all optional):
   home_name, away_name, home_points, away_points,
