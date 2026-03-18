@@ -529,7 +529,7 @@ STREAM_BRANCH_TEMPLATE_CAIRO = """
     videoconvert !
     video/x-raw,format=I420 !
     queue max-size-buffers=4 !
-    x264enc name=enc_stream pass=cbr speed-preset=ultrafast bitrate=3000 key-int-max=60 threads=2 !
+    x264enc name=enc_stream pass=cbr speed-preset=ultrafast bitrate=6800 key-int-max=60 threads=2 !
     h264parse !
     flvmux streamable=true name=flvmux !
     rtmpsink location={rtmp_url} async=false
@@ -543,7 +543,7 @@ STREAM_BRANCH_TEMPLATE_PLAIN = """
     t2. ! queue max-size-buffers=5 leaky=downstream ! nvvidconv !
     video/x-raw,format=I420 !
     queue max-size-buffers=4 !
-    x264enc name=enc_stream pass=cbr speed-preset=ultrafast bitrate=3000 key-int-max=60 threads=2 !
+    x264enc name=enc_stream pass=cbr speed-preset=ultrafast bitrate=6800 key-int-max=60 threads=2 !
     h264parse !
     flvmux streamable=true name=flvmux !
     rtmpsink location={rtmp_url} async=false
