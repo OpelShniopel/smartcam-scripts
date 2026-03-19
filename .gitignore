@@ -2,3 +2,4 @@
 .idea
 *.json
 *.txt
+__pycache__
