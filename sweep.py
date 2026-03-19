@@ -6,32 +6,25 @@ import scf4_tools
 import time
 import threading
 import camera
+import csv
+import numpy as np
+from scipy.interpolate import interp1d
 
-# --- Axis status bit indices ---
-CHC_MOVE    = 8
 CHB_MOVE    = 7
 CHA_MOVE    = 6
-CHC_PI      = 5
 CHB_PI      = 4
 CHA_PI      = 3
-CHC_POS     = 2
-CHB_POS     = 1
-CHA_POS     = 0
 
-# --- Zoom (A axis) calibration range ---
-# 32000 = home/wide end. Adjust ZOOM_MAX to your true 3x position.
-ZOOM_MIN          = 30000
-ZOOM_MAX          = 39800
-ZOOM_STEPS        = 150        # motor steps between calibration points
+CSV_FILE = "zoom_focus_table_updated.csv"
 
-# --- Focus (B axis) sweep range (from working autofocus script) ---
-FOCUS_SWEEP_MIN   = 32000
-FOCUS_SWEEP_MAX   = 37000
-FOCUS_SWEEP_SPEED = 5000      # slower during sweep for more samples
-FOCUS_NORMAL_SPEED = 600
-FOCUS_OFFSET      = -60      # empirical camera/motor frame offset
-
-OUTPUT_CSV = "zoom_focus_table.csv"
+# ──────────────────────────────────────────────
+# Tune these
+# ──────────────────────────────────────────────
+SWEEP_SPEED = 500  # motor speed during sweep
+SWEEP_DELAY = 0.001  # seconds between commands (lower = faster)
+SWEEP_STEP  = 10     # motor units skipped per command — this is the main speed lever
+                     # 1 = ~770 commands (slowest), 50 = ~15 commands (fast),
+                     # try 10-100 depending on how smooth vs fast you want
 
 
 # ──────────────────────────────────────────────
@@ -54,9 +47,6 @@ ser.flushOutput()
 c = camera.Cam()
 print("Starting cam")
 c.start()
-
-# Enable focus tracker on centre ROI so focus_val is always live
-c.focus_tracker(True, int(1920 / 2), int(1080 / 2), size=100)
 
 print("Waiting for camera")
 while c.fps == 0:
@@ -104,15 +94,9 @@ scf4_tools.send_command(ser, "M232 A400 B400 C400 E700 F700 G700", echo=True)
 print("Filter = VIS")
 scf4_tools.send_command(ser, "M7", echo=True)
 
-print("Get bus voltage")
-adc = scf4_tools.send_command(ser, "M247", echo=True)
-adc = float(adc.split("=")[1])
-volts = adc / 4096.0 * 3.3 / 0.5
-print("  V(bus)=", round(volts, 2), "V")
-
 
 # ──────────────────────────────────────────────
-# Home axis A (zoom) — exact logic from working script
+# Home axis A (zoom)
 # ──────────────────────────────────────────────
 c.set_cam_text("Homing A")
 print()
@@ -153,7 +137,7 @@ scf4_tools.send_command(ser, "G90")
 
 
 # ──────────────────────────────────────────────
-# Home axis B (focus) — exact logic from working script
+# Home axis B (focus)
 # ──────────────────────────────────────────────
 c.set_cam_text("Homing B")
 print()
@@ -192,133 +176,60 @@ scf4_tools.send_command(ser, "G92 B32000")
 scf4_tools.send_command(ser, "M230 B")
 scf4_tools.send_command(ser, "G90")
 
+
+# ──────────────────────────────────────────────
+# Load CSV and interpolate
+# ──────────────────────────────────────────────
 print()
-print("Get status")
-status_str = scf4_tools.send_command(ser, "!1")
-status = scf4_tools.parse_status(status_str)
-print(status_str)
-print("Both axes homed")
+print(f"Loading {CSV_FILE}")
+zoom_pts = []
+focus_pts = []
+with open(CSV_FILE, newline="") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        zoom_pts.append(int(row["zoom_pos"]))
+        focus_pts.append(int(row["focus_pos"]))
+
+print(f"  {len(zoom_pts)} points loaded")
+
+# Build cubic interpolator, one command every SWEEP_STEP motor units
+zoom_min, zoom_max = min(zoom_pts), max(zoom_pts)
+focus_interp = interp1d(zoom_pts, focus_pts, kind='cubic')
+zoom_dense = np.arange(zoom_min, zoom_max + 1, SWEEP_STEP)
+focus_dense = focus_interp(zoom_dense).astype(int)
+
+# wide -> tele (zoom in)
+sweep_table = list(zip(zoom_dense.tolist(), focus_dense.tolist()))
+print(f"  {len(sweep_table)} steps (SWEEP_STEP={SWEEP_STEP})")
 
 
 # ──────────────────────────────────────────────
-# Helper: find best focus at current zoom position
+# Move to start position
 # ──────────────────────────────────────────────
-def find_best_focus(zoom_pos):
-    """
-    Sweep focus axis across [FOCUS_SWEEP_MIN, FOCUS_SWEEP_MAX],
-    sample focus_val throughout, return motor position with peak sharpness.
-    """
-    focus_table = []
+print("Set motor drive speed")
+scf4_tools.send_command(ser, f"M240 A{SWEEP_SPEED} B{SWEEP_SPEED} C{SWEEP_SPEED}", echo=True)
 
-    scf4_tools.send_command(ser, f"G0 B{FOCUS_SWEEP_MIN}")
-    scf4_tools.wait_homing(ser, 1, CHB_MOVE)
-    time.sleep(0.05)
+c.set_cam_text("Moving to start position")
+zoom_start, focus_start = sweep_table[0]
+scf4_tools.send_command(ser, f"G0 A{zoom_start}")
+scf4_tools.wait_homing(ser, 1, CHA_MOVE)
 
-    scf4_tools.send_command(ser, f"M240 B{FOCUS_SWEEP_SPEED}")
-    scf4_tools.send_command(ser, f"G0 B{FOCUS_SWEEP_MAX}")
+scf4_tools.send_command(ser, f"G0 B{focus_start}")
+scf4_tools.wait_homing(ser, 1, CHB_MOVE)
 
-    for i in range(10000):
-        status_str = scf4_tools.send_command(ser, "!1")
-        status = scf4_tools.parse_status(status_str)
-        focus_table.append([status[CHB_POS], c.focus_val])
-        time.sleep(0.01)
-        if status[CHB_MOVE] != 1:
-            break
-
-    time.sleep(0.1)
-    scf4_tools.send_command(ser, f"M240 B{FOCUS_NORMAL_SPEED}")
-
-    if not focus_table:
-        print(f"  [zoom={zoom_pos}] WARNING: empty focus table")
-        return None, None
-
-    best_pos, best_val = max(focus_table, key=lambda f: f[1])
-    best_pos += FOCUS_OFFSET
-
-    print(f"  [zoom={zoom_pos}] best focus pos={best_pos}  val={best_val:.2f}")
-    return int(best_pos), float(best_val)
-
-
-# ──────────────────────────────────────────────
-# Build zoom-to-focus calibration table
-# ──────────────────────────────────────────────
-c.set_cam_text("Building zoom-focus table...")
-print()
-print("=== Building zoom-focus table ===")
-print(f"Zoom range: {ZOOM_MIN} - {ZOOM_MAX}, step={ZOOM_STEPS}")
-
-zoom_focus_table = []
-zoom_positions = list(range(ZOOM_MIN, ZOOM_MAX + 1, ZOOM_STEPS))
-total = len(zoom_positions)
-
-for idx, zoom_pos in enumerate(zoom_positions):
-    c.set_cam_text(f"Calibrating {idx+1}/{total}  zoom={zoom_pos}")
-    print(f"\nStep {idx+1}/{total} - moving zoom to {zoom_pos}")
-
-    scf4_tools.send_command(ser, f"G0 A{zoom_pos}")
-    scf4_tools.wait_homing(ser, 1, CHA_MOVE)
-    time.sleep(0.1)
-
-    best_pos, best_val = find_best_focus(zoom_pos)
-
-    if best_pos is not None:
-        zoom_focus_table.append((zoom_pos, best_pos))
-        # Park focus at best position before moving zoom
-        scf4_tools.send_command(ser, f"G0 B{best_pos}")
-        scf4_tools.wait_homing(ser, 1, CHB_MOVE)
-
-
-# ──────────────────────────────────────────────
-# Save table to CSV
-# ──────────────────────────────────────────────
-with open(OUTPUT_CSV, "w") as f:
-    f.write("zoom_pos,focus_pos\n")
-    for zoom_pos, focus_pos in zoom_focus_table:
-        f.write(f"{zoom_pos},{focus_pos}\n")
-
-print(f"\n=== Calibration complete - {len(zoom_focus_table)} entries saved to {OUTPUT_CSV} ===")
-c.set_cam_text(f"Done - {len(zoom_focus_table)} zoom points saved")
+print("Done - starting sweep")
 time.sleep(1)
 
 
 # ──────────────────────────────────────────────
-# Interactive loop: click to jump to calibrated focus
+# Sweep - fast-fire, no per-step wait
 # ──────────────────────────────────────────────
-def lookup_focus(zoom_pos):
-    if not zoom_focus_table:
-        return None
-    return min(zoom_focus_table, key=lambda row: abs(row[0] - zoom_pos))[1]
+for i, (zoom_pos, focus_pos) in enumerate(sweep_table):
+    c.set_cam_text(f"zoom={zoom_pos}  focus={focus_pos}  ({i+1}/{len(sweep_table)})")
+    scf4_tools.send_command(ser, f"G0 A{zoom_pos} B{focus_pos}")
+    time.sleep(SWEEP_DELAY)
 
+c.set_cam_text("Sweep done - sleeping 10s")
+time.sleep(10)
 
-print("\nEntering interactive mode - click the image to jump to calibrated focus.")
-
-while True:
-    status_str = scf4_tools.send_command(ser, "!1")
-    status = scf4_tools.parse_status(status_str)
-    current_zoom = status[CHA_POS]
-
-    c.set_cam_text(f"Click to autofocus  |  zoom={current_zoom}")
-    time.sleep(0.1)
-
-    if c.mouse_clicked:
-        c.mouse_clicked = False
-
-        focus_pos = lookup_focus(current_zoom)
-        if focus_pos is not None:
-            c.set_cam_text(f"Moving to focus pos {focus_pos} (table lookup)")
-            print(f"Click - zoom={current_zoom}, table focus pos={focus_pos}")
-            scf4_tools.send_command(ser, f"G0 B{focus_pos}")
-            scf4_tools.wait_homing(ser, 1, CHB_MOVE)
-        else:
-            # Fallback: live sweep if table is empty
-            c.set_cam_text("No table - sweeping for focus...")
-            best_pos, _ = find_best_focus(current_zoom)
-            if best_pos:
-                scf4_tools.send_command(ser, f"G0 B{best_pos}")
-                scf4_tools.wait_homing(ser, 1, CHB_MOVE)
-
-    if not c.running:
-        break
-
-print("Stopping camera")
 c.stop()

@@ -137,7 +137,7 @@ class Cam():
                 img_r = cv2.resize(img, None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_CUBIC)
                
                 cv2.imshow("image", img_r)
-                
+
                 self.last_key = cv2.waitKey(1) & 0xff
                 
                 if self.last_key == 27: # ESC

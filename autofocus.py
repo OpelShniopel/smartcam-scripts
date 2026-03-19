@@ -44,11 +44,9 @@ c.start()
 
 # define ROI center of the frame
 roi_size = 100
-x0 = int(1920/2-roi_size)
-x1 = int(1920/2+roi_size)
-y0 = int(1080/2-roi_size)
-y1 = int(1080/2+roi_size)
-#c.focus_tracker(True, x0, x1, y0, y1)
+x = int(1920/2)
+y = int(1080/2)
+c.focus_tracker(True, x, y, roi_size)
 
 
 print("Waiting for camera")
