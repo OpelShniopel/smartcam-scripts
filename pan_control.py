@@ -9,7 +9,7 @@ import lens_helpers
 import pan_homing
 
 # --- CONFIGURATION ---
-UNIX_SOCK = "/tmp/smartcam.sock"
+UNIX_SOCK = "/tmp/pycam.sock"
 SERIAL_PORT_P = "/dev/ttyACM0"      # Pan control serial port
 BAUD_RATE = 115200
 TARGET_CAM = "CAM2"                 # Camera to use for control
@@ -78,20 +78,22 @@ def socket_listener(controller):
         try:
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             client.connect(UNIX_SOCK)
-            print("Connected to SmartCam Socket.")
+            print("Connected to socket.")
 
-            fileobj = client.makefile('r')
-            for line in fileobj:
-                data = json.loads(line)
-
-                if data.get("type") == "detection" and data.get("camera") == TARGET_CAM:
-                    controller.process_detection(data.get("detections", []))
-
-                elif data.get("type") == "cmd" and data.get("action") == "manual_ptz":
-                    controller.process_manual_pan(data)
+            buf = ""
+            while True:
+                chunk = client.recv(4096).decode()
+                if not chunk:
+                    break
+                buf += chunk
+                while "\n" in buf:
+                    line, buf = buf.split("\n", 1)
+                    msg = json.loads(line)
+                    if msg.get("camera") == TARGET_CAM:
+                        controller.process_detection(msg.get("detections", []))
 
         except (ConnectionRefusedError, FileNotFoundError):
-            print("Waiting for SmartCam socket...")
+            print("Waiting for socket...")
             time.sleep(2)
         except Exception as e:
             print(f"Socket Error: {e}")
