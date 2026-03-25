@@ -22,7 +22,7 @@ CENTER_X = FRAME_W / 2
 # --- CONTROL TUNING ---
 GAIN_P = 0.05       # Proportional: How fast it moves toward the target
 DEADZONE_PAN = 50
-PAN_SPEED = 3000
+PAN_SPEED = 4000
 
 # Control limits
 PAN_MAX_STEPS = 180
@@ -31,40 +31,55 @@ PAN_MIN_STEPS = -70
 class PanController:
     def __init__(self):
         self.current_pan_pos = 0.0
+        self.last_command_time = 0.0
+        self.command_interval = 0.05    # 20Hz — motor gets 50ms to move before next update
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
             print(f"SUCCESS: Connected to Pan Motor on {SERIAL_PORT_P}")
             pan_homing.auto_home_precision(self.ser_p)
-            self.ser_p.write(b"G90\n") 
         except Exception as e:
             print(f"WARNING: Pan Motor Serial port not found. ({e})")
             self.ser_p = None
 
-    def _is_idle(self):
+    def _get_position(self):
+        """Query actual motor X position from GRBL status report."""
         try:
             self.ser_p.reset_input_buffer()
             self.ser_p.write(b"?\n")
             line = self.ser_p.readline().decode('utf-8')
-            return "Idle" in line
+            if "MPos:" in line:
+                x = float(line.split("MPos:")[1].split(",")[0])
+                return x
         except Exception as e:
-            print(f"[PAN] Idle check failed: {e}")
-            return False
+            print(f"[PAN] Position query failed: {e}")
+        return self.current_pan_pos  # fallback if query fails
 
-    def send_command(self, pan_steps, pan_speed=PAN_SPEED):
+    def send_command(self, pan_delta, pan_speed=PAN_SPEED):
         if not self.ser_p:
             return
-        if not self._is_idle():
-            print(f"[PAN] Motor busy, skipping")
+        if abs(pan_delta) < 1.0:
             return
-        new_pan_pos = self.current_pan_pos + pan_steps
-        new_pan_pos = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, new_pan_pos))
-        if abs(new_pan_pos - self.current_pan_pos) < 1.0:
+        if time.time() - self.last_command_time < self.command_interval:
             return
-        self.current_pan_pos = new_pan_pos
-        cmd = f"G1 X{new_pan_pos:.2f} F{int(pan_speed)}\n"
+
+        # Cancel pending jog first, then read where the motor actually stopped
+        self.ser_p.write(b"\x85")
+        self.current_pan_pos = self._get_position()
+
+        # Hard limit check against real position — no drift possible
+        target = self.current_pan_pos + pan_delta
+        target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, target))
+        if abs(target - self.current_pan_pos) < 1.0:
+            print(f"[PAN] Limit at X={self.current_pan_pos:.1f}")
+            return
+
+        cmd = f"$J=G90 X{target:.2f} F{int(pan_speed)}\n"
         self.ser_p.write(cmd.encode())
-        print(f"[PAN] Move -> X={new_pan_pos:.1f} (delta={pan_steps:+.1f})")
+
+        self.current_pan_pos = target
+        self.last_command_time = time.time()
+        print(f"[PAN] Jog -> target={target:.1f}  actual_start={self.current_pan_pos:.1f}")
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
@@ -74,11 +89,12 @@ class PanController:
             if abs(error_x) > DEADZONE_PAN:
                 self.send_command(error_x * GAIN_P)
             else:
-                print(f"[DETECT] In deadzone, no move")
+                print(f"[DETECT] In deadzone")
 
     def return_home(self):
         if self.ser_p:
-            self.ser_p.write(b"G90 G0 X0\n")
+            self.ser_p.write(b"\x85")           # Cancel any pending jog
+            self.ser_p.write(b"G90 G0 X0\n")    # Return to home in absolute mode
             self.current_pan_pos = 0
 
 def socket_listener(controller):
