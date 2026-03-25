@@ -54,7 +54,7 @@ class PanController:
             print(f"[PAN] Idle check failed: {e}")
             return False
 
-    def send_command(self, pan_steps, pan_speed=500):
+    def send_command(self, pan_steps, pan_speed=3000):
         global current_pan_pos
         if not self.ser_p:
             return
