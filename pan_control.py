@@ -51,20 +51,18 @@ class PanController:
             return
         
         current_time = time.time()
-        # 1. BRAKE CHECK: If the ball reversed direction, 
-        # we need to clear the motor buffer immediately.
-        # (Assuming '!' is your controller's real-time stop command)
+        # 1. BRAKE CHECK: If the ball reversed direction, cancel the jog queue.
+        # \x85 is GRBL's real-time jog-cancel byte — purges the jog buffer
+        # instantly without resetting machine state, unlike ! + ~ which only pauses.
         moving_left = pan_steps < 0
         previously_moving_right = self.prev_error_x > 0
-        
+
         if moving_left and previously_moving_right:
-            self.ser_p.write(b"!") # Immediate Feed Hold (Purge Buffer)
-            self.ser_p.write(b"~") # Cycle Start (Resume)
-            # This "resets" the motor so it doesn't finish the old "Right" move
-        
+            self.ser_p.write(b"\x85")  # Jog Cancel
+
         # 2. RATE LIMIT: Don't send more than 15-20 commands per second.
         # This keeps the buffer from growing longer than ~100ms.
-        if current_time - self.last_command_time < 0.06: 
+        if current_time - self.last_command_time < self.command_rate_limit:
             return
 
         new_pan_pos = self.current_pan_pos + pan_steps
@@ -78,7 +76,7 @@ class PanController:
         self.current_pan_pos = new_pan_pos
         # Using $J= for GRBL or G1 for standard. 
         # Note: $J= requires absolute if you use G90.
-        cmd = f"$J=X{new_pan_pos:.2f} F{int(pan_speed)}\n" 
+        cmd = f"$J=G90 X{new_pan_pos:.2f} F{int(pan_speed)}\n"
         self.ser_p.write(cmd.encode())
         self.last_command_time = current_time
 
