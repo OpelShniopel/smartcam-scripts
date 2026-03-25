@@ -6,6 +6,7 @@ import sys
 import atexit
 import signal
 import lens_helpers
+import pan_homing
 
 # --- CONFIGURATION ---
 UNIX_SOCK = "/tmp/smartcam.sock"
@@ -23,8 +24,8 @@ GAIN_X = 0.05       # Pan sensitivity
 DEADZONE_PAN = 100  # Pan deadzone
 
 # Control limits
-PAN_MAX_STEPS = 120
-PAN_MIN_STEPS = -120
+PAN_MAX_STEPS = 180
+PAN_MIN_STEPS = -70
 
 current_pan_pos = 0
 
@@ -34,7 +35,8 @@ class PanController:
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
             print(f"SUCCESS: Connected to Pan Motor on {SERIAL_PORT_P}")
-            self.ser_p.write(b"G90\r\n")
+            pan_homing.auto_home_precision(self.ser_p)
+            self.ser_p.write(b"G90\n")  # Ensure absolute mode after homing
         except Exception as e:
             print(f"WARNING: Pan Motor Serial port not found. ({e})")
             self.ser_p = None
@@ -66,7 +68,9 @@ class PanController:
 
     def return_home(self):
         global current_pan_pos
-        self.send_command(-current_pan_pos)
+        if self.ser_p:
+            self.ser_p.write(b"G90 G0 X0\n")
+            current_pan_pos = 0
 
 
 def socket_listener(controller):
