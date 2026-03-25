@@ -19,10 +19,9 @@ FRAME_W = 1280
 FRAME_H = 720
 CENTER_X = FRAME_W / 2
 
-# --- CONTROL TUNING (PD Controller) ---
+# --- CONTROL TUNING ---
 GAIN_P = 0.05       # Proportional: How fast it moves toward the target
-GAIN_D = 0.02       # Derivative: The "brakes" to prevent overshoot (Tune this)
-DEADZONE_PAN = 50   # Reduced deadzone for smoother micro-adjustments
+DEADZONE_PAN = 50
 PAN_SPEED = 3000
 
 # Control limits
@@ -32,10 +31,6 @@ PAN_MIN_STEPS = -70
 class PanController:
     def __init__(self):
         self.current_pan_pos = 0.0
-        self.prev_error_x = 0.0
-        self.last_time = time.time()
-        self.last_command_time = 0.0
-        self.command_rate_limit = 0.05 # Max 20 commands per second to not choke the serial buffer
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
@@ -46,58 +41,40 @@ class PanController:
             print(f"WARNING: Pan Motor Serial port not found. ({e})")
             self.ser_p = None
 
+    def _is_idle(self):
+        try:
+            self.ser_p.reset_input_buffer()
+            self.ser_p.write(b"?\n")
+            line = self.ser_p.readline().decode('utf-8')
+            return "Idle" in line
+        except Exception as e:
+            print(f"[PAN] Idle check failed: {e}")
+            return False
+
     def send_command(self, pan_steps, pan_speed=PAN_SPEED):
         if not self.ser_p:
             return
-        
-        current_time = time.time()
-        # 1. BRAKE CHECK: If the ball reversed direction, cancel the jog queue.
-        # \x85 is GRBL's real-time jog-cancel byte — purges the jog buffer
-        # instantly without resetting machine state, unlike ! + ~ which only pauses.
-        moving_left = pan_steps < 0
-        previously_moving_right = self.prev_error_x > 0
-
-        if moving_left and previously_moving_right:
-            self.ser_p.write(b"\x85")  # Jog Cancel
-
-        # 2. RATE LIMIT: Don't send more than 15-20 commands per second.
-        # This keeps the buffer from growing longer than ~100ms.
-        if current_time - self.last_command_time < self.command_rate_limit:
+        if not self._is_idle():
+            print(f"[PAN] Motor busy, skipping")
             return
-
         new_pan_pos = self.current_pan_pos + pan_steps
         new_pan_pos = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, new_pan_pos))
-        
-        # 3. THRESHOLD: If the move is less than 1 step/unit, ignore it.
-        # This prevents "micro-buffering" that causes choppiness.
         if abs(new_pan_pos - self.current_pan_pos) < 1.0:
             return
-
         self.current_pan_pos = new_pan_pos
-        # Using $J= for GRBL or G1 for standard. 
-        # Note: $J= requires absolute if you use G90.
-        cmd = f"$J=G90 X{new_pan_pos:.2f} F{int(pan_speed)}\n"
+        cmd = f"G1 X{new_pan_pos:.2f} F{int(pan_speed)}\n"
         self.ser_p.write(cmd.encode())
-        self.last_command_time = current_time
+        print(f"[PAN] Move -> X={new_pan_pos:.1f} (delta={pan_steps:+.1f})")
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
-        current_time = time.time()
-        dt = current_time - self.last_time
-        
-        if ball and dt > 0:
+        if ball:
             error_x = ball['center_x'] - CENTER_X
-            
+            print(f"[DETECT] center_x={ball['center_x']:.0f}  error_x={error_x:+.0f}")
             if abs(error_x) > DEADZONE_PAN:
-                # Calculate Derivative (Rate of change of the error)
-                derivative = (error_x - self.prev_error_x) / dt
-                
-                # PD Control output
-                movement = (error_x * GAIN_P) + (derivative * GAIN_D)
-                self.send_command(movement)
-            
-            self.prev_error_x = error_x
-        self.last_time = current_time
+                self.send_command(error_x * GAIN_P)
+            else:
+                print(f"[DETECT] In deadzone, no move")
 
     def return_home(self):
         if self.ser_p:
