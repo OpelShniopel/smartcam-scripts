@@ -81,25 +81,32 @@ class PanController:
         if not self.ser_p:
             return
 
-        # 1. Clear the 'ok' responses to stay in sync
-        while self.ser_p.in_waiting > 0:
-            resp = self.ser_p.readline().decode().strip()
-            if 'ok' in resp:
-                self.pending_oks = max(0, self.pending_oks - 1)
+        # 1. Calculate Ball Velocity (pixels per frame)
+        # Positive if moving right, negative if moving left
+        ball_velocity = abs(error_x - self.last_error_x)
+        self.last_error_x = error_x # Update for next frame
 
-        # 2. Buffer Management: Allow 3 commands to stay queued
-        # This creates a "wedge" of data so the motor never runs out of instructions
-        if self.pending_oks >= 3:
-            return
-
-        # 3. Aggressive Curve
+        # 2. Base Speed (The Exponential Curve you already have)
         max_possible_error = FRAME_W / 2
         normalized_error = min(1.0, abs(error_x) / max_possible_error)
-        curved_factor = pow(normalized_error, 2.2) # Slightly more aggressive
-        speed = MIN_PAN_SPEED + (MAX_PAN_SPEED - MIN_PAN_SPEED) * curved_factor
+        base_factor = pow(normalized_error, 2.0) 
 
-        # 4. INCREASED LOOK-AHEAD (3.0x instead of 1.5x)
-        # This is the secret to removing the "twitch"
+        # 3. Sudden Move Boost (The "Turbo")
+        # If the ball moved more than 30 pixels since the last frame, 
+        # we add a multiplier to the speed.
+        boost_threshold = 30 
+        boost_gain = 1.5 # 50% extra speed during sudden moves
+        
+        speed_multiplier = 1.0
+        if ball_velocity > boost_threshold:
+            # Scale boost based on how 'sudden' the move is
+            speed_multiplier += (ball_velocity / 100.0) * boost_gain
+
+        # Calculate final speed with boost
+        speed = MIN_PAN_SPEED + (MAX_PAN_SPEED - MIN_PAN_SPEED) * base_factor
+        speed = min(MAX_PAN_SPEED, speed * speed_multiplier)
+
+        # 4. Look-ahead and Buffer Management (Keep your 3.0x logic)
         step_duration = COMMAND_DT * 3.0 
         step = (speed / 60.0) * step_duration * (1 if error_x > 0 else -1)
 
