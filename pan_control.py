@@ -59,25 +59,13 @@ class PanController:
         self._jog_thread = threading.Thread(target=self._jog_loop, daemon=True)
         self._jog_thread.start()
 
-    def _get_position(self):
-        try:
-            self.ser_p.reset_input_buffer()
-            self.ser_p.write(b"?\n")
-            line = self.ser_p.readline().decode('utf-8')
-            if "MPos:" in line:
-                return float(line.split("MPos:")[1].split(",")[0])
-        except Exception as e:
-            DEBUG and print(f"[PAN] Position query failed: {e}")
-        return self.current_pan_pos
-
     def _stop_jog(self):
-        """Cancel pending jog and sync position. Must hold _serial_lock when calling."""
+        """Cancel pending jog. Must hold _serial_lock when calling."""
         if not self.jogging:
             return
         self.ser_p.write(b"\x85")
         time.sleep(0.05)
         self.ser_p.reset_input_buffer()
-        self.current_pan_pos = self._get_position()
         self.jogging = False
         DEBUG and print(f"[PAN] Stopped at X={self.current_pan_pos:.1f}")
 
