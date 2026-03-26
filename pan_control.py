@@ -43,6 +43,7 @@ class PanController:
         self.current_pan_pos = 0.0
         self.jogging = False
         self.last_error_x = 0.0
+        self.pending_oks = 0
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
@@ -80,32 +81,47 @@ class PanController:
         if not self.ser_p:
             return
 
-        # Speed proportional to error, clamped to [MIN, MAX]
-        speed = max(MIN_PAN_SPEED, min(MAX_PAN_SPEED, abs(error_x) * SPEED_GAIN))
+        # 1. Read returning 'ok's to free up buffer space (Non-blocking)
+        while self.ser_p.in_waiting > 0:
+            resp = self.ser_p.readline().decode().strip()
+            if 'ok' in resp:
+                self.pending_oks = max(0, self.pending_oks - 1)
 
-        # Step size: distance covered in COMMAND_DT seconds at this speed (s = v * dt)
-        step = (speed / 60.0) * COMMAND_DT * (1 if error_x > 0 else -1)
+        # 2. THE BUFFER SHIELD: Max 2 commands in flight
+        if self.pending_oks >= 2:
+            # GRBL is already busy executing smooth moves. 
+            # Skip this update to prevent overflow and keep the script fast.
+            return
 
-        # Soft limit check
+        # 3. Exponential Speed Curve (n=2)
+        max_possible_error = FRAME_W / 2
+        normalized_error = min(1.0, abs(error_x) / max_possible_error)
+        curved_factor = pow(normalized_error, 2.0) 
+        speed = MIN_PAN_SPEED + (MAX_PAN_SPEED - MIN_PAN_SPEED) * curved_factor
+
+        # 4. Overlap the step duration
+        step_duration = COMMAND_DT * 1.5 
+        step = (speed / 60.0) * step_duration * (1 if error_x > 0 else -1)
+
         target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
         actual_step = target - self.current_pan_pos
+        
         if abs(actual_step) < 0.1:
-            DEBUG and print(f"[PAN] Limit at X={self.current_pan_pos:.1f}")
+            if self.current_pan_pos >= PAN_MAX_STEPS or self.current_pan_pos <= PAN_MIN_STEPS:
+                DEBUG and print(f"[PAN] Limit reached at X={self.current_pan_pos:.1f}")
             self._stop_jog()
             return
 
+        # 5. Fire the command and claim a token
         cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"
         self.ser_p.write(cmd.encode())
-
-        # Wait for 'ok' — natural rate limiter, keeps buffer just full enough
-        resp = self.ser_p.readline().decode().strip()
-        if 'ok' in resp:
-            self.current_pan_pos = target
-            self.jogging = True
-            DEBUG and print(f"[PAN] Jog step={actual_step:+.2f}  pos={target:.1f}  speed={int(speed)}")
-        else:
-            DEBUG and print(f"[PAN] Unexpected response: {resp}")
-
+        
+        self.current_pan_pos = target
+        self.jogging = True
+        self.pending_oks += 1  # Add a token to the queue
+        
+        DEBUG and print(f"[PAN] step={actual_step:+.2f} speed={int(speed)} pending={self.pending_oks}")
+        
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball:
