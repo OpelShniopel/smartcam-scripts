@@ -95,9 +95,8 @@ class PanController:
             speed = max(MIN_PAN_SPEED, min(MAX_PAN_SPEED, abs(error_x) * SPEED_GAIN))
             step = (speed / 60.0) * COMMAND_DT * (1 if error_x > 0 else -1)
             target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
-            actual_step = target - self.current_pan_pos
 
-            if abs(actual_step) < 0.1:
+            if target == self.current_pan_pos:
                 DEBUG and print(f"[PAN] Limit at X={self.current_pan_pos:.1f}")
                 with self._serial_lock:
                     self._stop_jog()
@@ -105,13 +104,13 @@ class PanController:
                 continue
 
             with self._serial_lock:
-                self.ser_p.write(f"$J=G91 X{actual_step:.3f} F{int(speed)}\n".encode())
+                self.ser_p.write(f"$J=G90 X{target:.3f} F{int(speed)}\n".encode())
                 resp = self.ser_p.readline().decode().strip()
 
             if 'ok' in resp:
                 self.current_pan_pos = target
                 self.jogging = True
-                DEBUG and print(f"[PAN] Jog step={actual_step:+.2f}  pos={target:.1f}  speed={int(speed)}")
+                DEBUG and print(f"[PAN] Jog target={target:.1f}  speed={int(speed)}")
             else:
                 DEBUG and print(f"[PAN] Response: {resp}")
 
