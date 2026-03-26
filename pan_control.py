@@ -31,7 +31,7 @@ MIN_PAN_SPEED = 1000                            # units/min  — ~8.3°/sec
 MAX_PAN_SPEED = 5000                            # units/min  — ~41.7°/sec
 SPEED_GAIN    = MAX_PAN_SPEED / (FRAME_W / 2)  # ramps linearly from 0 to MAX across half-frame
                                                 # = 7.8 units/min per pixel
-COMMAND_DT    = 0.04                            # seconds per jog segment: s = (speed/60) * dt
+COMMAND_DT    = 0.02                            # seconds per jog segment: s = (speed/60) * dt
                                                 # at MAX_PAN_SPEED: 3.3 units (1.65°) per step
 
 # Control limits (1 unit = 0.5°)
@@ -44,6 +44,10 @@ class PanController:
         self.jogging = False
         self.last_error_x = 0.0
         self.pending_oks = 0
+        self.lost_frames = 0
+        self.max_coast_frames = 10 # Coast for ~0.2 seconds at 50fps
+        self.last_speed = 0
+        self.last_direction = 0
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
@@ -77,9 +81,12 @@ class PanController:
         self.jogging = False
         DEBUG and print(f"[PAN] Stopped at X={self.current_pan_pos:.1f}")
 
-    def send_command(self, error_x):
+    def send_command(self, error_x, override_speed=None):
         if not self.ser_p:
             return
+        
+        speed = override_speed if override_speed is not None else speed
+        self.last_speed = speed
 
         # 1. Calculate Ball Velocity (pixels per frame)
         # Positive if moving right, negative if moving left
@@ -95,7 +102,7 @@ class PanController:
         # If the ball moved more than 30 pixels since the last frame, 
         # we add a multiplier to the speed.
         boost_threshold = 30 
-        boost_gain = 1.5 # 50% extra speed during sudden moves
+        boost_gain = 2 # 100% extra speed during sudden moves
         
         speed_multiplier = 1.0
         if ball_velocity > boost_threshold:
@@ -130,22 +137,48 @@ class PanController:
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
+        
+        # --- CASE 1: NO BALL DETECTED ---
         if not ball:
-            self._stop_jog()
+            self.lost_frames += 1
+            
+            # Only stop if we've been blind for too long (e.g., 10 frames)
+            if self.lost_frames > self.max_coast_frames:
+                if self.jogging:
+                    self._stop_jog()
+                return
+
+            # ACTIVE COAST: If we were moving fast, keep the momentum going
+            if self.jogging and abs(self.last_speed) > 500:
+                # Decay the speed (0.9 = 10% slowdown per frame)
+                coast_speed = abs(self.last_speed) * 0.9 
+                self.last_speed = coast_speed * self.last_direction # Keep the sign
+                
+                # Calculate a 'ghost' error based on last direction to use send_command
+                # We simulate an error just outside the deadzone to keep the loop alive
+                ghost_error = (DEADZONE_PAN + 10) * self.last_direction
+                self.send_command(ghost_error, override_speed=coast_speed)
             return
 
+        # --- CASE 2: BALL FOUND ---
+        self.lost_frames = 0 # Reset the counter
         error_x = ball['center_x'] - CENTER_X
-        DEBUG and print(f"[DETECT] center_x={ball['center_x']:.0f}  error_x={error_x:+.0f}")
+        
+        # Handle Direction Reversal
+        # Use a small buffer so a 1-pixel flicker doesn't trigger a hard stop
+        reversed = self.last_error_x != 0.0 and (error_x > 0) != (self.last_error_x > 0)
+        if reversed and abs(error_x) > 20: 
+            DEBUG and print(f"[DETECT] Direction reversal, cancelling jog")
+            self._stop_jog()
 
+        # Handle Deadzone
         if abs(error_x) <= DEADZONE_PAN:
-            DEBUG and print(f"[DETECT] In deadzone")
             self._stop_jog()
         else:
-            reversed = self.last_error_x != 0.0 and (error_x > 0) != (self.last_error_x > 0)
-            if reversed:
-                DEBUG and print(f"[DETECT] Direction reversal, cancelling jog")
-                self._stop_jog()
+            # Normal tracking
             self.send_command(error_x)
+            # Store direction for coasting logic (+1 for Right, -1 for Left)
+            self.last_direction = 1 if error_x > 0 else -1
 
         self.last_error_x = error_x
 
