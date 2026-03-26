@@ -81,47 +81,46 @@ class PanController:
         if not self.ser_p:
             return
 
-        # 1. Read returning 'ok's to free up buffer space (Non-blocking)
+        # 1. Clear the 'ok' responses to stay in sync
         while self.ser_p.in_waiting > 0:
             resp = self.ser_p.readline().decode().strip()
             if 'ok' in resp:
                 self.pending_oks = max(0, self.pending_oks - 1)
 
-        # 2. THE BUFFER SHIELD: Max 2 commands in flight
-        if self.pending_oks >= 2:
-            # GRBL is already busy executing smooth moves. 
-            # Skip this update to prevent overflow and keep the script fast.
+        # 2. Buffer Management: Allow 3 commands to stay queued
+        # This creates a "wedge" of data so the motor never runs out of instructions
+        if self.pending_oks >= 3:
             return
 
-        # 3. Exponential Speed Curve (n=2)
+        # 3. Aggressive Curve
         max_possible_error = FRAME_W / 2
         normalized_error = min(1.0, abs(error_x) / max_possible_error)
-        curved_factor = pow(normalized_error, 2.0) 
+        curved_factor = pow(normalized_error, 2.2) # Slightly more aggressive
         speed = MIN_PAN_SPEED + (MAX_PAN_SPEED - MIN_PAN_SPEED) * curved_factor
 
-        # 4. Overlap the step duration
-        step_duration = COMMAND_DT * 1.5 
+        # 4. INCREASED LOOK-AHEAD (3.0x instead of 1.5x)
+        # This is the secret to removing the "twitch"
+        step_duration = COMMAND_DT * 3.0 
         step = (speed / 60.0) * step_duration * (1 if error_x > 0 else -1)
 
         target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
         actual_step = target - self.current_pan_pos
         
-        if abs(actual_step) < 0.1:
-            if self.current_pan_pos >= PAN_MAX_STEPS or self.current_pan_pos <= PAN_MIN_STEPS:
-                DEBUG and print(f"[PAN] Limit reached at X={self.current_pan_pos:.1f}")
-            self._stop_jog()
+        # 5. Ignore "Micro-twitches" that the motor can't physically do smoothly
+        if abs(actual_step) < 0.4: 
             return
 
-        # 5. Fire the command and claim a token
         cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"
         self.ser_p.write(cmd.encode())
         
-        self.current_pan_pos = target
+        # Important: Don't update current_pan_pos by the FULL 'step' 
+        # only update it by what we expect to cover in ONE COMMAND_DT
+        # this keeps the 'target' from drifting too far ahead of reality
+        self.current_pan_pos += (speed / 60.0) * COMMAND_DT * (1 if error_x > 0 else -1)
+        
         self.jogging = True
-        self.pending_oks += 1  # Add a token to the queue
-        
-        DEBUG and print(f"[PAN] step={actual_step:+.2f} speed={int(speed)} pending={self.pending_oks}")
-        
+        self.pending_oks += 1
+
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball:
