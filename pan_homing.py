@@ -9,7 +9,7 @@ def auto_home_precision(ser):
     # PASS 1: THE FAST SEEK (Overshoot Expected)
     # ==========================================
     print("Fast Search for magnet...")
-    ser.write(b"G91 G1 X190 F2500\n") 
+    ser.write(b"G91 G1 X250 F2500\n") 
 
     while True:
         ser.reset_input_buffer() # CRITICAL: Destroys old delayed messages
