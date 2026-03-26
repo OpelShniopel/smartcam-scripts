@@ -42,6 +42,7 @@ class PanController:
     def __init__(self):
         self.current_pan_pos = 0.0
         self.jogging = False
+        self.last_error_x = 0.0
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
@@ -118,7 +119,13 @@ class PanController:
             DEBUG and print(f"[DETECT] In deadzone")
             self._stop_jog()
         else:
+            reversed = self.last_error_x != 0.0 and (error_x > 0) != (self.last_error_x > 0)
+            if reversed:
+                DEBUG and print(f"[DETECT] Direction reversal, cancelling jog")
+                self._stop_jog()
             self.send_command(error_x)
+
+        self.last_error_x = error_x
 
     def return_home(self):
         if self.ser_p:
