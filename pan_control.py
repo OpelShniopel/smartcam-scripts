@@ -8,6 +8,8 @@ import signal
 import lens_helpers
 import pan_homing
 
+DEBUG = False
+
 # --- CONFIGURATION ---
 UNIX_SOCK = "/tmp/pycam.sock"
 SERIAL_PORT_P = "/dev/ttyACM0"
@@ -59,7 +61,7 @@ class PanController:
                 x = float(line.split("MPos:")[1].split(",")[0])
                 return x
         except Exception as e:
-            print(f"[PAN] Position query failed: {e}")
+            DEBUG and print(f"[PAN] Position query failed: {e}")
         return self.current_pan_pos  # fallback if query fails
 
     def _stop_jog(self):
@@ -71,7 +73,7 @@ class PanController:
         self.ser_p.reset_input_buffer()             # discard any leftover 'ok' responses
         self.current_pan_pos = self._get_position()
         self.jogging = False
-        print(f"[PAN] Stopped at X={self.current_pan_pos:.1f}")
+        DEBUG and print(f"[PAN] Stopped at X={self.current_pan_pos:.1f}")
 
     def send_command(self, error_x):
         if not self.ser_p:
@@ -87,7 +89,7 @@ class PanController:
         target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
         actual_step = target - self.current_pan_pos
         if abs(actual_step) < 0.1:
-            print(f"[PAN] Limit at X={self.current_pan_pos:.1f}")
+            DEBUG and print(f"[PAN] Limit at X={self.current_pan_pos:.1f}")
             self._stop_jog()
             return
 
@@ -99,9 +101,9 @@ class PanController:
         if 'ok' in resp:
             self.current_pan_pos = target
             self.jogging = True
-            print(f"[PAN] Jog step={actual_step:+.2f}  pos={target:.1f}  speed={int(speed)}")
+            DEBUG and print(f"[PAN] Jog step={actual_step:+.2f}  pos={target:.1f}  speed={int(speed)}")
         else:
-            print(f"[PAN] Unexpected response: {resp}")
+            DEBUG and print(f"[PAN] Unexpected response: {resp}")
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
@@ -110,10 +112,10 @@ class PanController:
             return
 
         error_x = ball['center_x'] - CENTER_X
-        print(f"[DETECT] center_x={ball['center_x']:.0f}  error_x={error_x:+.0f}")
+        DEBUG and print(f"[DETECT] center_x={ball['center_x']:.0f}  error_x={error_x:+.0f}")
 
         if abs(error_x) <= DEADZONE_PAN:
-            print(f"[DETECT] In deadzone")
+            DEBUG and print(f"[DETECT] In deadzone")
             self._stop_jog()
         else:
             self.send_command(error_x)
