@@ -5,6 +5,7 @@ import time
 import sys
 import atexit
 import signal
+import threading
 import lens_helpers
 import pan_homing
 
@@ -42,7 +43,10 @@ class PanController:
     def __init__(self):
         self.current_pan_pos = 0.0
         self.jogging = False
+        self.error_x = 0.0
         self.last_error_x = 0.0
+        self._serial_lock = threading.Lock()
+        self._stop_event = threading.Event()
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
@@ -52,64 +56,82 @@ class PanController:
             print(f"WARNING: Pan Motor Serial port not found. ({e})")
             self.ser_p = None
 
+        self._jog_thread = threading.Thread(target=self._jog_loop, daemon=True)
+        self._jog_thread.start()
+
     def _get_position(self):
-        """Query actual motor X position from GRBL status report."""
         try:
             self.ser_p.reset_input_buffer()
             self.ser_p.write(b"?\n")
             line = self.ser_p.readline().decode('utf-8')
             if "MPos:" in line:
-                x = float(line.split("MPos:")[1].split(",")[0])
-                return x
+                return float(line.split("MPos:")[1].split(",")[0])
         except Exception as e:
             DEBUG and print(f"[PAN] Position query failed: {e}")
-        return self.current_pan_pos  # fallback if query fails
+        return self.current_pan_pos
 
     def _stop_jog(self):
-        """Cancel any pending jog and sync position from the board."""
+        """Cancel pending jog and sync position. Must hold _serial_lock when calling."""
         if not self.jogging:
             return
         self.ser_p.write(b"\x85")
-        time.sleep(0.05)                            # wait for GRBL to flush and return to Idle
-        self.ser_p.reset_input_buffer()             # discard any leftover 'ok' responses
+        time.sleep(0.05)
+        self.ser_p.reset_input_buffer()
         self.current_pan_pos = self._get_position()
         self.jogging = False
         DEBUG and print(f"[PAN] Stopped at X={self.current_pan_pos:.1f}")
 
-    def send_command(self, error_x):
-        if not self.ser_p:
-            return
+    def _jog_loop(self):
+        """Dedicated thread: continuously feeds GRBL planner buffer independently
+        of the socket/detection rate. Socket thread only updates self.error_x."""
+        while True:
+            if not self.ser_p:
+                time.sleep(0.1)
+                continue
 
-        # Speed proportional to error, clamped to [MIN, MAX]
-        speed = max(MIN_PAN_SPEED, min(MAX_PAN_SPEED, abs(error_x) * SPEED_GAIN))
+            # Direction reversal requested by detection thread
+            if self._stop_event.is_set():
+                with self._serial_lock:
+                    self._stop_jog()
+                self._stop_event.clear()
+                continue
 
-        # Step size: distance covered in COMMAND_DT seconds at this speed (s = v * dt)
-        step = (speed / 60.0) * COMMAND_DT * (1 if error_x > 0 else -1)
+            error_x = self.error_x
 
-        # Soft limit check
-        target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
-        actual_step = target - self.current_pan_pos
-        if abs(actual_step) < 0.1:
-            DEBUG and print(f"[PAN] Limit at X={self.current_pan_pos:.1f}")
-            self._stop_jog()
-            return
+            if abs(error_x) <= DEADZONE_PAN:
+                with self._serial_lock:
+                    self._stop_jog()
+                time.sleep(0.01)
+                continue
 
-        cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"
-        self.ser_p.write(cmd.encode())
+            speed = max(MIN_PAN_SPEED, min(MAX_PAN_SPEED, abs(error_x) * SPEED_GAIN))
+            step = (speed / 60.0) * COMMAND_DT * (1 if error_x > 0 else -1)
+            target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
+            actual_step = target - self.current_pan_pos
 
-        # Wait for 'ok' — natural rate limiter, keeps buffer just full enough
-        resp = self.ser_p.readline().decode().strip()
-        if 'ok' in resp:
-            self.current_pan_pos = target
-            self.jogging = True
-            DEBUG and print(f"[PAN] Jog step={actual_step:+.2f}  pos={target:.1f}  speed={int(speed)}")
-        else:
-            DEBUG and print(f"[PAN] Unexpected response: {resp}")
+            if abs(actual_step) < 0.1:
+                DEBUG and print(f"[PAN] Limit at X={self.current_pan_pos:.1f}")
+                with self._serial_lock:
+                    self._stop_jog()
+                time.sleep(0.01)
+                continue
+
+            with self._serial_lock:
+                self.ser_p.write(f"$J=G91 X{actual_step:.3f} F{int(speed)}\n".encode())
+                resp = self.ser_p.readline().decode().strip()
+
+            if 'ok' in resp:
+                self.current_pan_pos = target
+                self.jogging = True
+                DEBUG and print(f"[PAN] Jog step={actual_step:+.2f}  pos={target:.1f}  speed={int(speed)}")
+            else:
+                DEBUG and print(f"[PAN] Response: {resp}")
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball:
-            self._stop_jog()
+            self.error_x = 0.0
+            self.last_error_x = 0.0
             return
 
         error_x = ball['center_x'] - CENTER_X
@@ -117,21 +139,22 @@ class PanController:
 
         if abs(error_x) <= DEADZONE_PAN:
             DEBUG and print(f"[DETECT] In deadzone")
-            self._stop_jog()
+            self.error_x = 0.0
         else:
-            reversed = self.last_error_x != 0.0 and (error_x > 0) != (self.last_error_x > 0)
-            if reversed:
-                DEBUG and print(f"[DETECT] Direction reversal, cancelling jog")
-                self._stop_jog()
-            self.send_command(error_x)
+            if self.last_error_x != 0.0 and (error_x > 0) != (self.last_error_x > 0):
+                DEBUG and print(f"[DETECT] Direction reversal")
+                self._stop_event.set()
+            self.error_x = error_x
 
         self.last_error_x = error_x
 
     def return_home(self):
         if self.ser_p:
-            self.ser_p.write(b"\x85")           # Cancel any pending jog
-            self.ser_p.write(b"G90 G0 X0\n")    # Return to home in absolute mode
-            self.current_pan_pos = 0
+            self.error_x = 0.0
+            with self._serial_lock:
+                self.ser_p.write(b"\x85")
+                self.ser_p.write(b"G90 G0 X0\n")
+                self.current_pan_pos = 0
 
 def socket_listener(controller):
     while True:
