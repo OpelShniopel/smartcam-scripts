@@ -19,20 +19,27 @@ FRAME_W = 1280
 FRAME_H = 720
 CENTER_X = FRAME_W / 2
 
-# --- CONTROL TUNING ---
-GAIN_P = 0.05       # Proportional: How fast it moves toward the target
-DEADZONE_PAN = 50
-PAN_SPEED = 4000
+# --- PHYSICAL CONSTANTS ---
+# 1 unit = 0.5°  |  G0 X180 = 90° right
+DEGREES_PER_UNIT = 0.5
 
-# Control limits
-PAN_MAX_STEPS = 180
-PAN_MIN_STEPS = -70
+# --- CONTROL TUNING ---
+DEADZONE_PAN  = 50                              # pixels
+MIN_PAN_SPEED = 1000                            # units/min  — ~8.3°/sec
+MAX_PAN_SPEED = 5000                            # units/min  — ~41.7°/sec
+SPEED_GAIN    = MAX_PAN_SPEED / (FRAME_W / 2)  # ramps linearly from 0 to MAX across half-frame
+                                                # = 7.8 units/min per pixel
+COMMAND_DT    = 0.04                            # seconds per jog segment: s = (speed/60) * dt
+                                                # at MAX_PAN_SPEED: 3.3 units (1.65°) per step
+
+# Control limits (1 unit = 0.5°)
+PAN_MAX_STEPS =  180    # +90°  right
+PAN_MIN_STEPS =  -70    # -35°  left
 
 class PanController:
     def __init__(self):
         self.current_pan_pos = 0.0
-        self.last_command_time = 0.0
-        self.command_interval = 0.05    # 20Hz — motor gets 50ms to move before next update
+        self.jogging = False
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
@@ -55,41 +62,61 @@ class PanController:
             print(f"[PAN] Position query failed: {e}")
         return self.current_pan_pos  # fallback if query fails
 
-    def send_command(self, pan_delta, pan_speed=PAN_SPEED):
+    def _stop_jog(self):
+        """Cancel any pending jog and sync position from the board."""
+        if not self.jogging:
+            return
+        self.ser_p.write(b"\x85")
+        time.sleep(0.05)                            # wait for GRBL to flush and return to Idle
+        self.ser_p.reset_input_buffer()             # discard any leftover 'ok' responses
+        self.current_pan_pos = self._get_position()
+        self.jogging = False
+        print(f"[PAN] Stopped at X={self.current_pan_pos:.1f}")
+
+    def send_command(self, error_x):
         if not self.ser_p:
             return
-        if abs(pan_delta) < 1.0:
-            return
-        if time.time() - self.last_command_time < self.command_interval:
-            return
 
-        # Cancel pending jog first, then read where the motor actually stopped
-        self.ser_p.write(b"\x85")
-        self.current_pan_pos = self._get_position()
+        # Speed proportional to error, clamped to [MIN, MAX]
+        speed = max(MIN_PAN_SPEED, min(MAX_PAN_SPEED, abs(error_x) * SPEED_GAIN))
 
-        # Hard limit check against real position — no drift possible
-        target = self.current_pan_pos + pan_delta
-        target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, target))
-        if abs(target - self.current_pan_pos) < 1.0:
+        # Step size: distance covered in COMMAND_DT seconds at this speed (s = v * dt)
+        step = (speed / 60.0) * COMMAND_DT * (1 if error_x > 0 else -1)
+
+        # Soft limit check
+        target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
+        actual_step = target - self.current_pan_pos
+        if abs(actual_step) < 0.1:
             print(f"[PAN] Limit at X={self.current_pan_pos:.1f}")
+            self._stop_jog()
             return
 
-        cmd = f"$J=G90 X{target:.2f} F{int(pan_speed)}\n"
+        cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"
         self.ser_p.write(cmd.encode())
 
-        self.current_pan_pos = target
-        self.last_command_time = time.time()
-        print(f"[PAN] Jog -> target={target:.1f}  actual_start={self.current_pan_pos:.1f}")
+        # Wait for 'ok' — natural rate limiter, keeps buffer just full enough
+        resp = self.ser_p.readline().decode().strip()
+        if 'ok' in resp:
+            self.current_pan_pos = target
+            self.jogging = True
+            print(f"[PAN] Jog step={actual_step:+.2f}  pos={target:.1f}  speed={int(speed)}")
+        else:
+            print(f"[PAN] Unexpected response: {resp}")
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
-        if ball:
-            error_x = ball['center_x'] - CENTER_X
-            print(f"[DETECT] center_x={ball['center_x']:.0f}  error_x={error_x:+.0f}")
-            if abs(error_x) > DEADZONE_PAN:
-                self.send_command(error_x * GAIN_P)
-            else:
-                print(f"[DETECT] In deadzone")
+        if not ball:
+            self._stop_jog()
+            return
+
+        error_x = ball['center_x'] - CENTER_X
+        print(f"[DETECT] center_x={ball['center_x']:.0f}  error_x={error_x:+.0f}")
+
+        if abs(error_x) <= DEADZONE_PAN:
+            print(f"[DETECT] In deadzone")
+            self._stop_jog()
+        else:
+            self.send_command(error_x)
 
     def return_home(self):
         if self.ser_p:
