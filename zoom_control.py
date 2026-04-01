@@ -24,7 +24,7 @@ FOCUS_MIN_STEPS = 32000
 
 class ZoomController:
     def __init__(self):
-        self.current_zoom_pos = 0
+        self.current_zoom_pos = 32000  # set by G92 A32000 at end of calibration
 
         try:
             self.ser_z = serial.Serial(SERIAL_PORT_Z, 115200, timeout=1)
@@ -40,6 +40,8 @@ class ZoomController:
 
         if self.ser_z and not lens_helpers.verify_command(self.ser_z, "G90"):
             print("CRITICAL: Kurokesu board failed response check.")
+
+        self.calibrate()
 
     def calibrate(self):
         if not self.ser_z:
@@ -69,7 +71,7 @@ class ZoomController:
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball:
             return
-        zoom_error = TARGET_WIDTH - ball['width']
+        zoom_error = ball['width'] - TARGET_WIDTH
         DEBUG and print(f"[ZOOM] width={ball['width']:.0f}  error={zoom_error:+.0f}")
         if abs(zoom_error) > DEADZONE_ZOOM:
             self.send_zoom(zoom_error * GAIN_ZOOM)
