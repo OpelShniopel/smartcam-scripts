@@ -7,14 +7,16 @@ DEBUG = True
 # --- CONFIGURATION ---
 CSV_FILE       = "zoom_focus_table_updated.csv"
 SERIAL_PORT_Z  = "/dev/zoom_control"
-ZOOM_SPEED     = 600
-FOCUS_SPEED    = 600
+ZOOM_SPEED     = 800
+FOCUS_SPEED    = 800
 
 # --- TUNING ---
-GAIN_ZOOM          = 1
-DEADZONE_ZOOM      = 50
+DEADZONE_ZOOM      = 50       # pixels — no action within this band
+FINE_ZONE_ZOOM     = 150      # pixels — proportional steps within this band
+ZOOM_STEP          = 250      # fixed step size outside the fine zone
+GAIN_ZOOM          = 2.0      # proportional gain inside fine zone (pixels → steps)
 TARGET_WIDTH       = 100      # Target ball width in pixels
-FOCUS_UPDATE_STEPS = 50      # Update focus axis only when zoom moves this many steps
+FOCUS_UPDATE_STEPS = 50       # Update focus axis only when zoom moves this many steps
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 34000
@@ -96,7 +98,13 @@ class ZoomController:
             return
         zoom_error = ball['width'] - TARGET_WIDTH
         DEBUG and print(f"[ZOOM] width={ball['width']:.0f}  error={zoom_error:+.0f}")
-        if abs(zoom_error) > DEADZONE_ZOOM:
+        abs_error = abs(zoom_error)
+        if abs_error <= DEADZONE_ZOOM:
+            DEBUG and print(f"[ZOOM] In deadzone")
+        elif abs_error <= FINE_ZONE_ZOOM:
+            # Proportional approach near the target
             self.send_zoom(zoom_error * GAIN_ZOOM)
         else:
-            DEBUG and print(f"[ZOOM] In deadzone")
+            # Fixed step in the correct direction — symmetric speed regardless of error magnitude
+            direction = 1 if zoom_error > 0 else -1
+            self.send_zoom(direction * ZOOM_STEP)
