@@ -8,21 +8,23 @@ don't kill the restart loop.
 Exit code convention from pipeline:
   0   - clean shutdown (SIGINT/SIGTERM from operator), do NOT restart
   42  - intentional restart (stream config changed), relaunch immediately
+  43  - RTMP stream error, stream.conf already cleared, relaunch without stream
   other - crash or error, relaunch after delay
 
 Usage:  python3 run_pipeline.py [--no-stream]
 """
-import os
-import signal
-import subprocess
 import sys
+import subprocess
 import time
+import signal
+import os
 from datetime import datetime
 
-RESTART_DELAY_SEC = 2
-RESTART_EXIT_CODE = 42
-MAX_CRASHES = 10  # stop looping if we crash this many times without a clean run
-CRASH_RESET_SEC = 300  # reset crash counter if pipeline ran cleanly for this long
+RESTART_DELAY_SEC  = 2
+RESTART_EXIT_CODE  = 42
+STREAM_ERROR_EXIT_CODE = 43  # RTMP error — pipeline already cleared stream.conf, restart normally
+MAX_CRASHES        = 10   # stop looping if we crash this many times without a clean run
+CRASH_RESET_SEC    = 300  # reset crash counter if pipeline ran cleanly for this long
 
 SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "pipeline.py")
@@ -33,15 +35,15 @@ def _ts() -> str:
 
 
 def main():
-    shutdown = False
-    crash_count = 0
-    extra_args = sys.argv[1:]
+    shutdown     = False
+    crash_count  = 0
+    extra_args   = sys.argv[1:]
 
     def _handler(_sig, _frame):
         nonlocal shutdown
         shutdown = True
 
-    signal.signal(signal.SIGINT, _handler)
+    signal.signal(signal.SIGINT,  _handler)
     signal.signal(signal.SIGTERM, _handler)
 
     while not shutdown:
@@ -89,6 +91,12 @@ def main():
         if ret == RESTART_EXIT_CODE:
             print(f"\n[{_ts()}] *** Config change restart (ran {run_duration:.0f}s) ***")
             # Reset crash count — this was an intentional restart, not a crash
+            crash_count = 0
+            continue
+
+        if ret == STREAM_ERROR_EXIT_CODE:
+            print(f"\n[{_ts()}] *** RTMP stream error (ran {run_duration:.0f}s) — restarting without stream ***")
+            # stream.conf already cleared by pipeline, reset crash count — not a crash
             crash_count = 0
             continue
 
