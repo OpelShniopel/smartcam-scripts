@@ -11,7 +11,7 @@ ZOOM_SPEED     = 600
 FOCUS_SPEED    = 600
 
 # --- TUNING ---
-GAIN_ZOOM     = 0.2
+GAIN_ZOOM     = 3.0
 DEADZONE_ZOOM = 15
 TARGET_WIDTH  = 100      # Target ball width in pixels
 
