@@ -11,7 +11,7 @@ ZOOM_SPEED     = 600
 FOCUS_SPEED    = 600
 
 # --- TUNING ---
-GAIN_ZOOM     = 3.0
+GAIN_ZOOM     = 0.3
 DEADZONE_ZOOM = 15
 TARGET_WIDTH  = 100      # Target ball width in pixels
 
@@ -73,8 +73,7 @@ class ZoomController:
             new_focus_pos = self.get_focus_for_zoom(new_zoom_pos)
             if new_focus_pos <= FOCUS_MIN_STEPS or new_focus_pos >= FOCUS_MAX_STEPS:
                 new_focus_pos = 4000
-            cmd = f"G1 A{int(new_zoom_pos)} B{int(new_focus_pos)} F{int(zoom_speed)}\n"
-            self.ser_z.write(cmd.encode())
+            lens_helpers.send_command(self.ser_z, f"G1 A{int(new_zoom_pos)} B{int(new_focus_pos)} F{int(zoom_speed)}")
             DEBUG and print(f"[ZOOM] pos={int(new_zoom_pos)}  focus={int(new_focus_pos)}  speed={int(zoom_speed)}")
         else:
             DEBUG and print(f"[ZOOM] Limit! Target {int(new_zoom_pos)} out of range [{ZOOM_MIN_STEPS}, {ZOOM_MAX_STEPS}]")
