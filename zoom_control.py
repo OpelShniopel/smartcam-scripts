@@ -2,6 +2,8 @@ import serial
 import time
 import lens_helpers
 
+DEBUG = True
+
 # --- CONFIGURATION ---
 CSV_FILE       = "zoom_focus_table_updated.csv"
 SERIAL_PORT_Z  = "/dev/zoom_control"
@@ -11,7 +13,7 @@ FOCUS_SPEED    = 600
 # --- TUNING ---
 GAIN_ZOOM     = 0.2
 DEADZONE_ZOOM = 15
-TARGET_WIDTH  = 50      # Target ball width in pixels
+TARGET_WIDTH  = 100      # Target ball width in pixels
 
 # --- LIMITS ---
 ZOOM_MAX_STEPS  = 40000
@@ -59,11 +61,17 @@ class ZoomController:
                 new_focus_pos = 4000
             cmd = f"G1 A{int(new_zoom_pos)} B{int(new_focus_pos)} F{int(zoom_speed)}\n"
             self.ser_z.write(cmd.encode())
+            DEBUG and print(f"[ZOOM] pos={int(new_zoom_pos)}  focus={int(new_focus_pos)}  speed={int(zoom_speed)}")
+        else:
+            DEBUG and print(f"[ZOOM] Limit! Target {int(new_zoom_pos)} out of range [{ZOOM_MIN_STEPS}, {ZOOM_MAX_STEPS}]")
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball:
             return
         zoom_error = TARGET_WIDTH - ball['width']
+        DEBUG and print(f"[ZOOM] width={ball['width']:.0f}  error={zoom_error:+.0f}")
         if abs(zoom_error) > DEADZONE_ZOOM:
             self.send_zoom(zoom_error * GAIN_ZOOM)
+        else:
+            DEBUG and print(f"[ZOOM] In deadzone")

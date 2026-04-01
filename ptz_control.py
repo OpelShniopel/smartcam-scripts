@@ -12,7 +12,7 @@ UNIX_SOCK  = "/tmp/pycam.sock"
 TARGET_CAM = "CAM2"
 
 # --- ENABLE / DISABLE CONTROLLERS ---
-ENABLE_PAN  = True
+ENABLE_PAN  = False
 ENABLE_ZOOM = True
 
 
