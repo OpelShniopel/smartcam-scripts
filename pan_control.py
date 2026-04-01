@@ -78,9 +78,6 @@ class PanController:
         if not self.ser_p:
             return
         
-        speed = override_speed if override_speed is not None else speed
-        self.last_speed = speed
-
         # 1. Calculate Ball Velocity (pixels per frame)
         # Positive if moving right, negative if moving left
         ball_velocity = abs(error_x - self.last_error_x)
@@ -89,14 +86,14 @@ class PanController:
         # 2. Base Speed (The Exponential Curve you already have)
         max_possible_error = FRAME_W / 2
         normalized_error = min(1.0, abs(error_x) / max_possible_error)
-        base_factor = pow(normalized_error, 2.0) 
+        base_factor = pow(normalized_error, 2.0)
 
         # 3. Sudden Move Boost (The "Turbo")
-        # If the ball moved more than 30 pixels since the last frame, 
+        # If the ball moved more than 30 pixels since the last frame,
         # we add a multiplier to the speed.
-        boost_threshold = 20 
+        boost_threshold = 20
         boost_gain = 1.5 # 50% extra speed during sudden moves
-        
+
         speed_multiplier = 1.0
         if ball_velocity > boost_threshold:
             # Scale boost based on how 'sudden' the move is
@@ -105,6 +102,10 @@ class PanController:
         # Calculate final speed with boost
         speed = MIN_PAN_SPEED + (MAX_PAN_SPEED - MIN_PAN_SPEED) * base_factor
         speed = min(MAX_PAN_SPEED, speed * speed_multiplier)
+
+        if override_speed is not None:
+            speed = override_speed
+        self.last_speed = speed
 
         # 4. Look-ahead and Buffer Management (Keep your 3.0x logic)
         step_duration = COMMAND_DT * 4.0 
