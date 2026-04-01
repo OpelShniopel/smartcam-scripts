@@ -11,27 +11,37 @@ from zoom_control import ZoomController
 UNIX_SOCK  = "/tmp/pycam.sock"
 TARGET_CAM = "CAM2"
 
+# --- ENABLE / DISABLE CONTROLLERS ---
+ENABLE_PAN  = True
+ENABLE_ZOOM = True
+
 
 class PTZController:
     def __init__(self):
-        self.pan  = PanController()
-        self.zoom = ZoomController()
+        self.pan  = PanController()  if ENABLE_PAN  else None
+        self.zoom = ZoomController() if ENABLE_ZOOM else None
+
+        if not self.pan and not self.zoom:
+            print("WARNING: Both pan and zoom are disabled.")
 
     def process_detection(self, detections):
-        self.pan.process_detection(detections)
-        self.zoom.process_detection(detections)
+        if self.pan:
+            self.pan.process_detection(detections)
+        if self.zoom:
+            self.zoom.process_detection(detections)
 
     def process_manual_ptz(self, msg):
         pan  = msg.get("pan", 0)
         zoom = msg.get("zoom", 0)
         print(f"Manual Override: Pan {pan}, Zoom {zoom}")
-        if pan:
-            self.pan._send_pan(pan)
-        if zoom:
+        if pan and self.pan:
+            self.pan.send_command(pan)
+        if zoom and self.zoom:
             self.zoom.send_zoom(zoom, zoom_speed=1000)
 
     def return_home(self):
-        self.pan.return_home()
+        if self.pan:
+            self.pan.return_home()
 
 
 def socket_listener(controller):

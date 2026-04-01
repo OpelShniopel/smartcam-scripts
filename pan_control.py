@@ -1,20 +1,13 @@
-import json
-import socket
 import serial
 import time
-import sys
-import atexit
-import signal
 import lens_helpers
 import pan_homing
 
 DEBUG = False
 
 # --- CONFIGURATION ---
-UNIX_SOCK = "/tmp/pycam.sock"
-SERIAL_PORT_P = "/dev/ttyACM0"
+SERIAL_PORT_P = "/dev/pan_control"
 BAUD_RATE = 115200
-TARGET_CAM = "CAM2"
 
 # Frame dimensions (Ensure this matches your inference output)
 FRAME_W = 1280 
@@ -188,52 +181,7 @@ class PanController:
             self.ser_p.write(b"G90 G0 X0\n")    # Return to home in absolute mode
             self.current_pan_pos = 0
 
-def socket_listener(controller):
-    while True:
-        try:
-            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            client.connect(UNIX_SOCK)
-            print("Connected to socket.")
-
-            buf = ""
-            while True:
-                chunk = client.recv(4096).decode()
-                if not chunk:
-                    break
-                buf += chunk
-                
-                latest_msg = None
-                
-                # Extract all complete JSON messages from the buffer
-                while "\n" in buf:
-                    line, buf = buf.split("\n", 1)
-                    try:
-                        latest_msg = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                
-                # ONLY process the absolute newest frame, discard the backlog
-                if latest_msg:
-                    cam = latest_msg.get("camera", "?")
-                    if cam == TARGET_CAM:
-                        controller.process_detection(latest_msg.get("detections", []))
-
-        except (ConnectionRefusedError, FileNotFoundError):
-            time.sleep(2)
-        except Exception as e:
-            print(f"Socket Error: {e}")
-            time.sleep(1)
-
 if __name__ == "__main__":
-    motor_ctrl = PanController()
-    atexit.register(motor_ctrl.return_home)
-
-    def signal_handler(sig, frame):
-        print("\nInterrupt detected! Homing before exit...")
-        motor_ctrl.return_home()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    socket_listener(motor_ctrl)
+    # Standalone: initialise and home the pan motor, then exit
+    ctrl = PanController()
+    ctrl.return_home()

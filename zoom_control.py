@@ -4,7 +4,7 @@ import lens_helpers
 
 # --- CONFIGURATION ---
 CSV_FILE       = "zoom_focus_table_updated.csv"
-SERIAL_PORT_Z  = "/dev/ttyACM1"
+SERIAL_PORT_Z  = "/dev/zoom_control"
 ZOOM_SPEED     = 600
 FOCUS_SPEED    = 600
 
