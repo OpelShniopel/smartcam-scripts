@@ -101,8 +101,8 @@ class PanController:
         # 3. Sudden Move Boost (The "Turbo")
         # If the ball moved more than 30 pixels since the last frame, 
         # we add a multiplier to the speed.
-        boost_threshold = 30 
-        boost_gain = 2 # 100% extra speed during sudden moves
+        boost_threshold = 20 
+        boost_gain = 1.5 # 50% extra speed during sudden moves
         
         speed_multiplier = 1.0
         if ball_velocity > boost_threshold:
@@ -114,14 +114,14 @@ class PanController:
         speed = min(MAX_PAN_SPEED, speed * speed_multiplier)
 
         # 4. Look-ahead and Buffer Management (Keep your 3.0x logic)
-        step_duration = COMMAND_DT * 3.0 
+        step_duration = COMMAND_DT * 4.0 
         step = (speed / 60.0) * step_duration * (1 if error_x > 0 else -1)
 
         target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
         actual_step = target - self.current_pan_pos
         
         # 5. Ignore "Micro-twitches" that the motor can't physically do smoothly
-        if abs(actual_step) < 0.4: 
+        if abs(actual_step) < 1: 
             return
 
         cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"

@@ -1,6 +1,5 @@
 import csv
 import time
-import numpy as np
 from scipy.interpolate import interp1d
 
 # Status field indices for the Kurokesu SCF4 board (!1 response)
