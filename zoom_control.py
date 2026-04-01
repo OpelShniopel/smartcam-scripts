@@ -15,6 +15,10 @@ GAIN_ZOOM     = 0.2
 DEADZONE_ZOOM = 15
 TARGET_WIDTH  = 100      # Target ball width in pixels
 
+# --- PRESET POSITION ---
+ZOOM_BASE_POS  = 34000
+FOCUS_BASE_POS = 34520
+
 # --- LIMITS ---
 ZOOM_MAX_STEPS  = 40000
 ZOOM_MIN_STEPS  = 30000
@@ -42,6 +46,11 @@ class ZoomController:
             print("CRITICAL: Kurokesu board failed response check.")
 
         self.calibrate()
+        if self.ser_z:
+            cmd = f"G1 A{ZOOM_BASE_POS} B{FOCUS_BASE_POS} F{ZOOM_SPEED}\n"
+            self.ser_z.write(cmd.encode())
+            self.current_zoom_pos = ZOOM_BASE_POS
+            print(f"Moved to base position: zoom={ZOOM_BASE_POS}, focus={FOCUS_BASE_POS}")
 
     def calibrate(self):
         if not self.ser_z:
