@@ -47,10 +47,13 @@ class ZoomController:
 
         self.calibrate()
         if self.ser_z:
-            cmd = f"G1 A{ZOOM_BASE_POS} B{FOCUS_BASE_POS} F{ZOOM_SPEED}\n"
-            self.ser_z.write(cmd.encode())
+            print("Moving to base position...")
+            lens_helpers.send_command(self.ser_z, f"G0 A{ZOOM_BASE_POS}")
+            lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHA_MOVE)
+            lens_helpers.send_command(self.ser_z, f"G0 B{FOCUS_BASE_POS}")
+            lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHB_MOVE)
             self.current_zoom_pos = ZOOM_BASE_POS
-            print(f"Moved to base position: zoom={ZOOM_BASE_POS}, focus={FOCUS_BASE_POS}")
+            print(f"Base position reached: zoom={ZOOM_BASE_POS}, focus={FOCUS_BASE_POS}")
 
     def calibrate(self):
         if not self.ser_z:
