@@ -11,9 +11,10 @@ ZOOM_SPEED     = 600
 FOCUS_SPEED    = 600
 
 # --- TUNING ---
-GAIN_ZOOM     = 0.5
-DEADZONE_ZOOM = 15
-TARGET_WIDTH  = 100      # Target ball width in pixels
+GAIN_ZOOM          = 1
+DEADZONE_ZOOM      = 50
+TARGET_WIDTH       = 100      # Target ball width in pixels
+FOCUS_UPDATE_STEPS = 50      # Update focus axis only when zoom moves this many steps
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 34000
@@ -29,6 +30,7 @@ FOCUS_MIN_STEPS = 32000
 class ZoomController:
     def __init__(self):
         self.current_zoom_pos = 32000  # set by G92 A32000 at end of calibration
+        self.last_focus_update_pos = 32000  # zoom position at last focus update
 
         try:
             self.ser_z = serial.Serial(SERIAL_PORT_Z, 115200, timeout=1)
@@ -53,6 +55,7 @@ class ZoomController:
             lens_helpers.send_command(self.ser_z, f"G0 B{FOCUS_BASE_POS}")
             lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHB_MOVE)
             self.current_zoom_pos = ZOOM_BASE_POS
+            self.last_focus_update_pos = ZOOM_BASE_POS
             print(f"Base position reached: zoom={ZOOM_BASE_POS}, focus={FOCUS_BASE_POS}")
 
     def calibrate(self):
@@ -73,8 +76,17 @@ class ZoomController:
             new_focus_pos = self.get_focus_for_zoom(new_zoom_pos)
             if new_focus_pos <= FOCUS_MIN_STEPS or new_focus_pos >= FOCUS_MAX_STEPS:
                 new_focus_pos = 4000
-            lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_pos)} B{int(new_focus_pos)}")
-            DEBUG and print(f"[ZOOM] pos={int(new_zoom_pos)}  focus={int(new_focus_pos)}")
+
+            focus_due = abs(new_zoom_pos - self.last_focus_update_pos) >= FOCUS_UPDATE_STEPS
+            if focus_due:
+                # Update both axes together only when focus needs a meaningful correction
+                lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_pos)} B{int(new_focus_pos)}")
+                self.last_focus_update_pos = new_zoom_pos
+                DEBUG and print(f"[ZOOM] pos={int(new_zoom_pos)}  focus={int(new_focus_pos)}  (focus updated)")
+            else:
+                # Zoom axis only — keeps A moving at full speed without B as a bottleneck
+                lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_pos)}")
+                DEBUG and print(f"[ZOOM] pos={int(new_zoom_pos)}  focus=hold")
         else:
             DEBUG and print(f"[ZOOM] Limit! Target {int(new_zoom_pos)} out of range [{ZOOM_MIN_STEPS}, {ZOOM_MAX_STEPS}]")
 
