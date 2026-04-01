@@ -22,14 +22,20 @@ if [ -z "$SERIAL" ]; then
     exit 1
 fi
 
-# Create the specific rule. 
-RULE="SUBSYSTEM==\"tty\", ATTRS{idVendor}==\"$ID_VENDOR\", ATTRS{idProduct}==\"$ID_PRODUCT\", ATTRS{serial}==\"$SERIAL\", SYMLINK+=\"$SYMLINK_NAME\", MODE=\"0666\""
+# Construct the rule
+RULE="ACTION==\"add\", SUBSYSTEM==\"tty\", ENV{ID_VENDOR_ID}==\"$ID_VENDOR\", ENV{ID_MODEL_ID}==\"$ID_PRODUCT\", ENV{ID_SERIAL_SHORT}==\"$SERIAL\", SYMLINK+=\"$SYMLINK_NAME\""
 
-echo "Writing rule to $RULE_FILE..."
-echo "$RULE" | sudo tee $RULE_FILE > /dev/null
+# Check if this serial already exists in the file to avoid duplicates
+if grep -q "$SERIAL" "$RULE_FILE" 2>/dev/null; then
+    echo "Notice: A rule for serial $SERIAL already exists in $RULE_FILE. Skipping append."
+else
+    echo "Appending rule to $RULE_FILE..."
+    # The -a flag appends instead of overwriting
+    echo "$RULE" | sudo tee -a $RULE_FILE > /dev/null
+fi
 
 echo "Reloading udev..."
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 
-echo "Done! This specific board will now always be available at /dev/$SYMLINK_NAME"
+echo "Done! The board with serial $SERIAL is mapped to /dev/$SYMLINK_NAME"
