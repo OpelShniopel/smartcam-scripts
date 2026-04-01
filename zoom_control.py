@@ -2,13 +2,13 @@ import serial
 import time
 import lens_helpers
 
-DEBUG = True
+DEBUG = False
 
 # --- CONFIGURATION ---
 CSV_FILE       = "zoom_focus_table_updated.csv"
 SERIAL_PORT_Z  = "/dev/zoom_control"
-ZOOM_SPEED     = 800
-FOCUS_SPEED    = 800
+ZOOM_SPEED     = 1200
+FOCUS_SPEED    = 1200
 
 # --- TUNING ---
 DEADZONE_ZOOM      = 50       # pixels — no action within this band
