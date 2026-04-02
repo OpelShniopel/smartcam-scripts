@@ -24,8 +24,8 @@ MIN_PAN_SPEED = 1000                            # units/min  — ~8.3°/sec
 MAX_PAN_SPEED = 5000                            # units/min  — ~41.7°/sec
 SPEED_GAIN    = MAX_PAN_SPEED / (FRAME_W / 2)  # ramps linearly from 0 to MAX across half-frame
                                                 # = 7.8 units/min per pixel
-COMMAND_DT    = 0.02                            # seconds per jog segment: s = (speed/60) * dt
-                                                # at MAX_PAN_SPEED: 3.3 units (1.65°) per step
+COMMAND_DT    = 0.04                            # seconds per jog segment (= 1 frame at 25fps)
+                                                # at MAX_PAN_SPEED: 6.7 units (3.3°) per step
 SPEED_FACTOR = 3.0                              # power of speed curve - lower for linear, higher for more exponential
 
 

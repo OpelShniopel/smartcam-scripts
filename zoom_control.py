@@ -12,11 +12,13 @@ ZOOM_SPEED     = 1000
 FOCUS_SPEED    = 2000
 
 # --- TUNING ---
-TARGET_WIDTH       = 100    # Target ball width in pixels
-ZOOM_K             = 2000   # Step multiplier: larger = faster zoom response
-NORM_DEADZONE      = 0.1    # Log-ratio deadzone (~±10% of target width)
-MAX_ZOOM_STEP      = 200    # Max steps per frame — keeps focus motor from falling behind
-FOCUS_UPDATE_STEPS = 10     # Send focus correction only when zoom drifts this many steps
+TARGET_WIDTH            = 100   # Target ball width in pixels
+ZOOM_K                  = 2000  # Step multiplier: larger = faster zoom response
+NORM_DEADZONE           = 0.1   # Log-ratio deadzone (~±10% of target width)
+MAX_ZOOM_STEP           = 200   # Max steps per frame — keeps focus motor from falling behind
+FOCUS_UPDATE_STEPS      = 10    # Send focus correction only when zoom drifts this many steps
+VELOCITY_ZOOM_THRESHOLD = 60    # Ball horizontal speed (px/frame) that starts triggering zoom-out
+VELOCITY_ZOOM_GAIN      = 5.0   # Zoom-out steps added per px/frame above threshold
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 34000
@@ -34,6 +36,7 @@ class ZoomController:
     def __init__(self):
         self.current_zoom_pos = 32000  # set by G92 A32000 at end of calibration
         self.last_focus_update_pos = 32000
+        self.last_ball_x = None
 
         try:
             self.ser_z = serial.Serial(SERIAL_PORT_Z, 115200, timeout=1)
@@ -106,14 +109,26 @@ class ZoomController:
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball or ball['width'] <= 0:
+            self.last_ball_x = None
             return
 
+        # Horizontal velocity (px/frame) — reset on lost frames so first reacquire doesn't spike
+        ball_velocity_x = abs(ball['center_x'] - self.last_ball_x) if self.last_ball_x is not None else 0.0
+        self.last_ball_x = ball['center_x']
+
+        # Size-based zoom: proportional log error, suppressed inside deadzone
         ratio = ball['width'] / TARGET_WIDTH
         norm_error = math.log(ratio)
+        zoom_step = 0.0
+        if abs(norm_error) >= NORM_DEADZONE:
+            zoom_step = max(-MAX_ZOOM_STEP, min(MAX_ZOOM_STEP, norm_error * ZOOM_K))
 
-        if abs(norm_error) < NORM_DEADZONE:
-            return
+        # Velocity-based zoom-out: fast horizontal movement → widen FOV
+        if ball_velocity_x > VELOCITY_ZOOM_THRESHOLD:
+            excess = ball_velocity_x - VELOCITY_ZOOM_THRESHOLD
+            velocity_bias = min(MAX_ZOOM_STEP, excess * VELOCITY_ZOOM_GAIN)
+            zoom_step += velocity_bias
+            DEBUG and print(f"[ZOOM] velocity={ball_velocity_x:.0f}px/f  bias=+{velocity_bias:.0f}")
 
-        zoom_step_command = norm_error * ZOOM_K
-        zoom_step_command = max(-MAX_ZOOM_STEP, min(MAX_ZOOM_STEP, zoom_step_command))
-        self.send_zoom(zoom_step_command)
+        if zoom_step != 0.0:
+            self.send_zoom(zoom_step)
