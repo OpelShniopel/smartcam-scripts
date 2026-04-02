@@ -102,8 +102,9 @@ class PanController:
             speed_multiplier += (ball_velocity / 100.0) * boost_gain
 
         # Calculate final speed with boost, scaled by zoom level
-        effective_max = max(MIN_PAN_SPEED, MAX_PAN_SPEED * speed_scale)
-        speed = MIN_PAN_SPEED + (effective_max - MIN_PAN_SPEED) * base_factor
+        effective_min = max(50, MIN_PAN_SPEED * speed_scale)
+        effective_max = max(effective_min, MAX_PAN_SPEED * speed_scale)
+        speed = effective_min + (effective_max - effective_min) * base_factor
         speed = min(effective_max, speed * speed_multiplier)
 
         if override_speed is not None:
