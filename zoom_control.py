@@ -12,9 +12,10 @@ ZOOM_SPEED     = 1000
 FOCUS_SPEED    = 1000
 
 # --- TUNING ---
-TARGET_WIDTH  = 100    # Target ball width in pixels
-ZOOM_K        = 1000   # Step multiplier: larger = faster zoom response
-NORM_DEADZONE = 0.1    # Log-ratio deadzone (~±10% of target width)
+TARGET_WIDTH       = 100    # Target ball width in pixels
+ZOOM_K             = 1000   # Step multiplier: larger = faster zoom response
+NORM_DEADZONE      = 0.1    # Log-ratio deadzone (~±10% of target width)
+FOCUS_UPDATE_STEPS = 10     # Send focus correction only when zoom drifts this many steps
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 34000
@@ -30,7 +31,8 @@ FOCUS_MIN_STEPS = 32000
 class ZoomController:
     def __init__(self):
         self.current_zoom_pos = 32000  # set by G92 A32000 at end of calibration
-        
+        self.last_focus_update_pos = 32000
+
         try:
             self.ser_z = serial.Serial(SERIAL_PORT_Z, 115200, timeout=1)
             time.sleep(1.5)
@@ -55,6 +57,7 @@ class ZoomController:
             lens_helpers.send_command(self.ser_z, f"G0 B{focus_base}")
             lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHB_MOVE)
             self.current_zoom_pos = ZOOM_BASE_POS
+            self.last_focus_update_pos = ZOOM_BASE_POS
             print(f"Base position reached: zoom={ZOOM_BASE_POS}, focus={focus_base}")
 
     def calibrate(self):
@@ -81,16 +84,16 @@ class ZoomController:
 
         self.current_zoom_pos = new_zoom_pos
         new_focus_pos = self.get_focus_for_zoom(new_zoom_pos)
-        
-        # Clamp focus to valid range
         new_focus_pos = max(FOCUS_MIN_STEPS, min(FOCUS_MAX_STEPS, new_focus_pos))
 
-        # Send BOTH axes via G0 every time. 
-        # The firmware will start both motors at the exact same time.
-        cmd = f"G0 A{int(new_zoom_pos)} B{int(new_focus_pos)}"
-        lens_helpers.send_command(self.ser_z, cmd)
-        
-        DEBUG and print(f"[ZOOM] Sync Move -> A:{int(new_zoom_pos)} B:{int(new_focus_pos)}")
+        focus_due = abs(new_zoom_pos - self.last_focus_update_pos) >= FOCUS_UPDATE_STEPS
+        if focus_due:
+            lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_pos)} B{int(new_focus_pos)}")
+            self.last_focus_update_pos = new_zoom_pos
+            DEBUG and print(f"[ZOOM] A={int(new_zoom_pos)} B={int(new_focus_pos)} (focus updated)")
+        else:
+            lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_pos)}")
+            DEBUG and print(f"[ZOOM] A={int(new_zoom_pos)} (focus hold)")
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
