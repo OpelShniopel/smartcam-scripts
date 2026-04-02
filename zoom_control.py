@@ -13,8 +13,8 @@ FOCUS_SPEED    = 1200
 # --- TUNING ---
 DEADZONE_ZOOM      = 50       # pixels — no action within this band
 FINE_ZONE_ZOOM     = 150      # pixels — proportional steps within this band
-ZOOM_STEP          = 250      # fixed step size outside the fine zone
-GAIN_ZOOM          = 2.0      # proportional gain inside fine zone (pixels → steps)
+ZOOM_STEP          = 350      # fixed step size outside the fine zone
+GAIN_ZOOM          = 1.5      # proportional gain inside fine zone (pixels → steps)
 TARGET_WIDTH       = 100      # Target ball width in pixels
 FOCUS_UPDATE_STEPS = 50       # Update focus axis only when zoom moves this many steps
 

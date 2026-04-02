@@ -26,6 +26,8 @@ SPEED_GAIN    = MAX_PAN_SPEED / (FRAME_W / 2)  # ramps linearly from 0 to MAX ac
                                                 # = 7.8 units/min per pixel
 COMMAND_DT    = 0.02                            # seconds per jog segment: s = (speed/60) * dt
                                                 # at MAX_PAN_SPEED: 3.3 units (1.65°) per step
+SPEED_FACTOR = 3.0                              # power of speed curve - lower for linear, higher for more exponential
+
 
 # Control limits (1 unit = 0.5°)
 PAN_MAX_STEPS =  180    # +90°  right
@@ -38,7 +40,7 @@ class PanController:
         self.last_error_x = 0.0
         self.pending_oks = 0
         self.lost_frames = 0
-        self.max_coast_frames = 10 # Coast for ~0.2 seconds at 50fps
+        self.max_coast_frames = 30 # Coast for ~0.2 seconds at 50fps
         self.last_speed = 0
         self.last_direction = 0
 
@@ -86,13 +88,13 @@ class PanController:
         # 2. Base Speed (The Exponential Curve you already have)
         max_possible_error = FRAME_W / 2
         normalized_error = min(1.0, abs(error_x) / max_possible_error)
-        base_factor = pow(normalized_error, 2.0)
+        base_factor = pow(normalized_error, SPEED_FACTOR)
 
         # 3. Sudden Move Boost (The "Turbo")
         # If the ball moved more than 30 pixels since the last frame,
         # we add a multiplier to the speed.
         boost_threshold = 20
-        boost_gain = 1.5 # 50% extra speed during sudden moves
+        boost_gain = 1.7 # 70% extra speed during sudden moves
 
         speed_multiplier = 1.0
         if ball_velocity > boost_threshold:
@@ -108,7 +110,7 @@ class PanController:
         self.last_speed = speed
 
         # 4. Look-ahead and Buffer Management (Keep your 3.0x logic)
-        step_duration = COMMAND_DT * 4.0 
+        step_duration = COMMAND_DT * 4.5 
         step = (speed / 60.0) * step_duration * (1 if error_x > 0 else -1)
 
         target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
