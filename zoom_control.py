@@ -19,6 +19,9 @@ MAX_ZOOM_STEP           = 200   # Max steps per frame — keeps focus motor from
 FOCUS_UPDATE_STEPS      = 10    # Send focus correction only when zoom drifts this many steps
 VELOCITY_ZOOM_THRESHOLD = 60    # Ball horizontal speed (px/frame) that starts triggering zoom-out
 VELOCITY_ZOOM_GAIN      = 5.0   # Zoom-out steps added per px/frame above threshold
+FRAME_W                 = 1280  # Camera frame width in pixels
+EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
+EDGE_ZOOM_GAIN          = 3.0   # Zoom-out steps per pixel inside the edge margin
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 34000
@@ -129,6 +132,14 @@ class ZoomController:
             velocity_bias = min(MAX_ZOOM_STEP, excess * VELOCITY_ZOOM_GAIN)
             zoom_step += velocity_bias
             DEBUG and print(f"[ZOOM] velocity={ball_velocity_x:.0f}px/f  bias=+{velocity_bias:.0f}")
+
+        # Edge-of-frame zoom-out: ball near horizontal edge → widen FOV to keep it in frame
+        edge_margin_px = FRAME_W * EDGE_MARGIN
+        edge_distance = min(ball['center_x'], FRAME_W - ball['center_x'])
+        if edge_distance < edge_margin_px:
+            edge_bias = min(MAX_ZOOM_STEP, (edge_margin_px - edge_distance) * EDGE_ZOOM_GAIN)
+            zoom_step += edge_bias
+            DEBUG and print(f"[ZOOM] edge_dist={edge_distance:.0f}px  bias=+{edge_bias:.0f}")
 
         if zoom_step != 0.0:
             self.send_zoom(zoom_step)

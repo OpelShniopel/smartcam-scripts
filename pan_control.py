@@ -101,11 +101,11 @@ class PanController:
             # Scale boost based on how 'sudden' the move is
             speed_multiplier += (ball_velocity / 100.0) * boost_gain
 
-        # Calculate final speed with boost, scaled by zoom level
+        # Scale only the minimum speed by zoom level to prevent oscillation near centre.
+        # Maximum speed stays full — so tracking is fast when the ball is far away.
         effective_min = max(50, MIN_PAN_SPEED * speed_scale)
-        effective_max = max(effective_min, MAX_PAN_SPEED * speed_scale)
-        speed = effective_min + (effective_max - effective_min) * base_factor
-        speed = min(effective_max, speed * speed_multiplier)
+        speed = effective_min + (MAX_PAN_SPEED - effective_min) * base_factor
+        speed = min(MAX_PAN_SPEED, speed * speed_multiplier)
 
         if override_speed is not None:
             speed = override_speed
