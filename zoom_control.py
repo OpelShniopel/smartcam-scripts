@@ -49,13 +49,13 @@ class ZoomController:
         self.calibrate()
         if self.ser_z:
             print("Moving to base position...")
-            # Using G0 for both axes simultaneously
-            lens_helpers.send_command(self.ser_z, f"G0 A{ZOOM_BASE_POS} B{FOCUS_BASE_POS}")
+            focus_base = self.get_focus_for_zoom(ZOOM_BASE_POS)
+            lens_helpers.send_command(self.ser_z, f"G0 A{ZOOM_BASE_POS}")
             lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHA_MOVE)
+            lens_helpers.send_command(self.ser_z, f"G0 B{focus_base}")
             lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHB_MOVE)
-            
             self.current_zoom_pos = ZOOM_BASE_POS
-            print(f"Base position reached: zoom={ZOOM_BASE_POS}, focus={FOCUS_BASE_POS}")
+            print(f"Base position reached: zoom={ZOOM_BASE_POS}, focus={focus_base}")
 
     def calibrate(self):
         if not self.ser_z:
