@@ -119,7 +119,7 @@ class PanController:
         actual_step = target - self.current_pan_pos
         
         # 5. Ignore "Micro-twitches" that the motor can't physically do smoothly
-        if abs(actual_step) < 1: 
+        if abs(actual_step) < 0.1:
             return
 
         cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"
