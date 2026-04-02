@@ -133,13 +133,15 @@ class ZoomController:
             zoom_step += velocity_bias
             DEBUG and print(f"[ZOOM] velocity={ball_velocity_x:.0f}px/f  bias=+{velocity_bias:.0f}")
 
-        # Edge-of-frame zoom-out: ball near horizontal edge → widen FOV to keep it in frame
+        # Edge-of-frame zoom-out: ball near horizontal edge → widen FOV to keep it in frame.
+        # Overrides any size-based zoom-in — keeping ball in frame takes priority.
         edge_margin_px = FRAME_W * EDGE_MARGIN
         edge_distance = min(ball['center_x'], FRAME_W - ball['center_x'])
         if edge_distance < edge_margin_px:
-            edge_bias = min(MAX_ZOOM_STEP, (edge_margin_px - edge_distance) * EDGE_ZOOM_GAIN)
-            zoom_step += edge_bias
+            edge_bias = (edge_margin_px - edge_distance) * EDGE_ZOOM_GAIN
+            # Suppress zoom-in and apply the edge bias on top
+            zoom_step = max(0.0, zoom_step) + edge_bias
             DEBUG and print(f"[ZOOM] edge_dist={edge_distance:.0f}px  bias=+{edge_bias:.0f}")
 
-        if zoom_step != 0.0:
+        if abs(zoom_step) >= 5:
             self.send_zoom(zoom_step)
