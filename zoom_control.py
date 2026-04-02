@@ -1,6 +1,7 @@
 import serial
 import time
 import lens_helpers
+import math
 
 DEBUG = False
 
@@ -94,17 +95,28 @@ class ZoomController:
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
-        if not ball:
+        if not ball or ball['width'] <= 0:
             return
-        zoom_error = ball['width'] - TARGET_WIDTH
-        DEBUG and print(f"[ZOOM] width={ball['width']:.0f}  error={zoom_error:+.0f}")
-        abs_error = abs(zoom_error)
-        if abs_error <= DEADZONE_ZOOM:
-            DEBUG and print(f"[ZOOM] In deadzone")
-        elif abs_error <= FINE_ZONE_ZOOM:
-            # Proportional approach near the target
-            self.send_zoom(zoom_error * GAIN_ZOOM)
-        else:
-            # Fixed step in the correct direction — symmetric speed regardless of error magnitude
-            direction = 1 if zoom_error > 0 else -1
-            self.send_zoom(direction * ZOOM_STEP)
+
+        # 1. Calculate the Ratio (How much bigger/smaller is it than target?)
+        # Example: 150px / 100px = 1.5
+        ratio = ball['width'] / TARGET_WIDTH
+
+        # 2. Use Log to get a symmetrical error signal
+        # log(1.0) = 0 (On target)
+        # log(2.0) = 0.69 (Too big)
+        # log(0.5) = -0.69 (Too small)
+        norm_error = math.log(ratio)
+
+        # 3. Apply Deadzone to the normalized error
+        # 0.1 means "ignore if within 10% of target size"
+        NORM_DEADZONE = 0.1 
+        if abs(norm_error) < NORM_DEADZONE:
+            return
+
+        # 4. Global Gain
+        # Higher value = faster zoom. Try 5000 to 10000.
+        ZOOM_K = 1000
+        
+        zoom_step_command = norm_error * ZOOM_K
+        self.send_zoom(zoom_step_command)
