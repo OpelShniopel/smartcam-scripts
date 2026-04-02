@@ -8,13 +8,14 @@ DEBUG = False
 # --- CONFIGURATION ---
 CSV_FILE       = "zoom_focus_table_updated.csv"
 SERIAL_PORT_Z  = "/dev/zoom_control"
-ZOOM_SPEED     = 1000
-FOCUS_SPEED    = 1000
+ZOOM_SPEED     = 600
+FOCUS_SPEED    = 600
 
 # --- TUNING ---
 TARGET_WIDTH       = 100    # Target ball width in pixels
 ZOOM_K             = 1000   # Step multiplier: larger = faster zoom response
 NORM_DEADZONE      = 0.1    # Log-ratio deadzone (~±10% of target width)
+MAX_ZOOM_STEP      = 350    # Max steps per frame — keeps focus motor from falling behind
 FOCUS_UPDATE_STEPS = 10     # Send focus correction only when zoom drifts this many steps
 
 # --- PRESET POSITION ---
@@ -107,4 +108,5 @@ class ZoomController:
             return
 
         zoom_step_command = norm_error * ZOOM_K
+        zoom_step_command = max(-MAX_ZOOM_STEP, min(MAX_ZOOM_STEP, zoom_step_command))
         self.send_zoom(zoom_step_command)
