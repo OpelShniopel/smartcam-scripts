@@ -76,7 +76,7 @@ class PanController:
         self.jogging = False
         DEBUG and print(f"[PAN] Stopped at X={self.current_pan_pos:.1f}")
 
-    def send_command(self, error_x, override_speed=None):
+    def send_command(self, error_x, override_speed=None, speed_scale=1.0):
         if not self.ser_p:
             return
         
@@ -101,9 +101,10 @@ class PanController:
             # Scale boost based on how 'sudden' the move is
             speed_multiplier += (ball_velocity / 100.0) * boost_gain
 
-        # Calculate final speed with boost
-        speed = MIN_PAN_SPEED + (MAX_PAN_SPEED - MIN_PAN_SPEED) * base_factor
-        speed = min(MAX_PAN_SPEED, speed * speed_multiplier)
+        # Calculate final speed with boost, scaled by zoom level
+        effective_max = max(MIN_PAN_SPEED, MAX_PAN_SPEED * speed_scale)
+        speed = MIN_PAN_SPEED + (effective_max - MIN_PAN_SPEED) * base_factor
+        speed = min(effective_max, speed * speed_multiplier)
 
         if override_speed is not None:
             speed = override_speed
@@ -131,7 +132,7 @@ class PanController:
         self.jogging = True
         self.pending_oks += 1
 
-    def process_detection(self, detections):
+    def process_detection(self, detections, speed_scale=1.0):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         
         # --- CASE 1: NO BALL DETECTED ---
@@ -153,7 +154,7 @@ class PanController:
                 # Calculate a 'ghost' error based on last direction to use send_command
                 # We simulate an error just outside the deadzone to keep the loop alive
                 ghost_error = (DEADZONE_PAN + 10) * self.last_direction
-                self.send_command(ghost_error, override_speed=coast_speed)
+                self.send_command(ghost_error, override_speed=coast_speed, speed_scale=speed_scale)
             return
 
         # --- CASE 2: BALL FOUND ---
@@ -172,7 +173,7 @@ class PanController:
             self._stop_jog()
         else:
             # Normal tracking
-            self.send_command(error_x)
+            self.send_command(error_x, speed_scale=speed_scale)
             # Store direction for coasting logic (+1 for Right, -1 for Left)
             self.last_direction = 1 if error_x > 0 else -1
 

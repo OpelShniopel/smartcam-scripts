@@ -23,8 +23,9 @@ ZOOM_BASE_POS  = 34000
 FOCUS_BASE_POS = 34520
 
 # --- LIMITS ---
-ZOOM_MAX_STEPS  = 40000
-ZOOM_MIN_STEPS  = 30000
+ZOOM_MAX_STEPS    = 41800
+ZOOM_MIN_STEPS    = 30000
+MAX_OPTICAL_ZOOM  = 10     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
 FOCUS_MAX_STEPS = 37000
 FOCUS_MIN_STEPS = 32000
 
@@ -69,6 +70,12 @@ class ZoomController:
 
     def get_focus_for_zoom(self, zoom_pos):
         return int(self.focus_interp(zoom_pos))
+
+    def get_pan_speed_factor(self):
+        """Returns 1/optical_zoom_ratio: 1.0 at 1x (40000 steps), 0.1 at 10x (30000 steps)."""
+        t = (ZOOM_MAX_STEPS - self.current_zoom_pos) / (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
+        zoom_ratio = 1.0 + (MAX_OPTICAL_ZOOM - 1.0) * t
+        return 1.0 / zoom_ratio
 
     def send_zoom(self, zoom_steps):
         if not self.ser_z:

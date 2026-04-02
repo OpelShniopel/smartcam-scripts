@@ -1,6 +1,6 @@
 import csv
 import time
-from scipy.interpolate import interp1d
+from scipy.interpolate import CubicSpline
 
 # Status field indices for the Kurokesu SCF4 board (!1 response)
 CHA_PI   = 3
@@ -144,6 +144,4 @@ def load_focus_interpolator(csv_file):
             focus_pts.append(int(row["focus_pos"]))
 
     print(f"Loaded {len(zoom_pts)} zoom/focus points from {csv_file}")
-    return interp1d(zoom_pts, focus_pts, kind='cubic',
-                    bounds_error=False,
-                    fill_value=(focus_pts[0], focus_pts[-1]))
+    return CubicSpline(zoom_pts, focus_pts, extrapolate=True)

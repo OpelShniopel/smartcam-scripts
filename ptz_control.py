@@ -25,8 +25,9 @@ class PTZController:
             print("WARNING: Both pan and zoom are disabled.")
 
     def process_detection(self, detections):
+        speed_scale = self.zoom.get_pan_speed_factor() if self.zoom else 1.0
         if self.pan:
-            self.pan.process_detection(detections)
+            self.pan.process_detection(detections, speed_scale=speed_scale)
         if self.zoom:
             self.zoom.process_detection(detections)
 
