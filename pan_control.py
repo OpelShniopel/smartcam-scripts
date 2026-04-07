@@ -1,6 +1,5 @@
 import serial
 import time
-import lens_helpers
 import pan_homing
 
 DEBUG = False
@@ -27,6 +26,7 @@ SPEED_GAIN    = MAX_PAN_SPEED / (FRAME_W / 2)  # ramps linearly from 0 to MAX ac
 COMMAND_DT    = 0.04                            # seconds per jog segment (= 1 frame at 25fps)
                                                 # at MAX_PAN_SPEED: 6.7 units (3.3°) per step
 SPEED_FACTOR = 3.0                              # power of speed curve - lower for linear, higher for more exponential
+MAX_ERROR_JUMP = 200                            # pixels — reject rogue detections that jump more than this per frame
 
 
 # Control limits (1 unit = 0.5°)
@@ -117,18 +117,27 @@ class PanController:
 
         target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
         actual_step = target - self.current_pan_pos
-        
+
+        # If we hit a limit, flush the GRBL jog buffer immediately.
+        # Without this, the 4-5 commands already queued in GRBL will keep
+        # executing past the limit even after we stop sending new ones.
+        at_limit = abs((self.current_pan_pos + step) - target) > 0.1
+        if at_limit:
+            self.ser_p.write(b"\x85")
+            time.sleep(0.05)
+            self.ser_p.reset_input_buffer()
+            self.current_pan_pos = self._get_position()
+            self.jogging = False
+            DEBUG and print(f"[PAN] Limit reached, buffer flushed at X={self.current_pan_pos:.1f}")
+            return
+
         # 5. Ignore "Micro-twitches" that the motor can't physically do smoothly
         if abs(actual_step) < 0.1:
             return
 
         cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"
         self.ser_p.write(cmd.encode())
-        
-        # Important: Don't update current_pan_pos by the FULL 'step' 
-        # only update it by what we expect to cover in ONE COMMAND_DT
-        # this keeps the 'target' from drifting too far ahead of reality
-        self.current_pan_pos += (speed / 60.0) * COMMAND_DT * (1 if error_x > 0 else -1)
+        self.current_pan_pos += actual_step
         
         self.jogging = True
         self.pending_oks += 1
@@ -161,6 +170,11 @@ class PanController:
         # --- CASE 2: BALL FOUND ---
         self.lost_frames = 0 # Reset the counter
         error_x = ball['center_x'] - CENTER_X
+
+        # Reject rogue detection frames (single bad inference result)
+        if self.last_error_x != 0.0 and abs(error_x - self.last_error_x) > MAX_ERROR_JUMP:
+            DEBUG and print(f"[PAN] Rogue detection rejected: jump={abs(error_x - self.last_error_x):.0f}px")
+            return
         
         # Handle Direction Reversal
         # Use a small buffer so a 1-pixel flicker doesn't trigger a hard stop

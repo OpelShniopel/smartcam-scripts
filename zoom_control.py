@@ -17,20 +17,20 @@ ZOOM_K                  = 2000  # Step multiplier: larger = faster zoom response
 NORM_DEADZONE           = 0.1   # Log-ratio deadzone (~±10% of target width)
 MAX_ZOOM_STEP           = 200   # Max steps per frame — keeps focus motor from falling behind
 FOCUS_UPDATE_STEPS      = 10    # Send focus correction only when zoom drifts this many steps
-VELOCITY_ZOOM_THRESHOLD = 60    # Ball horizontal speed (px/frame) that starts triggering zoom-out
+VELOCITY_ZOOM_THRESHOLD = 50    # Ball horizontal speed (px/frame) that starts triggering zoom-out
 VELOCITY_ZOOM_GAIN      = 5.0   # Zoom-out steps added per px/frame above threshold
 FRAME_W                 = 1280  # Camera frame width in pixels
 EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
 EDGE_ZOOM_GAIN          = 3.0   # Zoom-out steps per pixel inside the edge margin
 
 # --- PRESET POSITION ---
-ZOOM_BASE_POS  = 34000
-FOCUS_BASE_POS = 34520
+ZOOM_BASE_POS  = 41800
+FOCUS_BASE_POS = 32035
 
 # --- LIMITS ---
 ZOOM_MAX_STEPS    = 41800
 ZOOM_MIN_STEPS    = 30000
-MAX_OPTICAL_ZOOM  = 10     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
+MAX_OPTICAL_ZOOM  = 8     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
 FOCUS_MAX_STEPS = 37000
 FOCUS_MIN_STEPS = 32000
 
