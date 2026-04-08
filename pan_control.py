@@ -25,7 +25,7 @@ SPEED_GAIN    = MAX_PAN_SPEED / (FRAME_W / 2)  # ramps linearly from 0 to MAX ac
                                                 # = 7.8 units/min per pixel
 COMMAND_DT    = 0.04                            # seconds per jog segment (= 1 frame at 25fps)
                                                 # at MAX_PAN_SPEED: 6.7 units (3.3°) per step
-SPEED_FACTOR = 3.0                              # power of speed curve - lower for linear, higher for more exponential
+SPEED_FACTOR = 3.5                              # power of speed curve - lower for linear, higher for more exponential
 MAX_ERROR_JUMP = 200                            # pixels — reject rogue detections that jump more than this per frame
 
 
@@ -112,7 +112,7 @@ class PanController:
         self.last_speed = speed
 
         # 4. Look-ahead and Buffer Management (Keep your 3.0x logic)
-        step_duration = COMMAND_DT * 4.5 
+        step_duration = COMMAND_DT * 4.0 
         step = (speed / 60.0) * step_duration * (1 if error_x > 0 else -1)
 
         target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
@@ -132,7 +132,7 @@ class PanController:
             return
 
         # 5. Ignore "Micro-twitches" that the motor can't physically do smoothly
-        if abs(actual_step) < 0.1:
+        if abs(actual_step) < 0.2:
             return
 
         cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"
