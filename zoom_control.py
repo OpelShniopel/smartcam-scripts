@@ -6,7 +6,7 @@ import math
 DEBUG = True
 
 # --- CONFIGURATION ---
-CSV_FILE       = "zoom_focus_table_updated.csv"
+CSV_FILE       = "zoom_focus_table.csv"
 SERIAL_PORT_Z  = "/dev/zoom_control"
 ZOOM_SPEED     = 2000
 FOCUS_SPEED    = 2000
@@ -15,13 +15,13 @@ FOCUS_SPEED    = 2000
 TARGET_WIDTH            = 100   # Target ball width in pixels
 ZOOM_K                  = 2000  # Step multiplier: larger = faster zoom response
 NORM_DEADZONE           = 0.1   # Log-ratio deadzone (~±10% of target width)
-MAX_ZOOM_STEP           = 100   # Max steps per frame — keeps focus motor from falling behind
-VELOCITY_ZOOM_THRESHOLD = 40    # Ball horizontal speed (px/frame) that starts triggering zoom-out
+MAX_ZOOM_STEP           = 200   # Max steps per frame — keeps focus motor from falling behind
+VELOCITY_ZOOM_THRESHOLD = 30    # Ball horizontal speed (px/frame) that starts triggering zoom-out
 VELOCITY_ZOOM_GAIN      = 5.0   # Zoom-out steps added per px/frame above threshold
 FRAME_W                 = 1280  # Camera frame width in pixels
 FRAME_H                 = 720
 EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
-EDGE_ZOOM_GAIN          = 3.0   # Zoom-out steps per pixel inside the edge margin
+EDGE_ZOOM_GAIN          = 3.5   # Zoom-out steps per pixel inside the edge margin
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 40000
@@ -32,7 +32,7 @@ ZOOM_MIN_STEPS    = 30000
 MAX_OPTICAL_ZOOM  = 8     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
 FOCUS_MAX_STEPS = 37000
 FOCUS_MIN_STEPS = 32000
-FOCUS_BIAS      = 0 #-1040      # Steps added to every CSV lookup — tune if table is systematically off
+FOCUS_BIAS      = -1040      # Steps added to every CSV lookup — tune if table is systematically off
 
 
 class ZoomController:
