@@ -168,13 +168,21 @@ class PanController:
             return
 
         # --- CASE 2: BALL FOUND ---
-        self.lost_frames = 0 # Reset the counter
         error_x = ball['center_x'] - CENTER_X
 
-        # Reject rogue detection frames (single bad inference result)
-        if self.last_error_x != 0.0 and abs(error_x - self.last_error_x) > MAX_ERROR_JUMP:
-            DEBUG and print(f"[PAN] Rogue detection rejected: jump={abs(error_x - self.last_error_x):.0f}px")
-            return
+        # Rogue ball jump rejection
+        is_consecutive = (self.lost_frames == 0)
+        
+        if is_consecutive and self.last_error_x != 0.0:
+            jump_amount = abs(error_x - self.last_error_x)
+            if jump_amount > MAX_ERROR_JUMP:
+                DEBUG and print(f"[PAN] Rogue jump rejected: {jump_amount:.0f}px")
+                # We don't return! We just don't move. 
+                # We still reset lost_frames so the NEXT frame is trusted.
+                self.lost_frames = 0 
+                return
+            
+        self.lost_frames = 0 # Reset the counter
         
         # Handle Direction Reversal
         # Use a small buffer so a 1-pixel flicker doesn't trigger a hard stop
