@@ -9,13 +9,13 @@ DEBUG = True
 CSV_FILE       = "zoom_focus_table.csv"
 SERIAL_PORT_Z  = "/dev/zoom_control"
 ZOOM_SPEED     = 1000
-FOCUS_SPEED    = 3000
+FOCUS_SPEED    = 3500
 
 # --- TUNING ---
 TARGET_WIDTH            = 100   # Target ball width in pixels
 ZOOM_K                  = 2000  # Step multiplier: larger = faster zoom response
 NORM_DEADZONE           = 0.1   # Log-ratio deadzone (~±10% of target width)
-MAX_ZOOM_STEP           = 200   # Max steps per frame — keeps focus motor from falling behind
+MAX_ZOOM_STEP           = 150   # Max steps per frame — keeps focus motor from falling behind
 VELOCITY_ZOOM_THRESHOLD = 30    # Ball horizontal speed (px/frame) that starts triggering zoom-out
 VELOCITY_ZOOM_GAIN      = 5.0   # Zoom-out steps added per px/frame above threshold
 FRAME_W                 = 1280  # Camera frame width in pixels
