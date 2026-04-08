@@ -3,20 +3,19 @@ import time
 import lens_helpers
 import math
 
-DEBUG = False
+DEBUG = True
 
 # --- CONFIGURATION ---
-CSV_FILE       = "zoom_focus_table.csv"
+CSV_FILE       = "zoom_focus_table_updated.csv"
 SERIAL_PORT_Z  = "/dev/zoom_control"
-ZOOM_SPEED     = 1000
-FOCUS_SPEED    = 3000
+ZOOM_SPEED     = 2000
+FOCUS_SPEED    = 2000
 
 # --- TUNING ---
 TARGET_WIDTH            = 100   # Target ball width in pixels
 ZOOM_K                  = 2000  # Step multiplier: larger = faster zoom response
 NORM_DEADZONE           = 0.1   # Log-ratio deadzone (~±10% of target width)
-MAX_ZOOM_STEP           = 200   # Max steps per frame — keeps focus motor from falling behind
-FOCUS_UPDATE_STEPS      = 10    # Send focus correction only when zoom drifts this many steps
+MAX_ZOOM_STEP           = 100   # Max steps per frame — keeps focus motor from falling behind
 VELOCITY_ZOOM_THRESHOLD = 40    # Ball horizontal speed (px/frame) that starts triggering zoom-out
 VELOCITY_ZOOM_GAIN      = 5.0   # Zoom-out steps added per px/frame above threshold
 FRAME_W                 = 1280  # Camera frame width in pixels
@@ -33,13 +32,12 @@ ZOOM_MIN_STEPS    = 30000
 MAX_OPTICAL_ZOOM  = 8     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
 FOCUS_MAX_STEPS = 37000
 FOCUS_MIN_STEPS = 32000
-FOCUS_BIAS      = -1040      # Steps added to every CSV lookup — tune if table is systematically off
+FOCUS_BIAS      = 0 #-1040      # Steps added to every CSV lookup — tune if table is systematically off
 
 
 class ZoomController:
     def __init__(self):
-        self.current_zoom_pos = 32000  # set by G92 A32000 at end of calibration
-        self.last_focus_update_pos = 32000
+        self.current_zoom_pos = 32000
         self.last_ball_x = None
 
         try:
@@ -66,7 +64,6 @@ class ZoomController:
             lens_helpers.send_command(self.ser_z, f"G0 B{focus_base}")
             lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHB_MOVE)
             self.current_zoom_pos = ZOOM_BASE_POS
-            self.last_focus_update_pos = ZOOM_BASE_POS
             print(f"Base position reached: zoom={ZOOM_BASE_POS}, focus={focus_base}")
 
     def calibrate(self):
@@ -101,14 +98,8 @@ class ZoomController:
         new_focus_pos = self.get_focus_for_zoom(new_zoom_pos)
         new_focus_pos = max(FOCUS_MIN_STEPS, min(FOCUS_MAX_STEPS, new_focus_pos))
 
-        focus_due = abs(new_zoom_pos - self.last_focus_update_pos) >= FOCUS_UPDATE_STEPS
-        if focus_due:
-            lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_pos)} B{int(new_focus_pos)}")
-            self.last_focus_update_pos = new_zoom_pos
-            DEBUG and print(f"[ZOOM] A={int(new_zoom_pos)} B={int(new_focus_pos)} (focus updated)")
-        else:
-            lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_pos)}")
-            DEBUG and print(f"[ZOOM] A={int(new_zoom_pos)} (focus hold)")
+        lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_pos)} B{int(new_focus_pos)}")
+        DEBUG and print(f"[ZOOM] A={int(new_zoom_pos)} B={int(new_focus_pos)}")
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
