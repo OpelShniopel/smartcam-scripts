@@ -44,7 +44,7 @@ class PanController:
         self.last_direction = 0
         self.rogue_patience = 0
         self.frame_count = 0
-        self.sync_every_n_frames = 20 
+        self.sync_every_n_frames = 15 
 
         try:
             # timeout=0.1 allows enough time for a full status string to arrive
@@ -107,7 +107,7 @@ class PanController:
         self.last_speed = speed
 
         # --- Movement Logic ---
-        step_duration = COMMAND_DT * 4.0 
+        step_duration = COMMAND_DT * 3.0 
         step = (speed / 60.0) * step_duration * (1 if error_x > 0 else -1)
         
         # Calculate intended target
@@ -134,11 +134,20 @@ class PanController:
     def process_detection(self, detections, speed_scale=1.0):
         self.frame_count += 1
         
-        # Periodically anchor the software position to hardware reality
+       # Periodically anchor the software position to hardware reality
         if self.frame_count % self.sync_every_n_frames == 0:
             hw_pos = self._get_position()
-            if abs(hw_pos - self.current_pan_pos) > 0.2:
-                DEBUG and print(f"[SYNC] Correcting Drift: {self.current_pan_pos:.2f} -> {hw_pos:.2f}")
+            drift = abs(hw_pos - self.current_pan_pos)
+            
+            if drift > 5.0:  # If we are off by more than 2.5 degrees
+                DEBUG and print(f"[CRITICAL SYNC] Huge drift ({drift:.2f}). Resetting buffer.")
+                self.ser_p.write(b"\x85")      # Cancel current jogs immediately
+                time.sleep(0.02)
+                self.ser_p.reset_input_buffer() # Clear old 'ok' responses
+                self.current_pan_pos = hw_pos   # Snap to reality
+                return # Skip this frame to let the motor settle
+            
+            elif drift > 0.2:
                 self.current_pan_pos = hw_pos
 
         ball = next((d for d in detections if d['class'] == 'BALL'), None)

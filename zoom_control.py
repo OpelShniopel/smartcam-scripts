@@ -24,11 +24,10 @@ EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that tr
 EDGE_ZOOM_GAIN          = 3.0   # Zoom-out steps per pixel inside the edge margin
 
 # --- PRESET POSITION ---
-ZOOM_BASE_POS  = 41800
-FOCUS_BASE_POS = 32000     #32035
+ZOOM_BASE_POS  = 40000
 
 # --- LIMITS ---
-ZOOM_MAX_STEPS    = 41800
+ZOOM_MAX_STEPS    = 41000
 ZOOM_MIN_STEPS    = 30000
 MAX_OPTICAL_ZOOM  = 8     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
 FOCUS_MAX_STEPS = 37000
