@@ -43,6 +43,7 @@ class PanController:
         self.max_coast_frames = 30 # Coast for ~0.2 seconds at 50fps
         self.last_speed = 0
         self.last_direction = 0
+        self.rogue_patience = 0
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
@@ -171,17 +172,18 @@ class PanController:
         error_x = ball['center_x'] - CENTER_X
 
         # Rogue ball jump rejection
-        is_consecutive = (self.lost_frames == 0)
         
-        if is_consecutive and self.last_error_x != 0.0:
+        if self.lost_frames < 1 and self.rogue_patience < 5 and self.last_error_x != 0.0:
             jump_amount = abs(error_x - self.last_error_x)
             if jump_amount > MAX_ERROR_JUMP:
                 DEBUG and print(f"[PAN] Rogue jump rejected: {jump_amount:.0f}px")
                 # We don't return! We just don't move. 
                 # We still reset lost_frames so the NEXT frame is trusted.
                 self.lost_frames = 0 
+                self.rogue_patience += 1
                 return
             
+        self.rogue_patience = 0
         self.lost_frames = 0 # Reset the counter
         
         # Handle Direction Reversal
