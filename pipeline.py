@@ -769,10 +769,10 @@ def pgie_src_pad_buffer_probe(_pad, info, cam_label):
         except StopIteration:
             break
 
-        if frame_meta.frame_num % PROBE_EVERY_N_FRAMES == 0:
-            with _fps_lock:
-                _fps_counters[cam_label] += 1
+        with _fps_lock:
+            _fps_counters[cam_label] += 1
 
+        if frame_meta.frame_num % PROBE_EVERY_N_FRAMES == 0:
             detections = []
             l_obj = frame_meta.obj_meta_list
             while l_obj is not None:
