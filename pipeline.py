@@ -48,23 +48,23 @@ HTTP API (internal / debug only):
 Class IDs (model v9):  0=RIM  1=BALL
 """
 
-import sys
-import os
 import json
+import os
 import queue
-import time
-import socket
-import threading
 import signal
+import socket
 import socket as _socket
+import sys
+import threading
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import gi
+
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
 import pyds
-
 
 
 # ---------------------------------------------------------------------------
@@ -80,21 +80,22 @@ def _get_local_ip() -> str:
     except OSError:
         return "localhost"
 
-JETSON_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
-UNIX_SOCK    = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
-PYCAM_SOCK   = "/tmp/pycam.sock"
-HTTP_PORT    = 9101
 
-CLASS_ID_RIM  = 0
+JETSON_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
+UNIX_SOCK = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
+PYCAM_SOCK = "/tmp/pycam.sock"
+HTTP_PORT = 9101
+
+CLASS_ID_RIM = 0
 CLASS_ID_BALL = 1
-CLASS_NAMES   = {CLASS_ID_RIM: "RIM", CLASS_ID_BALL: "BALL"}
+CLASS_NAMES = {CLASS_ID_RIM: "RIM", CLASS_ID_BALL: "BALL"}
 
 PROBE_EVERY_N_FRAMES = 2
 
-SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STREAM_CONF = os.path.join(SCRIPT_DIR, "stream.conf")
 
-RESTART_EXIT_CODE      = 42
+RESTART_EXIT_CODE = 42
 STREAM_ERROR_EXIT_CODE = 43  # RTMP failed — clear stream.conf and restart without streaming
 
 # Mutable flag set by bus_call when an RTMP error triggers a stream-error exit.
@@ -102,25 +103,27 @@ STREAM_ERROR_EXIT_CODE = 43  # RTMP failed — clear stream.conf and restart wit
 _stream_error_exit: list[bool] = [False]
 
 # Clean branch encoder settings — tuned for low latency local WebRTC viewing
-CLEAN_BITRATE    = 8000
-CLEAN_KEYINT     = 15
-CLEAN_THREADS    = 2
-CLEAN_PRESET     = "ultrafast"
-CLEAN_TUNE       = "zerolatency"
+CLEAN_BITRATE = 8000
+CLEAN_KEYINT = 15
+CLEAN_THREADS = 2
+CLEAN_PRESET = "ultrafast"
+CLEAN_TUNE = "zerolatency"
 
 # AI branch encoder settings
-AI_BITRATE   = 2000
-AI_KEYINT    = 20
-AI_THREADS   = 1
-AI_PRESET    = "ultrafast"
-AI_TUNE      = "zerolatency"
+AI_BITRATE = 2000
+AI_KEYINT = 20
+AI_THREADS = 1
+AI_PRESET = "ultrafast"
+AI_TUNE = "zerolatency"
+# Higher bitrate used when CAM2 AI recording is enabled for training footage.
+AI_RECORD_BITRATE = 5000
 
 # RTMP stream encoder settings — YouTube 1080p
 RTMP_BITRATE = 6800
-RTMP_KEYINT  = 60
+RTMP_KEYINT = 60
 RTMP_THREADS = 2
-RTMP_PRESET  = "ultrafast"
-RTMP_TUNE    = "zerolatency"
+RTMP_PRESET = "ultrafast"
+RTMP_TUNE = "zerolatency"
 
 # Encoder references populated by build_pipeline() — used by set_config cmd
 _encoders: dict[str, Gst.Element] = {}
@@ -216,17 +219,17 @@ def _fps_report() -> bool:
 # Score state
 # ---------------------------------------------------------------------------
 score_state = {
-    "home_name":     "HOME",
-    "away_name":     "AWAY",
-    "home_points":   0,
-    "away_points":   0,
-    "home_fouls":    0,
-    "away_fouls":    0,
+    "home_name": "HOME",
+    "away_name": "AWAY",
+    "home_points": 0,
+    "away_points": 0,
+    "home_fouls": 0,
+    "away_fouls": 0,
     "home_timeouts": 3,
     "away_timeouts": 3,
-    "quarter":       1,
-    "clock":         "10:00",
-    "visible":       False,
+    "quarter": 1,
+    "clock": "10:00",
+    "visible": False,
 }
 score_lock = threading.Lock()
 
@@ -255,12 +258,12 @@ def _update_osd_texts(state: dict) -> None:
     if not els:
         return
 
-    home  = els.get("osd_home")
-    away  = els.get("osd_away")
+    home = els.get("osd_home")
+    away = els.get("osd_away")
     score = els.get("osd_score")
     clock = els.get("osd_clock")
     fouls = els.get("osd_fouls")
-    bg    = els.get("osd_bg")
+    bg = els.get("osd_bg")
     visible = state.get("visible", False)
 
     if home:
@@ -275,27 +278,27 @@ def _update_osd_texts(state: dict) -> None:
         score.set_property("silent", not visible)
         if visible:
             score.set_property("text",
-                f"{state['home_points']} - {state['away_points']}")
+                               f"{state['home_points']} - {state['away_points']}")
     if clock:
         clock.set_property("silent", not visible)
         if visible:
             clock.set_property("text",
-                f"Q{state['quarter']}  {state['clock']}")
+                               f"Q{state['quarter']}  {state['clock']}")
     if fouls:
         fouls.set_property("silent", not visible)
         if visible:
             fouls.set_property("text",
-                f"F:{state['home_fouls']} T:{state['home_timeouts']}"
-                f"          "
-                f"F:{state['away_fouls']} T:{state['away_timeouts']}")
+                               f"F:{state['home_fouls']} T:{state['home_timeouts']}"
+                               f"          "
+                               f"F:{state['away_fouls']} T:{state['away_timeouts']}")
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
 
 
 def _apply_score_patch(data: dict) -> None:
-    allowed_str  = {"home_name", "away_name", "clock"}
-    allowed_int  = {"home_points", "away_points", "home_fouls",
-                    "away_fouls", "home_timeouts", "away_timeouts", "quarter"}
+    allowed_str = {"home_name", "away_name", "clock"}
+    allowed_int = {"home_points", "away_points", "home_fouls",
+                   "away_fouls", "home_timeouts", "away_timeouts", "quarter"}
     allowed_bool = {"visible"}
     with score_lock:
         for k in allowed_str:
@@ -364,9 +367,9 @@ def start_pycam_server() -> None:
 
 def send_to_pycam(cam_label: str, frame_num: int, detections: list) -> None:
     _pycam_q.put({
-        "camera":     cam_label,
-        "frame":      frame_num,
-        "timestamp":  time.time(),
+        "camera": cam_label,
+        "frame": frame_num,
+        "timestamp": time.time(),
         "detections": detections,
     })
 
@@ -519,22 +522,22 @@ def _dispatch_cmd(msg: dict) -> None:
         _ack(action, False, err)
 
 
-MODEL_NAME       = "Basketball"
+MODEL_NAME = "Basketball"
 AVAILABLE_MODELS = ["Basketball"]
 
 
 def _push_state() -> None:
     url = read_stream_url()
     _out_q.put({
-        "type":             "state",
-        "streaming":        url is not None,
-        "model":            MODEL_NAME,
+        "type": "state",
+        "streaming": url is not None,
+        "model": MODEL_NAME,
         "available_models": AVAILABLE_MODELS,
         "webrtc": {
             "cam0_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
-            "cam0_ai":    f"http://{JETSON_HOST}:8889/camera0_ai",
+            "cam0_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
             "cam2_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
-            "cam2_ai":    f"http://{JETSON_HOST}:8889/camera2_ai",
+            "cam2_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
         },
     })
 
@@ -579,28 +582,28 @@ class ControlHandler(BaseHTTPRequestHandler):
             with score_lock:
                 score_visible = score_state["visible"]
             self._json(200, {
-                "alive":         True,
-                "pid":           os.getpid(),
-                "streaming":     url is not None,
-                "rtmp_url":      url or "",
+                "alive": True,
+                "pid": os.getpid(),
+                "streaming": url is not None,
+                "rtmp_url": url or "",
                 "score_overlay": score_visible,
-                "unix_sock":     UNIX_SOCK,
-                "pycam_sock":    PYCAM_SOCK,
-                "encoders":      list(_encoders.keys()),
+                "unix_sock": UNIX_SOCK,
+                "pycam_sock": PYCAM_SOCK,
+                "encoders": list(_encoders.keys()),
                 "cameras": {
                     "cam0": {
-                        "device":       "/dev/video0",
-                        "rtsp_clean":   f"rtsp://{JETSON_HOST}:8554/camera0_clean",
-                        "rtsp_ai":      f"rtsp://{JETSON_HOST}:8554/camera0_ai",
+                        "device": "/dev/video0",
+                        "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
+                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
-                        "webrtc_ai":    f"http://{JETSON_HOST}:8889/camera0_ai",
+                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
                     "cam2": {
-                        "device":       "/dev/video2",
-                        "rtsp_clean":   f"rtsp://{JETSON_HOST}:8554/camera2_clean",
-                        "rtsp_ai":      f"rtsp://{JETSON_HOST}:8554/camera2_ai",
+                        "device": "/dev/video2",
+                        "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera2_clean",
+                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
-                        "webrtc_ai":    f"http://{JETSON_HOST}:8889/camera2_ai",
+                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
                     },
                 },
             })
@@ -708,7 +711,7 @@ def _tee_branch(tee: Gst.Element, first_el: Gst.Element) -> None:
 
 def _make_nvconv(name: str) -> Gst.Element:
     el = _make("nvvideoconvert", name)
-    el.set_property("gpu-id",  0)
+    el.set_property("gpu-id", 0)
     el.set_property("copy-hw", 2)
     return el
 
@@ -736,7 +739,15 @@ def _request_restart() -> None:
     def _kill():
         time.sleep(0.5)
         os.kill(os.getpid(), signal.SIGUSR1)
+
     threading.Thread(target=_kill, daemon=True).start()
+
+
+def _new_recording_path(prefix: str) -> str:
+    recordings_dir = os.path.join(SCRIPT_DIR, "recordings")
+    os.makedirs(recordings_dir, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    return os.path.join(recordings_dir, f"{prefix}_{timestamp}.mkv")
 
 
 # ---------------------------------------------------------------------------
@@ -758,10 +769,10 @@ def pgie_src_pad_buffer_probe(_pad, info, cam_label):
         except StopIteration:
             break
 
-        with _fps_lock:
-            _fps_counters[cam_label] += 1
-
         if frame_meta.frame_num % PROBE_EVERY_N_FRAMES == 0:
+            with _fps_lock:
+                _fps_counters[cam_label] += 1
+
             detections = []
             l_obj = frame_meta.obj_meta_list
             while l_obj is not None:
@@ -774,15 +785,15 @@ def pgie_src_pad_buffer_probe(_pad, info, cam_label):
                 if cid in CLASS_NAMES:
                     r = obj_meta.rect_params
                     detections.append({
-                        "class":      CLASS_NAMES[cid],
-                        "class_id":   cid,
+                        "class": CLASS_NAMES[cid],
+                        "class_id": cid,
                         "tracker_id": obj_meta.object_id,
-                        "center_x":   round(r.left + r.width  / 2.0, 1),
-                        "center_y":   round(r.top  + r.height / 2.0, 1),
-                        "width":      round(r.width,  1),
-                        "height":     round(r.height, 1),
-                        "left":       round(r.left,   1),
-                        "top":        round(r.top,    1),
+                        "center_x": round(r.left + r.width / 2.0, 1),
+                        "center_y": round(r.top + r.height / 2.0, 1),
+                        "width": round(r.width, 1),
+                        "height": round(r.height, 1),
+                        "left": round(r.left, 1),
+                        "top": round(r.top, 1),
                         "confidence": round(obj_meta.confidence, 4),
                     })
 
@@ -840,27 +851,27 @@ def bus_call(_bus, message, loop):
 # Camera source
 # ---------------------------------------------------------------------------
 def _build_camera_source(pipeline, device: str, suffix: str):
-    src       = _make("v4l2src",       f"src{suffix}")
-    caps_src  = _capsfilter(f"caps{suffix}_src",
-                            "image/jpeg,width=1920,height=1080,framerate=30/1")
-    jparse    = _make("jpegparse",     f"jparse{suffix}")
-    dec       = _make("nvv4l2decoder", f"dec{suffix}")
-    conv_src  = _make_nvconv(f"conv{suffix}_src")
+    src = _make("v4l2src", f"src{suffix}")
+    caps_src = _capsfilter(f"caps{suffix}_src",
+                           "image/jpeg,width=1920,height=1080,framerate=30/1")
+    jparse = _make("jpegparse", f"jparse{suffix}")
+    dec = _make("nvv4l2decoder", f"dec{suffix}")
+    conv_src = _make_nvconv(f"conv{suffix}_src")
     caps_nvmm = _capsfilter(f"caps{suffix}_nvmm",
                             "video/x-raw(memory:NVMM),format=NV12")
-    tee       = _make("tee",           f"tee{suffix}")
+    tee = _make("tee", f"tee{suffix}")
 
     src.set_property("device", device)
-    dec.set_property("mjpeg",  1)
+    dec.set_property("mjpeg", 1)
 
     for el in (src, caps_src, jparse, dec, conv_src, caps_nvmm, tee):
         pipeline.add(el)
 
-    _link(src,       caps_src)
-    _link(caps_src,  jparse)
-    _link(jparse,    dec)
-    _link(dec,       conv_src)
-    _link(conv_src,  caps_nvmm)
+    _link(src, caps_src)
+    _link(caps_src, jparse)
+    _link(jparse, dec)
+    _link(dec, conv_src)
+    _link(conv_src, caps_nvmm)
     _link(caps_nvmm, tee)
 
     return tee
@@ -870,35 +881,35 @@ def _build_camera_source(pipeline, device: str, suffix: str):
 # Clean branch
 # ---------------------------------------------------------------------------
 def _build_clean_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Element:
-    q     = _make("queue",          f"q{suffix}_clean")
-    conv  = _make_nvconv(f"conv{suffix}_clean")
-    caps  = _capsfilter(f"caps{suffix}_i420", "video/x-raw,format=I420")
-    enc   = _make("x264enc",         f"enc{suffix}_clean")
-    parse = _make("h264parse",       f"parse{suffix}_clean")
-    sink  = _make("rtspclientsink",  f"sink{suffix}_clean")
+    q = _make("queue", f"q{suffix}_clean")
+    conv = _make_nvconv(f"conv{suffix}_clean")
+    caps = _capsfilter(f"caps{suffix}_i420", "video/x-raw,format=I420")
+    enc = _make("x264enc", f"enc{suffix}_clean")
+    parse = _make("h264parse", f"parse{suffix}_clean")
+    sink = _make("rtspclientsink", f"sink{suffix}_clean")
 
     q.set_property("max-size-buffers", 2)
-    q.set_property("max-size-bytes",   0)
-    q.set_property("max-size-time",    0)
-    q.set_property("leaky",            2)
+    q.set_property("max-size-bytes", 0)
+    q.set_property("max-size-time", 0)
+    q.set_property("leaky", 2)
 
-    enc.set_property("tune",         CLEAN_TUNE)
+    enc.set_property("tune", CLEAN_TUNE)
     enc.set_property("speed-preset", CLEAN_PRESET)
-    enc.set_property("bitrate",      CLEAN_BITRATE)
-    enc.set_property("key-int-max",  CLEAN_KEYINT)
-    enc.set_property("threads",      CLEAN_THREADS)
+    enc.set_property("bitrate", CLEAN_BITRATE)
+    enc.set_property("key-int-max", CLEAN_KEYINT)
+    enc.set_property("threads", CLEAN_THREADS)
 
-    sink.set_property("location",  f"rtsp://127.0.0.1:8554/{rtsp_path}")
+    sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
     sink.set_property("protocols", 4)
 
     for el in (q, conv, caps, enc, parse, sink):
         pipeline.add(el)
 
     _tee_branch(tee, q)
-    _link(q,     conv)
-    _link(conv,  caps)
-    _link(caps,  enc)
-    _link(enc,   parse)
+    _link(q, conv)
+    _link(conv, caps)
+    _link(caps, enc)
+    _link(enc, parse)
     _link(parse, sink)
 
     return enc
@@ -908,69 +919,104 @@ def _build_clean_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Eleme
 # AI branch
 # ---------------------------------------------------------------------------
 def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
-                     infer_config: str, cam_label: str):
-    q_ai      = _make("queue",           f"q{suffix}_ai")
-    conv_ai   = _make_nvconv(f"conv{suffix}_ai")
-    caps_ai   = _capsfilter(f"caps{suffix}_ai",
-                            "video/x-raw(memory:NVMM),format=NV12,width=1280,height=720")
-    mux       = _make("nvstreammux",     f"mux{suffix}")
-    pgie      = _make("nvinfer",         f"pgie{suffix}")
-    tracker   = _make("nvtracker",       f"tracker{suffix}")
-    conv_pre  = _make_nvconv(f"conv{suffix}_pre")
-    nvosd     = _make("nvdsosd",         f"nvosd{suffix}")
+                     infer_config: str, cam_label: str,
+                     record_path: str | None = None,
+                     ai_bitrate: int = AI_BITRATE):
+    q_ai = _make("queue", f"q{suffix}_ai")
+    conv_ai = _make_nvconv(f"conv{suffix}_ai")
+    caps_ai = _capsfilter(f"caps{suffix}_ai",
+                          "video/x-raw(memory:NVMM),format=NV12,width=1280,height=720")
+    mux = _make("nvstreammux", f"mux{suffix}")
+    pgie = _make("nvinfer", f"pgie{suffix}")
+    tracker = _make("nvtracker", f"tracker{suffix}")
+    conv_pre = _make_nvconv(f"conv{suffix}_pre")
+    nvosd = _make("nvdsosd", f"nvosd{suffix}")
     conv_post = _make_nvconv(f"conv{suffix}_post")
     caps_post = _capsfilter(f"caps{suffix}_post", "video/x-raw,format=I420")
-    q_post    = _make("queue",           f"q{suffix}_post")
-    enc       = _make("x264enc",         f"enc{suffix}_ai")
-    parse     = _make("h264parse",       f"parse{suffix}_ai")
-    sink      = _make("rtspclientsink",  f"sink{suffix}_ai")
+    q_post = _make("queue", f"q{suffix}_post")
+    enc = _make("x264enc", f"enc{suffix}_ai")
+    parse = _make("h264parse", f"parse{suffix}_ai")
+    sink = _make("rtspclientsink", f"sink{suffix}_ai")
+    tee_out = None
+    q_rtsp = None
+    q_rec = None
+    parse_rec = None
+    mux_rec = None
+    sink_rec = None
+    if record_path:
+        tee_out = _make("tee", f"tee{suffix}_ai_out")
+        q_rtsp = _make("queue", f"q{suffix}_ai_rtsp")
+        q_rec = _make("queue", f"q{suffix}_ai_rec")
+        parse_rec = _make("h264parse", f"parse{suffix}_ai_rec")
+        mux_rec = _make("matroskamux", f"mux{suffix}_ai_rec")
+        sink_rec = _make("filesink", f"sink{suffix}_ai_rec")
 
-    mux.set_property("width",                1280)
-    mux.set_property("height",               720)
-    mux.set_property("batch-size",           1)
+    mux.set_property("width", 1280)
+    mux.set_property("height", 720)
+    mux.set_property("batch-size", 1)
     mux.set_property("batched-push-timeout", 33333)
-    mux.set_property("live-source",          1)
-    mux.set_property("nvbuf-memory-type",    0)
+    mux.set_property("live-source", 1)
+    mux.set_property("nvbuf-memory-type", 0)
 
     pgie.set_property("config-file-path", infer_config)
 
     tracker.set_property("ll-lib-file",
-        "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so")
+                         "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so")
     tracker.set_property("ll-config-file",
-        "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_IOU.yml")
-    tracker.set_property("tracker-width",       1280)
-    tracker.set_property("tracker-height",      736)
-    tracker.set_property("gpu-id",              0)
+                         "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_IOU.yml")
+    tracker.set_property("tracker-width", 1280)
+    tracker.set_property("tracker-height", 736)
+    tracker.set_property("gpu-id", 0)
     tracker.set_property("display-tracking-id", 1)
 
     nvosd.set_property("process-mode", 1)
 
     q_ai.set_property("max-size-buffers", 2)
-    q_ai.set_property("max-size-bytes",   0)
-    q_ai.set_property("max-size-time",    0)
-    q_ai.set_property("leaky",            2)
+    q_ai.set_property("max-size-bytes", 0)
+    q_ai.set_property("max-size-time", 0)
+    q_ai.set_property("leaky", 2)
 
     q_post.set_property("max-size-buffers", 2)
-    q_post.set_property("max-size-bytes",   0)
-    q_post.set_property("max-size-time",    0)
-    q_post.set_property("leaky",            2)
+    q_post.set_property("max-size-bytes", 0)
+    q_post.set_property("max-size-time", 0)
+    q_post.set_property("leaky", 2)
 
-    enc.set_property("tune",         AI_TUNE)
+    enc.set_property("tune", AI_TUNE)
     enc.set_property("speed-preset", AI_PRESET)
-    enc.set_property("bitrate",      AI_BITRATE)
-    enc.set_property("key-int-max",  AI_KEYINT)
-    enc.set_property("threads",      AI_THREADS)
+    enc.set_property("bitrate", ai_bitrate)
+    enc.set_property("key-int-max", AI_KEYINT)
+    enc.set_property("threads", AI_THREADS)
 
-    sink.set_property("location",  f"rtsp://127.0.0.1:8554/{rtsp_path}")
+    sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
     sink.set_property("protocols", 4)
 
-    for el in (q_ai, conv_ai, caps_ai, mux, pgie, tracker,
-               conv_pre, nvosd, conv_post, caps_post, q_post,
-               enc, parse, sink):
+    elements = [q_ai, conv_ai, caps_ai, mux, pgie, tracker,
+                conv_pre, nvosd, conv_post, caps_post, q_post,
+                enc, parse]
+    if record_path:
+        q_rtsp.set_property("max-size-buffers", 2)
+        q_rtsp.set_property("max-size-bytes", 0)
+        q_rtsp.set_property("max-size-time", 0)
+        q_rtsp.set_property("leaky", 2)
+
+        q_rec.set_property("max-size-buffers", 4)
+        q_rec.set_property("max-size-bytes", 0)
+        q_rec.set_property("max-size-time", 0)
+        q_rec.set_property("leaky", 2)
+
+        sink_rec.set_property("location", record_path)
+        sink_rec.set_property("sync", False)
+        sink_rec.set_property("async", False)
+
+        elements.extend([tee_out, q_rtsp, sink, q_rec, parse_rec, mux_rec, sink_rec])
+    else:
+        elements.extend([sink])
+
+    for el in elements:
         pipeline.add(el)
 
     _tee_branch(tee, q_ai)
-    _link(q_ai,    conv_ai)
+    _link(q_ai, conv_ai)
     _link(conv_ai, caps_ai)
 
     caps_ai_src = _get_static_pad(caps_ai, "src")
@@ -979,16 +1025,27 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         sys.stderr.write(f"ERROR: Failed to link caps{suffix}_ai -> mux{suffix}.sink_0\n")
         sys.exit(1)
 
-    _link(mux,       pgie)
-    _link(pgie,      tracker)
-    _link(tracker,   conv_pre)
-    _link(conv_pre,  nvosd)
-    _link(nvosd,     conv_post)
+    _link(mux, pgie)
+    _link(pgie, tracker)
+    _link(tracker, conv_pre)
+    _link(conv_pre, nvosd)
+    _link(nvosd, conv_post)
     _link(conv_post, caps_post)
     _link(caps_post, q_post)
-    _link(q_post,    enc)
-    _link(enc,       parse)
-    _link(parse,     sink)
+    _link(q_post, enc)
+    _link(enc, parse)
+
+    if record_path:
+        _link(parse, tee_out)
+        _tee_branch(tee_out, q_rtsp)
+        _link(q_rtsp, sink)
+        _tee_branch(tee_out, q_rec)
+        _link(q_rec, parse_rec)
+        _link(parse_rec, mux_rec)
+        _link(mux_rec, sink_rec)
+        print(f"AI recording enabled for {cam_label} -> {record_path}")
+    else:
+        _link(parse, sink)
 
     return pgie, enc
 
@@ -1002,72 +1059,72 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
 
     _render_scoreboard_bg()
 
-    q_stream  = _make("queue",              "q_stream")
+    q_stream = _make("queue", "q_stream")
     conv_strm = _make_nvconv("conv_strm")
     caps_strm = _capsfilter("caps_strm_i420", "video/x-raw,format=I420")
-    osd_bg    = _make("gdkpixbufoverlay",   "osd_bg")
-    osd_home  = _make("textoverlay",        "osd_home")
-    osd_away  = _make("textoverlay",        "osd_away")
-    osd_score = _make("textoverlay",        "osd_score")
-    osd_clock = _make("textoverlay",        "osd_clock")
-    osd_fouls = _make("textoverlay",        "osd_fouls")
-    enc_stream   = _make("x264enc",         "enc_stream")
-    parse_stream = _make("h264parse",       "parse_stream")
-    flvmux       = _make("flvmux",          "flvmux")
-    rtmpsink     = _make("rtmpsink",        "rtmpsink")
-    audiosrc     = _make("audiotestsrc",    "audiosrc")
-    aacenc       = _make("voaacenc",        "aacenc")
+    osd_bg = _make("gdkpixbufoverlay", "osd_bg")
+    osd_home = _make("textoverlay", "osd_home")
+    osd_away = _make("textoverlay", "osd_away")
+    osd_score = _make("textoverlay", "osd_score")
+    osd_clock = _make("textoverlay", "osd_clock")
+    osd_fouls = _make("textoverlay", "osd_fouls")
+    enc_stream = _make("x264enc", "enc_stream")
+    parse_stream = _make("h264parse", "parse_stream")
+    flvmux = _make("flvmux", "flvmux")
+    rtmpsink = _make("rtmpsink", "rtmpsink")
+    audiosrc = _make("audiotestsrc", "audiosrc")
+    aacenc = _make("voaacenc", "aacenc")
 
     q_stream.set_property("max-size-buffers", 2)
-    q_stream.set_property("max-size-bytes",   0)
-    q_stream.set_property("max-size-time",    0)
-    q_stream.set_property("leaky",            2)
+    q_stream.set_property("max-size-bytes", 0)
+    q_stream.set_property("max-size-time", 0)
+    q_stream.set_property("leaky", 2)
 
-    osd_bg.set_property("location",       SCOREBOARD_PNG)
-    osd_bg.set_property("offset-x",       SCOREBOARD_OFFSET_X)
-    osd_bg.set_property("offset-y",       SCOREBOARD_OFFSET_Y)
-    osd_bg.set_property("overlay-width",  SCOREBOARD_W)
+    osd_bg.set_property("location", SCOREBOARD_PNG)
+    osd_bg.set_property("offset-x", SCOREBOARD_OFFSET_X)
+    osd_bg.set_property("offset-y", SCOREBOARD_OFFSET_Y)
+    osd_bg.set_property("overlay-width", SCOREBOARD_W)
     osd_bg.set_property("overlay-height", SCOREBOARD_H)
-    osd_bg.set_property("alpha",          0.0)
+    osd_bg.set_property("alpha", 0.0)
 
     def _setup_text(el, text, xpos, ypos, font="Sans Bold 20",
                     color=0xFFFFFFFF, shadow=True):
-        el.set_property("text",        text)
-        el.set_property("font-desc",   font)
-        el.set_property("halignment",  4)
-        el.set_property("valignment",  3)
-        el.set_property("xpos",        xpos)
-        el.set_property("ypos",        ypos)
-        el.set_property("color",       color)
+        el.set_property("text", text)
+        el.set_property("font-desc", font)
+        el.set_property("halignment", 4)
+        el.set_property("valignment", 3)
+        el.set_property("xpos", xpos)
+        el.set_property("ypos", ypos)
+        el.set_property("color", color)
         el.set_property("draw-shadow", shadow)
         el.set_property("auto-resize", False)
-        el.set_property("wait-text",   False)
-        el.set_property("silent",      True)
+        el.set_property("wait-text", False)
+        el.set_property("silent", True)
 
-    _setup_text(osd_home,  "HOME",     xpos=0.022, ypos=0.040,
+    _setup_text(osd_home, "HOME", xpos=0.022, ypos=0.040,
                 font="Sans Bold 22", color=0xFFFFFFFF)
-    _setup_text(osd_away,  "AWAY",     xpos=0.230, ypos=0.040,
+    _setup_text(osd_away, "AWAY", xpos=0.230, ypos=0.040,
                 font="Sans Bold 22", color=0xFFFFFFFF)
-    _setup_text(osd_score, "0 - 0",   xpos=0.120, ypos=0.040,
+    _setup_text(osd_score, "0 - 0", xpos=0.120, ypos=0.040,
                 font="Sans Bold 22", color=0xFFD916FF)
     _setup_text(osd_clock, "Q1 10:00", xpos=0.330, ypos=0.040,
                 font="Sans Bold 22", color=0xB2E5FFFF)
-    _setup_text(osd_fouls, "",         xpos=0.022, ypos=0.068,
-                font="Sans 13",      color=0xA6A6A6FF)
+    _setup_text(osd_fouls, "", xpos=0.022, ypos=0.068,
+                font="Sans 13", color=0xA6A6A6FF)
 
-    enc_stream.set_property("pass",             "cbr")
-    enc_stream.set_property("bitrate",          RTMP_BITRATE)
+    enc_stream.set_property("pass", "cbr")
+    enc_stream.set_property("bitrate", RTMP_BITRATE)
     enc_stream.set_property("vbv-buf-capacity", 200)
-    enc_stream.set_property("tune",             RTMP_TUNE)
-    enc_stream.set_property("speed-preset",     RTMP_PRESET)
-    enc_stream.set_property("key-int-max",      RTMP_KEYINT)
-    enc_stream.set_property("threads",          RTMP_THREADS)
+    enc_stream.set_property("tune", RTMP_TUNE)
+    enc_stream.set_property("speed-preset", RTMP_PRESET)
+    enc_stream.set_property("key-int-max", RTMP_KEYINT)
+    enc_stream.set_property("threads", RTMP_THREADS)
 
-    flvmux.set_property("streamable",  True)
-    rtmpsink.set_property("location",  rtmp_url)
-    rtmpsink.set_property("async",     False)
-    audiosrc.set_property("wave",      4)
-    aacenc.set_property("bitrate",     128000)
+    flvmux.set_property("streamable", True)
+    rtmpsink.set_property("location", rtmp_url)
+    rtmpsink.set_property("async", False)
+    audiosrc.set_property("wave", 4)
+    aacenc.set_property("bitrate", 128000)
 
     for el in (q_stream, conv_strm, caps_strm,
                osd_bg, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
@@ -1075,20 +1132,20 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
         pipeline.add(el)
 
     _tee_branch(tee, q_stream)
-    _link(q_stream,  conv_strm)
+    _link(q_stream, conv_strm)
     _link(conv_strm, caps_strm)
     _link(caps_strm, osd_bg)
-    _link(osd_bg,    osd_home)
-    _link(osd_home,  osd_away)
-    _link(osd_away,  osd_score)
+    _link(osd_bg, osd_home)
+    _link(osd_home, osd_away)
+    _link(osd_away, osd_score)
     _link(osd_score, osd_clock)
     _link(osd_clock, osd_fouls)
     _link(osd_fouls, enc_stream)
-    _link(enc_stream,   parse_stream)
+    _link(enc_stream, parse_stream)
     _link(parse_stream, flvmux)
 
     _link_filtered(audiosrc, aacenc, "audio/x-raw,rate=44100,channels=2")
-    aacenc_src   = _get_static_pad(aacenc, "src")
+    aacenc_src = _get_static_pad(aacenc, "src")
     flvmux_audio = flvmux.request_pad_simple("audio")
     if not flvmux_audio:
         sys.stderr.write("ERROR: Unable to get audio pad from flvmux\n")
@@ -1101,9 +1158,9 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
 
     with _osd_lock:
         _osd_elements.update({
-            "osd_bg":    osd_bg,
-            "osd_home":  osd_home,
-            "osd_away":  osd_away,
+            "osd_bg": osd_bg,
+            "osd_home": osd_home,
+            "osd_away": osd_away,
             "osd_score": osd_score,
             "osd_clock": osd_clock,
             "osd_fouls": osd_fouls,
@@ -1150,9 +1207,13 @@ def build_pipeline(enable_stream: bool = True) -> tuple:
     _encoders["enc2_clean"] = enc2_clean
 
     print("Building CAM2 AI RTSP branch (720p debug) ...")
+    cam2_ai_record_path = _new_recording_path("camera2_ai") if rtmp_url else None
+    cam2_ai_bitrate = AI_RECORD_BITRATE if cam2_ai_record_path else AI_BITRATE
     pgie2, enc2_ai = _build_ai_branch(
         pipeline, tee2, "2", "camera2_ai",
-        "config_infer_primary_yoloV8_cam2.txt", "CAM2")
+        "config_infer_primary_yoloV8_cam2.txt", "CAM2",
+        record_path=cam2_ai_record_path,
+        ai_bitrate=cam2_ai_bitrate)
     _encoders["enc2_ai"] = enc2_ai
 
     rtmpsink_el = None
@@ -1183,6 +1244,7 @@ def main():
 
     def _restart_handler(_sig, _frame):
         raise SystemExit(RESTART_EXIT_CODE)
+
     signal.signal(signal.SIGUSR1, _restart_handler)
 
     Gst.init(None)
@@ -1218,7 +1280,7 @@ def main():
         print(f"RTMP verification timeout set: {RTMP_VERIFY_TIMEOUT_SEC}s")
 
     loop = GLib.MainLoop()
-    bus  = pipeline.get_bus()
+    bus = pipeline.get_bus()
     bus.add_signal_watch()
     bus.connect("message", bus_call, loop)
 
