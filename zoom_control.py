@@ -33,6 +33,7 @@ ZOOM_MIN_STEPS    = 30000
 MAX_OPTICAL_ZOOM  = 8     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
 FOCUS_MAX_STEPS = 37000
 FOCUS_MIN_STEPS = 32000
+FOCUS_BIAS      = -1040      # Steps added to every CSV lookup — tune if table is systematically off
 
 
 class ZoomController:
@@ -75,7 +76,7 @@ class ZoomController:
         lens_helpers.calibrate_lens(self.ser_z, ZOOM_SPEED, FOCUS_SPEED)
 
     def get_focus_for_zoom(self, zoom_pos):
-        return int(self.focus_interp(zoom_pos))
+        return int(self.focus_interp(zoom_pos)) + FOCUS_BIAS
 
     def get_pan_speed_factor(self):
         """Returns 1/optical_zoom_ratio: 1.0 at 1x (40000 steps), 0.1 at 10x (30000 steps)."""
