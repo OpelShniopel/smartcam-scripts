@@ -6,10 +6,10 @@ import math
 DEBUG = False
 
 # --- CONFIGURATION ---
-CSV_FILE       = "zoom_focus_table_updated.csv"
+CSV_FILE       = "zoom_focus_table.csv"
 SERIAL_PORT_Z  = "/dev/zoom_control"
 ZOOM_SPEED     = 1000
-FOCUS_SPEED    = 2000
+FOCUS_SPEED    = 3000
 
 # --- TUNING ---
 TARGET_WIDTH            = 100   # Target ball width in pixels
