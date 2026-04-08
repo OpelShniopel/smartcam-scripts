@@ -159,7 +159,7 @@ class PanController:
                 return
             # Momentum Coasting
             if self.jogging and abs(self.last_speed) > 500:
-                coast_speed = abs(self.last_speed) * 0.9 
+                coast_speed = abs(self.last_speed) * 0.8
                 ghost_error = (DEADZONE_PAN + 10) * self.last_direction
                 self.send_command(ghost_error, override_speed=coast_speed, speed_scale=speed_scale)
             return

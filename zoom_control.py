@@ -20,6 +20,7 @@ FOCUS_UPDATE_STEPS      = 10    # Send focus correction only when zoom drifts th
 VELOCITY_ZOOM_THRESHOLD = 40    # Ball horizontal speed (px/frame) that starts triggering zoom-out
 VELOCITY_ZOOM_GAIN      = 5.0   # Zoom-out steps added per px/frame above threshold
 FRAME_W                 = 1280  # Camera frame width in pixels
+FRAME_H                 = 720
 EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
 EDGE_ZOOM_GAIN          = 3.0   # Zoom-out steps per pixel inside the edge margin
 
@@ -134,13 +135,32 @@ class ZoomController:
 
         # Edge-of-frame zoom-out: ball near horizontal edge → widen FOV to keep it in frame.
         # Overrides any size-based zoom-in — keeping ball in frame takes priority.
-        edge_margin_px = FRAME_W * EDGE_MARGIN
-        edge_distance = min(ball['center_x'], FRAME_W - ball['center_x'])
-        if edge_distance < edge_margin_px:
-            edge_bias = (edge_margin_px - edge_distance) * EDGE_ZOOM_GAIN
-            # Suppress zoom-in and apply the edge bias on top
-            zoom_step = max(0.0, zoom_step) + edge_bias
-            DEBUG and print(f"[ZOOM] edge_dist={edge_distance:.0f}px  bias=+{edge_bias:.0f}")
+        # Calculate horizontal edge distance
+        dist_h = min(ball['center_x'], FRAME_W - ball['center_x'])
+        # Calculate vertical edge distance
+        dist_v = min(ball['center_y'], FRAME_H - ball['center_y'])
+        
+        # We care about the "most dangerous" edge (the smallest distance)
+        # Note: We normalize the vertical distance so the margin is proportional to frame height
+        edge_margin_h = FRAME_W * EDGE_MARGIN
+        edge_margin_v = FRAME_H * EDGE_MARGIN
+        
+        edge_bias = 0.0
+        
+        # Check Horizontal Edge
+        if dist_h < edge_margin_h:
+            edge_bias = max(edge_bias, (edge_margin_h - dist_h) * EDGE_ZOOM_GAIN)
+            
+        # Check Vertical Edge
+        if dist_v < edge_margin_v:
+            # Use same gain or a different one if vertical movement is more sensitive
+            edge_bias = max(edge_bias, (edge_margin_v - dist_v) * EDGE_ZOOM_GAIN)
 
+        if edge_bias > 0:
+            # Suppress zoom-in and apply the edge bias
+            zoom_step = max(0.0, zoom_step) + edge_bias
+            DEBUG and print(f"[ZOOM] Edge Alert! bias=+{edge_bias:.0f}")
+
+        # 5. Final Send
         if abs(zoom_step) >= 5:
             self.send_zoom(zoom_step)
