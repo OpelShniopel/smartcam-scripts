@@ -154,5 +154,4 @@ class ZoomController:
             DEBUG and print(f"[ZOOM] Edge Alert! bias=+{edge_bias:.0f}")
 
         # 5. Final Send
-        if abs(zoom_step) >= 5:
-            self.send_zoom(zoom_step)
+        self.send_zoom(zoom_step)
