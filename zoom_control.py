@@ -72,7 +72,7 @@ class ZoomController:
         if not self.ser_z:
             print("Calibration skipped: No serial connection.")
             return
-        lens_helpers.calibrate_lens(self.ser_z)
+        lens_helpers.calibrate_lens(self.ser_z, ZOOM_SPEED, FOCUS_SPEED)
 
     def get_focus_for_zoom(self, zoom_pos):
         return int(self.focus_interp(zoom_pos))

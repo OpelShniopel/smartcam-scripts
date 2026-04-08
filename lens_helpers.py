@@ -71,16 +71,20 @@ def init_lens_board(ser, zoom_speed, focus_speed):
 
 # ── Homing / calibration ───────────────────────────────────────────────────────
 
-def calibrate_lens(ser):
+def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
     """
     3-step homing for Zoom (A) and Focus (B):
       1. Find the PI sensor (direction-aware)
       2. Back off
       3. Re-approach for a precise reference, then set G92 {axis}32000
+    zoom_speed / focus_speed are the operational speeds restored after homing.
+    Homing itself always runs at 600 to match the calibration script and
+    ensure reproducible PI trigger overshoot.
     """
     print("--- Starting Lens Calibration ---")
-    send_command(ser, "M238")   # Energize PI LEDs
-    send_command(ser, "G91")    # Relative mode
+    send_command(ser, "M238")           # Energize PI LEDs
+    send_command(ser, "G91")            # Relative mode
+    send_command(ser, "M240 A600 B600") # Slow homing speed — must match focus_zoom_mapping.py
 
     # ── Axis A (Zoom) ──────────────────────────────
     print("Homing Axis A (zoom)")
@@ -126,6 +130,8 @@ def calibrate_lens(ser):
     send_command(ser, "M230 B")
     send_command(ser, "G90")
 
+    # Restore operational speeds now that homing is done
+    send_command(ser, f"M240 A{zoom_speed} B{focus_speed} C600")
     print("--- Calibration Complete ---")
 
 
