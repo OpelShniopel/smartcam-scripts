@@ -2,7 +2,7 @@ import serial
 import time
 import pan_homing
 
-DEBUG = False
+DEBUG = True
 
 # --- CONFIGURATION ---
 SERIAL_PORT_P = "/dev/pan_control"
@@ -38,33 +38,41 @@ class PanController:
         self.current_pan_pos = 0.0
         self.jogging = False
         self.last_error_x = 0.0
-        self.pending_oks = 0
         self.lost_frames = 0
-        self.max_coast_frames = 30 # Coast for ~0.2 seconds at 50fps
+        self.max_coast_frames = 30 
         self.last_speed = 0
         self.last_direction = 0
         self.rogue_patience = 0
+        
+        # --- NEW: Sync Logic ---
+        self.frame_count = 0
+        self.sync_every_n_frames = 20 # Sync with hardware every 0.5s @ 40fps
 
         try:
-            self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.1)
+            self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.02) # Low timeout for speed
             print(f"SUCCESS: Connected to Pan Motor on {SERIAL_PORT_P}")
             pan_homing.auto_home_precision(self.ser_p)
+            # Anchor the start position
+            self.current_pan_pos = self._get_position()
         except Exception as e:
             print(f"WARNING: Pan Motor Serial port not found. ({e})")
             self.ser_p = None
 
     def _get_position(self):
         """Query actual motor X position from GRBL status report."""
+        if not self.ser_p: return self.current_pan_pos
         try:
-            self.ser_p.reset_input_buffer()
-            self.ser_p.write(b"?\n")
+            self.ser_p.write(b"?") 
+            # Give GRBL a tiny moment to process the real-time command
+            time.sleep(0.01) 
             line = self.ser_p.readline().decode('utf-8')
             if "MPos:" in line:
-                x = float(line.split("MPos:")[1].split(",")[0])
-                return x
+                # Example line: <Idle|MPos:10.000,0.000,0.000|Bf:15,128>
+                pos_str = line.split("MPos:")[1].split(",")[0]
+                return float(pos_str)
         except Exception as e:
-            DEBUG and print(f"[PAN] Position query failed: {e}")
-        return self.current_pan_pos  # fallback if query fails
+            DEBUG and print(f"[PAN] Sync error: {e}")
+        return self.current_pan_pos
 
     def _stop_jog(self):
         """Cancel any pending jog and sync position from the board."""
@@ -116,54 +124,48 @@ class PanController:
         step_duration = COMMAND_DT * 4.0 
         step = (speed / 60.0) * step_duration * (1 if error_x > 0 else -1)
 
+        # Apply limits based on the LATEST synced position
         target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS, self.current_pan_pos + step))
         actual_step = target - self.current_pan_pos
 
-        # If we hit a limit, flush the GRBL jog buffer immediately.
-        # Without this, the 4-5 commands already queued in GRBL will keep
-        # executing past the limit even after we stop sending new ones.
-        at_limit = abs((self.current_pan_pos + step) - target) > 0.1
-        if at_limit:
-            self.ser_p.write(b"\x85")
-            time.sleep(0.05)
-            self.ser_p.reset_input_buffer()
-            self.current_pan_pos = self._get_position()
-            self.jogging = False
-            DEBUG and print(f"[PAN] Limit reached, buffer flushed at X={self.current_pan_pos:.1f}")
-            return
-
-        # 5. Ignore "Micro-twitches" that the motor can't physically do smoothly
-        if abs(actual_step) < 0.2:
+        # Limit Check
+        if abs(actual_step) < 0.1: # Changed from 0.2 to be more sensitive
+            # If we are being told to move but target=current_pos, we are at software limit
+            if abs(self.current_pan_pos - PAN_MAX_STEPS) < 0.5 or abs(self.current_pan_pos - PAN_MIN_STEPS) < 0.5:
+                DEBUG and print(f"[PAN] Software Limit Reached at {self.current_pan_pos}")
             return
 
         cmd = f"$J=G91 X{actual_step:.3f} F{int(speed)}\n"
         self.ser_p.write(cmd.encode())
-        self.current_pan_pos += actual_step
         
+        # Incremental update (will be corrected by periodic sync)
+        self.current_pan_pos += actual_step
         self.jogging = True
-        self.pending_oks += 1
 
     def process_detection(self, detections, speed_scale=1.0):
+        # 1. INCREMENT FRAME AND SYNC HARDWARE
+        self.frame_count += 1
+        if self.frame_count % self.sync_every_n_frames == 0:
+            hw_pos = self._get_position()
+            # If the difference is significant, force a correction
+            if abs(hw_pos - self.current_pan_pos) > 0.3:
+                DEBUG and print(f"[SYNC] Correcting drift: {self.current_pan_pos:.2f} -> {hw_pos:.2f}")
+                self.current_pan_pos = hw_pos
+
+        # 2. FIND BALL
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         
         # --- CASE 1: NO BALL DETECTED ---
         if not ball:
             self.lost_frames += 1
-            
-            # Only stop if we've been blind for too long (e.g., 10 frames)
             if self.lost_frames > self.max_coast_frames:
                 if self.jogging:
                     self._stop_jog()
                 return
 
-            # ACTIVE COAST: If we were moving fast, keep the momentum going
             if self.jogging and abs(self.last_speed) > 500:
-                # Decay the speed (0.9 = 10% slowdown per frame)
                 coast_speed = abs(self.last_speed) * 0.9 
-                self.last_speed = coast_speed * self.last_direction # Keep the sign
-                
-                # Calculate a 'ghost' error based on last direction to use send_command
-                # We simulate an error just outside the deadzone to keep the loop alive
+                self.last_speed = coast_speed * self.last_direction
                 ghost_error = (DEADZONE_PAN + 10) * self.last_direction
                 self.send_command(ghost_error, override_speed=coast_speed, speed_scale=speed_scale)
             return
@@ -171,35 +173,28 @@ class PanController:
         # --- CASE 2: BALL FOUND ---
         error_x = ball['center_x'] - CENTER_X
 
-        # Rogue ball jump rejection
-        
+        # 3. ROGUE JUMP REJECTION
+        # We trust the ball if we just found it (lost_frames >= 1)
         if self.lost_frames < 1 and self.rogue_patience < 3 and self.last_error_x != 0.0:
             jump_amount = abs(error_x - self.last_error_x)
             if jump_amount > MAX_ERROR_JUMP:
                 DEBUG and print(f"[PAN] Rogue jump rejected: {jump_amount:.0f}px")
-                # We don't return! We just don't move. 
-                # We still reset lost_frames so the NEXT frame is trusted.
-                self.lost_frames = 0 
                 self.rogue_patience += 1
                 return
             
         self.rogue_patience = 0
-        self.lost_frames = 0 # Reset the counter
+        self.lost_frames = 0 
         
-        # Handle Direction Reversal
-        # Use a small buffer so a 1-pixel flicker doesn't trigger a hard stop
-        reversed = self.last_error_x != 0.0 and (error_x > 0) != (self.last_error_x > 0)
-        if reversed and abs(error_x) > 20: 
-            DEBUG and print(f"[DETECT] Direction reversal, cancelling jog")
+        # 4. DIRECTION REVERSAL
+        reversed_dir = self.last_error_x != 0.0 and (error_x > 0) != (self.last_error_x > 0)
+        if reversed_dir and abs(error_x) > 20: 
             self._stop_jog()
 
-        # Handle Deadzone
+        # 5. DEADZONE OR TRACK
         if abs(error_x) <= DEADZONE_PAN:
             self._stop_jog()
         else:
-            # Normal tracking
             self.send_command(error_x, speed_scale=speed_scale)
-            # Store direction for coasting logic (+1 for Right, -1 for Left)
             self.last_direction = 1 if error_x > 0 else -1
 
         self.last_error_x = error_x
