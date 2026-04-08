@@ -25,7 +25,7 @@ EDGE_ZOOM_GAIN          = 3.0   # Zoom-out steps per pixel inside the edge margi
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 41800
-FOCUS_BASE_POS = 32035
+FOCUS_BASE_POS = 32000     #32035
 
 # --- LIMITS ---
 ZOOM_MAX_STEPS    = 41800

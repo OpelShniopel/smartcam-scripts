@@ -173,7 +173,7 @@ class PanController:
 
         # Rogue ball jump rejection
         
-        if self.lost_frames < 1 and self.rogue_patience < 5 and self.last_error_x != 0.0:
+        if self.lost_frames < 1 and self.rogue_patience < 3 and self.last_error_x != 0.0:
             jump_amount = abs(error_x - self.last_error_x)
             if jump_amount > MAX_ERROR_JUMP:
                 DEBUG and print(f"[PAN] Rogue jump rejected: {jump_amount:.0f}px")
