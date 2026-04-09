@@ -4,7 +4,7 @@ import time
 import sys
 import atexit
 import signal
-from pan_control import PanController
+from pan_control_esp import PanController
 from zoom_control import ZoomController
 
 # --- CONFIGURATION ---
