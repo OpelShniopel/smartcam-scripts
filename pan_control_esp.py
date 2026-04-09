@@ -4,7 +4,7 @@ import time
 DEBUG = True
 
 # --- CONFIGURATION ---
-SERIAL_PORT_P = "/dev/pan_control_esp"   # Update to your ESP32 port (e.g. /dev/ttyUSB0)
+SERIAL_PORT_P = "/dev/pan_control_esp32"   # Update to your ESP32 port (e.g. /dev/ttyUSB0)
 BAUD_RATE     = 921600
 
 # Enable homing on startup — requires limit switch to be wired to GPIO 27.
