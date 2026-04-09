@@ -54,10 +54,12 @@ import queue
 import signal
 import socket
 import socket as _socket
+import subprocess
 import sys
 import threading
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 
 import gi
 
@@ -94,9 +96,14 @@ PROBE_EVERY_N_FRAMES = 2
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STREAM_CONF = os.path.join(SCRIPT_DIR, "stream.conf")
+SCORE_STATE_FILE = os.path.join(SCRIPT_DIR, "score_state.json")
+STREAM_WORKER_CONFIG = os.path.join(SCRIPT_DIR, "stream_worker_config.json")
+STREAM_WORKER_STATUS = os.path.join(SCRIPT_DIR, "stream_worker_status.json")
+STREAM_WORKER_PID = os.path.join(SCRIPT_DIR, "stream_worker.pid")
+STREAM_WORKER_WRAPPER = os.path.join(SCRIPT_DIR, "run_stream_worker.py")
 
 RESTART_EXIT_CODE = 42
-STREAM_ERROR_EXIT_CODE = 43  # RTMP failed — clear stream.conf and restart without streaming
+STREAM_ERROR_EXIT_CODE = 43  # reserved for compatibility; main pipeline no longer owns RTMP
 
 # Mutable flag set by bus_call when an RTMP error triggers a stream-error exit.
 # Using a list so the nested bus_call closure can mutate it.
@@ -115,8 +122,6 @@ AI_KEYINT = 20
 AI_THREADS = 1
 AI_PRESET = "ultrafast"
 AI_TUNE = "zerolatency"
-# Higher bitrate used when CAM2 AI recording is enabled for training footage.
-AI_RECORD_BITRATE = 5000
 
 # RTMP stream encoder settings — YouTube 1080p
 RTMP_BITRATE = 6800
@@ -151,23 +156,23 @@ _rtmp_status_cached: dict | None = None
 
 
 def _send_stream_status(active: bool, error: str = "") -> None:
-    """Send stream_status to Go. Only fires once per pipeline lifecycle.
-    Also caches the result for replay when Go (re)connects."""
+    """Send stream_status to Go when it changes and cache latest state."""
     global _rtmp_status_sent, _rtmp_status_cached
+    msg: dict = {"type": "stream_status", "active": active}
+    if error:
+        msg["error"] = error
+
     with _rtmp_status_lock:
-        if _rtmp_status_sent:
+        if _rtmp_status_cached == msg:
             return
         _rtmp_status_sent = True
-        msg: dict = {"type": "stream_status", "active": active}
-        if error:
-            msg["error"] = error
         _rtmp_status_cached = msg
 
     _out_q.put(msg)
     if active:
         print("[stream_status] RTMP stream verified active")
     else:
-        print(f"[stream_status] RTMP stream failed: {error}")
+        print(f"[stream_status] RTMP stream inactive: {error}")
 
 
 def _get_cached_stream_status() -> dict | None:
@@ -312,6 +317,7 @@ def _apply_score_patch(data: dict) -> None:
                 score_state[k] = data[k]
         state = score_state.copy()
     _update_osd_texts(state)
+    _persist_score_state()
 
 
 # ---------------------------------------------------------------------------
@@ -461,16 +467,25 @@ def _dispatch_cmd(msg: dict) -> None:
 
     if action == "start_stream":
         rtmp_url = msg.get("rtmp_url", "").strip()
-        if rtmp_url.startswith("rtmp://") or rtmp_url.startswith("rtmps://"):
-            with open(STREAM_CONF, "w") as f:
-                f.write(rtmp_url + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-            print(f"[cmd] start_stream -> {rtmp_url[:60]}")
-            _ack("start_stream", True)
-            _request_restart()
-        else:
+        if not (rtmp_url.startswith("rtmp://") or rtmp_url.startswith("rtmps://")):
             err = f"invalid rtmp_url: {rtmp_url!r}"
+            print(f"[cmd] start_stream: {err}")
+            _ack("start_stream", False, err)
+            return
+
+        with open(STREAM_CONF, "w") as f:
+            f.write(rtmp_url + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+        ok, info = _start_stream_worker()
+        if ok:
+            print(f"[cmd] start_stream -> {rtmp_url[:60]} ({info})")
+            _ack("start_stream", True)
+            _push_state()
+            _poll_stream_worker_status()
+        else:
+            err = f"failed to start stream worker: {info}"
             print(f"[cmd] start_stream: {err}")
             _ack("start_stream", False, err)
 
@@ -479,9 +494,11 @@ def _dispatch_cmd(msg: dict) -> None:
             f.write("# disabled\n")
             f.flush()
             os.fsync(f.fileno())
-        print("[cmd] stop_stream")
-        _ack("stop_stream", True)
-        _request_restart()
+        ok, info = _stop_stream_worker()
+        print(f"[cmd] stop_stream ({info})")
+        _ack("stop_stream", ok, "" if ok else info)
+        _push_state()
+        _sync_stream_status_cache(False)
 
     elif action == "set_config":
         bitrate = msg.get("bitrateKbps")
@@ -490,14 +507,9 @@ def _dispatch_cmd(msg: dict) -> None:
             print(f"[cmd] set_config: {err}")
             _ack("set_config", False, err)
             return
-        enc_stream = _encoders.get("enc_stream")
-        if not enc_stream:
-            err = "no RTMP stream active — start a stream first"
-            print(f"[cmd] set_config: {err}")
-            _ack("set_config", False, err)
-            return
-        enc_stream.set_property("bitrate", bitrate)
-        print(f"[cmd] set_config bitrateKbps={bitrate} -> enc_stream")
+        _persist_stream_worker_config(bitrate_kbps=bitrate)
+        running = _is_stream_worker_running()
+        print(f"[cmd] set_config bitrateKbps={bitrate} -> worker config (running={running})")
         _ack("set_config", True)
 
     elif action == "set_osd":
@@ -528,9 +540,12 @@ AVAILABLE_MODELS = ["Basketball"]
 
 def _push_state() -> None:
     url = read_stream_url()
+    worker_running = _is_stream_worker_running()
     _out_q.put({
         "type": "state",
-        "streaming": url is not None,
+        "streaming": bool(url) and worker_running,
+        "stream_configured": bool(url),
+        "stream_worker_running": worker_running,
         "model": MODEL_NAME,
         "available_models": AVAILABLE_MODELS,
         "webrtc": {
@@ -538,6 +553,9 @@ def _push_state() -> None:
             "cam0_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
             "cam2_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
             "cam2_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
+        },
+        "internal_streams": {
+            "cam2_stream": f"rtsp://{JETSON_HOST}:8554/camera2_stream",
         },
     })
 
@@ -584,7 +602,9 @@ class ControlHandler(BaseHTTPRequestHandler):
             self._json(200, {
                 "alive": True,
                 "pid": os.getpid(),
-                "streaming": url is not None,
+                "streaming": bool(url) and _is_stream_worker_running(),
+                "stream_configured": bool(url),
+                "stream_worker_running": _is_stream_worker_running(),
                 "rtmp_url": url or "",
                 "score_overlay": score_visible,
                 "unix_sock": UNIX_SOCK,
@@ -604,6 +624,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
+                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera2_stream",
                     },
                 },
             })
@@ -743,11 +764,199 @@ def _request_restart() -> None:
     threading.Thread(target=_kill, daemon=True).start()
 
 
-def _new_recording_path(prefix: str) -> str:
-    recordings_dir = os.path.join(SCRIPT_DIR, "recordings")
-    os.makedirs(recordings_dir, exist_ok=True)
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    return os.path.join(recordings_dir, f"{prefix}_{timestamp}.mkv")
+def _atomic_write_text(path: str, content: str) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def _atomic_write_json(path: str, data: dict) -> None:
+    _atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def _persist_score_state() -> None:
+    with score_lock:
+        state = score_state.copy()
+    _atomic_write_json(SCORE_STATE_FILE, state)
+
+
+def _read_stream_worker_config() -> dict:
+    try:
+        with open(STREAM_WORKER_CONFIG) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"bitrateKbps": RTMP_BITRATE}
+
+
+def _persist_stream_worker_config(*, bitrate_kbps: int | None = None) -> dict:
+    cfg = _read_stream_worker_config()
+    if bitrate_kbps is not None:
+        cfg["bitrateKbps"] = bitrate_kbps
+    _atomic_write_json(STREAM_WORKER_CONFIG, cfg)
+    return cfg
+
+
+def _read_stream_worker_status() -> dict:
+    default = {"worker_alive": False, "stream_active": False, "last_error": ""}
+    try:
+        with open(STREAM_WORKER_STATUS) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            default.update(data)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return default
+
+
+_last_worker_status_seen: dict | None = None
+_worker_ctl_lock = threading.Lock()
+
+
+def _poll_stream_worker_status() -> bool:
+    global _last_worker_status_seen
+
+    configured = bool(read_stream_url())
+    running = _is_stream_worker_running()
+    status = _read_stream_worker_status()
+
+    if not configured or not running:
+        next_state = {"active": False, "error": status.get("last_error", "") if configured else ""}
+    else:
+        next_state = {
+            "active": bool(status.get("stream_active", False)),
+            "error": str(status.get("last_error", "") or ""),
+        }
+
+    if _last_worker_status_seen != next_state:
+        _last_worker_status_seen = next_state
+        _send_stream_status(next_state["active"], next_state["error"])
+    return True
+
+
+def _write_worker_pid(pid: int) -> None:
+    tmp = f"{STREAM_WORKER_PID}.tmp"
+    with open(tmp, "w") as f:
+        f.write(f"{pid}\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, STREAM_WORKER_PID)
+
+
+def _set_worker_status(worker_alive: bool, stream_active: bool, last_error: str = "") -> None:
+    _atomic_write_json(STREAM_WORKER_STATUS, {
+        "worker_alive": worker_alive,
+        "stream_active": stream_active,
+        "last_error": last_error,
+    })
+
+
+def _read_worker_pid() -> int | None:
+    try:
+        raw = Path(STREAM_WORKER_PID).read_text().strip()
+        return int(raw) if raw else None
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _pid_is_alive(pid: int | None) -> bool:
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _is_stream_worker_running() -> bool:
+    return _pid_is_alive(_read_worker_pid())
+
+
+def _start_stream_worker() -> tuple[bool, str]:
+    with _worker_ctl_lock:
+        if _is_stream_worker_running():
+            return True, "already running"
+        if not os.path.exists(STREAM_WORKER_WRAPPER):
+            return False, f"missing stream worker wrapper: {STREAM_WORKER_WRAPPER}"
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, STREAM_WORKER_WRAPPER],
+                cwd=SCRIPT_DIR,
+                start_new_session=True,
+                stdout=None,
+                stderr=None,
+            )
+            # Write the wrapper PID immediately so duplicate start commands
+            # cannot race in before the wrapper writes its own pid file.
+            _write_worker_pid(proc.pid)
+            _set_worker_status(worker_alive=True, stream_active=False, last_error="")
+        except OSError as e:
+            return False, str(e)
+        print(f"[stream_worker] launched wrapper pid={proc.pid}")
+        return True, "started"
+
+
+def _stop_stream_worker(timeout_sec: float = 5.0) -> tuple[bool, str]:
+    with _worker_ctl_lock:
+        pid = _read_worker_pid()
+        if not _pid_is_alive(pid):
+            try:
+                os.unlink(STREAM_WORKER_PID)
+            except FileNotFoundError:
+                pass
+            _set_worker_status(worker_alive=False, stream_active=False, last_error="")
+            return True, "already stopped"
+
+        assert pid is not None
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError as e:
+            return False, str(e)
+
+        deadline = time.time() + timeout_sec
+        while time.time() < deadline:
+            if not _pid_is_alive(pid):
+                break
+            time.sleep(0.1)
+
+        if _pid_is_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError as e:
+                return False, f"failed to terminate stream worker pid {pid}: {e}"
+
+        try:
+            os.unlink(STREAM_WORKER_PID)
+        except FileNotFoundError:
+            pass
+
+        _set_worker_status(worker_alive=False, stream_active=False, last_error="")
+        return True, "stopped"
+
+
+def _sync_stream_status_cache(active: bool, error: str = "") -> None:
+    """Update local status caches without emitting a new Go event."""
+    global _last_worker_status_seen, _rtmp_status_sent, _rtmp_status_cached
+    normalized_error = str(error or "")
+    _last_worker_status_seen = {"active": active, "error": normalized_error}
+    msg: dict = {"type": "stream_status", "active": active}
+    if normalized_error:
+        msg["error"] = normalized_error
+    with _rtmp_status_lock:
+        _rtmp_status_sent = True
+        _rtmp_status_cached = msg
+
+
+def _emit_stream_status_and_sync_cache(active: bool, error: str = "") -> None:
+    _sync_stream_status_cache(active, error)
+    _out_q.put(_get_cached_stream_status())
+    if active:
+        print("[stream_status] RTMP stream verified active")
+    else:
+        print(f"[stream_status] RTMP stream inactive: {error}")
 
 
 # ---------------------------------------------------------------------------
@@ -828,22 +1037,7 @@ def bus_call(_bus, message, loop):
         err, dbg = message.parse_error()
         src_name = message.src.get_name() if message.src else "unknown"
         print(f"ERROR: {err}: {dbg} (src={src_name})")
-        if src_name in ("rtmpsink", "enc_stream", "flvmux", "parse_stream"):
-            _send_stream_status(active=False, error=f"GStreamer error in {src_name}: {err}")
-            # Clear stream.conf so the pipeline restarts without the broken RTMP URL
-            try:
-                with open(STREAM_CONF, "w") as f:
-                    f.write("# disabled — cleared after RTMP error\n")
-                    f.flush()
-                    os.fsync(f.fileno())
-            except OSError as e:
-                print(f"WARNING: could not clear stream.conf: {e}")
-            loop.quit()
-            # Signal the wrapper to restart without streaming via exit code
-            # Use a flag so the finally block in main() can raise the right exit
-            _stream_error_exit[0] = True
-        else:
-            loop.quit()
+        loop.quit()
     return True
 
 
@@ -919,9 +1113,7 @@ def _build_clean_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Eleme
 # AI branch
 # ---------------------------------------------------------------------------
 def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
-                     infer_config: str, cam_label: str,
-                     record_path: str | None = None,
-                     ai_bitrate: int = AI_BITRATE):
+                     infer_config: str, cam_label: str):
     q_ai = _make("queue", f"q{suffix}_ai")
     conv_ai = _make_nvconv(f"conv{suffix}_ai")
     caps_ai = _capsfilter(f"caps{suffix}_ai",
@@ -937,19 +1129,6 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     enc = _make("x264enc", f"enc{suffix}_ai")
     parse = _make("h264parse", f"parse{suffix}_ai")
     sink = _make("rtspclientsink", f"sink{suffix}_ai")
-    tee_out = None
-    q_rtsp = None
-    q_rec = None
-    parse_rec = None
-    mux_rec = None
-    sink_rec = None
-    if record_path:
-        tee_out = _make("tee", f"tee{suffix}_ai_out")
-        q_rtsp = _make("queue", f"q{suffix}_ai_rtsp")
-        q_rec = _make("queue", f"q{suffix}_ai_rec")
-        parse_rec = _make("h264parse", f"parse{suffix}_ai_rec")
-        mux_rec = _make("matroskamux", f"mux{suffix}_ai_rec")
-        sink_rec = _make("filesink", f"sink{suffix}_ai_rec")
 
     mux.set_property("width", 1280)
     mux.set_property("height", 720)
@@ -983,36 +1162,16 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
 
     enc.set_property("tune", AI_TUNE)
     enc.set_property("speed-preset", AI_PRESET)
-    enc.set_property("bitrate", ai_bitrate)
+    enc.set_property("bitrate", AI_BITRATE)
     enc.set_property("key-int-max", AI_KEYINT)
     enc.set_property("threads", AI_THREADS)
 
     sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
     sink.set_property("protocols", 4)
 
-    elements = [q_ai, conv_ai, caps_ai, mux, pgie, tracker,
-                conv_pre, nvosd, conv_post, caps_post, q_post,
-                enc, parse]
-    if record_path:
-        q_rtsp.set_property("max-size-buffers", 2)
-        q_rtsp.set_property("max-size-bytes", 0)
-        q_rtsp.set_property("max-size-time", 0)
-        q_rtsp.set_property("leaky", 2)
-
-        q_rec.set_property("max-size-buffers", 4)
-        q_rec.set_property("max-size-bytes", 0)
-        q_rec.set_property("max-size-time", 0)
-        q_rec.set_property("leaky", 2)
-
-        sink_rec.set_property("location", record_path)
-        sink_rec.set_property("sync", False)
-        sink_rec.set_property("async", False)
-
-        elements.extend([tee_out, q_rtsp, sink, q_rec, parse_rec, mux_rec, sink_rec])
-    else:
-        elements.extend([sink])
-
-    for el in elements:
+    for el in (q_ai, conv_ai, caps_ai, mux, pgie, tracker,
+               conv_pre, nvosd, conv_post, caps_post, q_post,
+               enc, parse, sink):
         pipeline.add(el)
 
     _tee_branch(tee, q_ai)
@@ -1034,20 +1193,47 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     _link(caps_post, q_post)
     _link(q_post, enc)
     _link(enc, parse)
-
-    if record_path:
-        _link(parse, tee_out)
-        _tee_branch(tee_out, q_rtsp)
-        _link(q_rtsp, sink)
-        _tee_branch(tee_out, q_rec)
-        _link(q_rec, parse_rec)
-        _link(parse_rec, mux_rec)
-        _link(mux_rec, sink_rec)
-        print(f"AI recording enabled for {cam_label} -> {record_path}")
-    else:
-        _link(parse, sink)
+    _link(parse, sink)
 
     return pgie, enc
+
+
+# ---------------------------------------------------------------------------
+# Internal CAM2 stream branch for external RTMP worker
+# ---------------------------------------------------------------------------
+def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Element:
+    q = _make("queue", f"q{suffix}_streamsrc")
+    conv = _make_nvconv(f"conv{suffix}_streamsrc")
+    caps = _capsfilter(f"caps{suffix}_streamsrc", "video/x-raw,format=I420")
+    enc = _make("x264enc", f"enc{suffix}_streamsrc")
+    parse = _make("h264parse", f"parse{suffix}_streamsrc")
+    sink = _make("rtspclientsink", f"sink{suffix}_streamsrc")
+
+    q.set_property("max-size-buffers", 2)
+    q.set_property("max-size-bytes", 0)
+    q.set_property("max-size-time", 0)
+    q.set_property("leaky", 2)
+
+    enc.set_property("tune", CLEAN_TUNE)
+    enc.set_property("speed-preset", CLEAN_PRESET)
+    enc.set_property("bitrate", 10000)
+    enc.set_property("key-int-max", CLEAN_KEYINT)
+    enc.set_property("threads", CLEAN_THREADS)
+
+    sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
+    sink.set_property("protocols", 4)
+
+    for el in (q, conv, caps, enc, parse, sink):
+        pipeline.add(el)
+
+    _tee_branch(tee, q)
+    _link(q, conv)
+    _link(conv, caps)
+    _link(caps, enc)
+    _link(enc, parse)
+    _link(parse, sink)
+
+    return enc
 
 
 # ---------------------------------------------------------------------------
@@ -1057,23 +1243,33 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
     """Returns (enc_stream, rtmpsink)."""
     global _osd_elements
 
+    if not os.path.exists(SCOREBOARD_PNG):
+        print(f"ERROR: Scoreboard PNG not found: {SCOREBOARD_PNG}")
+        print("       Streaming without scoreboard overlay is not supported.")
+        print("       Place scoreboard.png next to pipeline.py, then restart.")
+        _send_stream_status(
+            active=False,
+            error=f"Missing scoreboard.png: {SCOREBOARD_PNG}",
+        )
+        return None, None
+
     _render_scoreboard_bg()
 
-    q_stream = _make("queue", "q_stream")
-    conv_strm = _make_nvconv("conv_strm")
-    caps_strm = _capsfilter("caps_strm_i420", "video/x-raw,format=I420")
-    osd_bg = _make("gdkpixbufoverlay", "osd_bg")
-    osd_home = _make("textoverlay", "osd_home")
-    osd_away = _make("textoverlay", "osd_away")
-    osd_score = _make("textoverlay", "osd_score")
-    osd_clock = _make("textoverlay", "osd_clock")
-    osd_fouls = _make("textoverlay", "osd_fouls")
-    enc_stream = _make("x264enc", "enc_stream")
-    parse_stream = _make("h264parse", "parse_stream")
-    flvmux = _make("flvmux", "flvmux")
-    rtmpsink = _make("rtmpsink", "rtmpsink")
-    audiosrc = _make("audiotestsrc", "audiosrc")
-    aacenc = _make("voaacenc", "aacenc")
+    q_stream = _make("queue", "strm_queue")
+    conv_strm = _make_nvconv("strm_conv")
+    caps_strm = _capsfilter("strm_caps_i420", "video/x-raw,format=I420")
+    osd_bg = _make("gdkpixbufoverlay", "strm_osd_bg")
+    osd_home = _make("textoverlay", "strm_osd_home")
+    osd_away = _make("textoverlay", "strm_osd_away")
+    osd_score = _make("textoverlay", "strm_osd_score")
+    osd_clock = _make("textoverlay", "strm_osd_clock")
+    osd_fouls = _make("textoverlay", "strm_osd_fouls")
+    enc_stream = _make("x264enc", "strm_enc")
+    parse_stream = _make("h264parse", "strm_parse")
+    flvmux = _make("flvmux", "strm_flvmux")
+    rtmpsink = _make("rtmpsink", "strm_rtmpsink")
+    audiosrc = _make("audiotestsrc", "strm_audiosrc")
+    aacenc = _make("voaacenc", "strm_aacenc")
 
     q_stream.set_property("max-size-buffers", 2)
     q_stream.set_property("max-size-bytes", 0)
@@ -1173,13 +1369,9 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
 # ---------------------------------------------------------------------------
 # Main pipeline builder
 # ---------------------------------------------------------------------------
-def build_pipeline(enable_stream: bool = True) -> tuple:
+def build_pipeline() -> tuple:
     global _encoders
     _encoders = {}
-
-    rtmp_url = read_stream_url() if enable_stream else None
-    if enable_stream and not rtmp_url:
-        print("No RTMP URL in stream.conf — streaming disabled.")
 
     pipeline = Gst.Pipeline()
     if not pipeline:
@@ -1207,24 +1399,16 @@ def build_pipeline(enable_stream: bool = True) -> tuple:
     _encoders["enc2_clean"] = enc2_clean
 
     print("Building CAM2 AI RTSP branch (720p debug) ...")
-    cam2_ai_record_path = _new_recording_path("camera2_ai") if rtmp_url else None
-    cam2_ai_bitrate = AI_RECORD_BITRATE if cam2_ai_record_path else AI_BITRATE
     pgie2, enc2_ai = _build_ai_branch(
         pipeline, tee2, "2", "camera2_ai",
-        "config_infer_primary_yoloV8_cam2.txt", "CAM2",
-        record_path=cam2_ai_record_path,
-        ai_bitrate=cam2_ai_bitrate)
+        "config_infer_primary_yoloV8_cam2.txt", "CAM2")
     _encoders["enc2_ai"] = enc2_ai
 
-    rtmpsink_el = None
-    if rtmp_url:
-        print(f"Building RTMP stream branch -> {rtmp_url[:60]}...")
-        enc_stream, rtmpsink_el = _build_stream_branch(pipeline, tee2, rtmp_url)
-        _encoders["enc_stream"] = enc_stream
-    else:
-        print("RTMP streaming disabled.")
+    print("Building CAM2 internal RTSP branch for stream worker ...")
+    enc2_streamsrc = _build_internal_stream_branch(pipeline, tee2, "2", "camera2_stream")
+    _encoders["enc2_streamsrc"] = enc2_streamsrc
 
-    return pipeline, pgie0, pgie2, rtmpsink_el
+    return pipeline, pgie0, pgie2
 
 
 # ---------------------------------------------------------------------------
@@ -1235,8 +1419,6 @@ def main():
     _rtmp_status_sent = False
     _rtmp_status_cached = None
     _stream_error_exit[0] = False
-
-    no_stream = "--no-stream" in sys.argv
 
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         os.environ.setdefault("DISPLAY", ":0")
@@ -1253,8 +1435,12 @@ def main():
     start_http_server()
     start_pycam_server()
 
+    _persist_score_state()
+    _persist_stream_worker_config()
+    _emit_stream_status_and_sync_cache(False)
+
     print("Building pipeline ...")
-    pipeline, pgie0, pgie2, rtmpsink_el = build_pipeline(enable_stream=not no_stream)
+    pipeline, pgie0, pgie2 = build_pipeline()
 
     for pgie, cam_label in [(pgie0, "CAM0"), (pgie2, "CAM2")]:
         srcpad = pgie.get_static_pad("src")
@@ -1264,20 +1450,7 @@ def main():
         srcpad.add_probe(Gst.PadProbeType.BUFFER, pgie_src_pad_buffer_probe, cam_label)
         print(f"Probe attached -> {pgie.get_name()} ({cam_label})")
 
-    if rtmpsink_el is not None:
-        sink_pad = rtmpsink_el.get_static_pad("sink")
-        if sink_pad:
-            sink_pad.add_probe(
-                Gst.PadProbeType.BUFFER,
-                _rtmp_sink_pad_probe,
-                None,
-            )
-            print("RTMP verification probe attached -> rtmpsink.sink")
-        else:
-            print("WARNING: Could not get rtmpsink sink pad for verification probe")
-
-        GLib.timeout_add_seconds(RTMP_VERIFY_TIMEOUT_SEC, _rtmp_verify_timeout)
-        print(f"RTMP verification timeout set: {RTMP_VERIFY_TIMEOUT_SEC}s")
+    _startup_stream_requested = bool(read_stream_url())
 
     loop = GLib.MainLoop()
     bus = pipeline.get_bus()
@@ -1285,9 +1458,21 @@ def main():
     bus.connect("message", bus_call, loop)
 
     GLib.timeout_add_seconds(5, _fps_report)
+    GLib.timeout_add_seconds(1, _poll_stream_worker_status)
 
     print("Starting pipeline ...")
     pipeline.set_state(Gst.State.PLAYING)
+
+    if _startup_stream_requested:
+        def _start_worker_after_main_ready() -> bool:
+            ok, info = _start_stream_worker()
+            if ok:
+                print(f"[startup] stream worker {info}")
+            else:
+                print(f"[startup] stream worker failed to start: {info}")
+            return False
+
+        GLib.timeout_add_seconds(2, _start_worker_after_main_ready)
 
     try:
         loop.run()
@@ -1305,8 +1490,6 @@ def main():
             os.unlink(PYCAM_SOCK)
         except FileNotFoundError:
             pass
-        if _stream_error_exit[0]:
-            raise SystemExit(STREAM_ERROR_EXIT_CODE)
 
 
 if __name__ == "__main__":

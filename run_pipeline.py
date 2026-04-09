@@ -22,7 +22,7 @@ from datetime import datetime
 
 RESTART_DELAY_SEC  = 2
 RESTART_EXIT_CODE  = 42
-STREAM_ERROR_EXIT_CODE = 43  # RTMP error — pipeline already cleared stream.conf, restart normally
+STREAM_ERROR_EXIT_CODE = 43  # reserved for compatibility
 MAX_CRASHES        = 10   # stop looping if we crash this many times without a clean run
 CRASH_RESET_SEC    = 300  # reset crash counter if pipeline ran cleanly for this long
 
@@ -95,7 +95,7 @@ def main():
             continue
 
         if ret == STREAM_ERROR_EXIT_CODE:
-            print(f"\n[{_ts()}] *** RTMP stream error (ran {run_duration:.0f}s) — restarting without stream ***")
+            print(f"\n[{_ts()}] *** Reserved stream error exit (ran {run_duration:.0f}s) — restarting ***")
             # stream.conf already cleared by pipeline, reset crash count — not a crash
             crash_count = 0
             continue
