@@ -13,18 +13,18 @@ Exit code convention from pipeline:
 
 Usage:  python3 run_pipeline.py [--no-stream]
 """
-import sys
-import subprocess
-import time
-import signal
 import os
+import signal
+import subprocess
+import sys
+import time
 from datetime import datetime
 
-RESTART_DELAY_SEC  = 2
-RESTART_EXIT_CODE  = 42
+RESTART_DELAY_SEC = 2
+RESTART_EXIT_CODE = 42
 STREAM_ERROR_EXIT_CODE = 43  # reserved for compatibility
-MAX_CRASHES        = 10   # stop looping if we crash this many times without a clean run
-CRASH_RESET_SEC    = 300  # reset crash counter if pipeline ran cleanly for this long
+MAX_CRASHES = 10  # stop looping if we crash this many times without a clean run
+CRASH_RESET_SEC = 300  # reset crash counter if pipeline ran cleanly for this long
 
 SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "pipeline.py")
@@ -35,15 +35,15 @@ def _ts() -> str:
 
 
 def main():
-    shutdown     = False
-    crash_count  = 0
-    extra_args   = sys.argv[1:]
+    shutdown = False
+    crash_count = 0
+    extra_args = sys.argv[1:]
 
     def _handler(_sig, _frame):
         nonlocal shutdown
         shutdown = True
 
-    signal.signal(signal.SIGINT,  _handler)
+    signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
 
     while not shutdown:
