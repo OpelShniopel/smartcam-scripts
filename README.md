@@ -3,6 +3,26 @@
 Python wrappers and GStreamer/DeepStream pipelines for the smartcam basketball
 camera setup.
 
+## Quickstart stream
+
+Run `run_pipeline.py` in the first terminal. Start `devtablet` in a
+second terminal and then send `start_stream <rtmpUrl>`.
+
+Terminal 1:
+
+```bash
+cd /home/smartcam/DeepStream-Yolo
+python3 run_pipeline.py
+```
+
+Terminal 2:
+
+```bash
+cd /home/smartcam/DeepStream-Yolo/smartcam-api-main
+go run ./cmd/devtablet/
+start_stream <rtmpUrl>
+```
+
 ## Runtime directory
 
 Run this from `/home/smartcam/DeepStream-Yolo` only:
