@@ -4,7 +4,7 @@ Manual zoom-focus calibration recorder.
 
 Controls:
   Arrow Up / Arrow Down   — move focus by FOCUS_FINE steps
-  + / -                   — move focus by FOCUS_COARSE steps
+  [ / ]                   — move focus by FOCUS_COARSE steps
   Enter                   — save current zoom+focus and advance to next zoom step
   s                       — skip this zoom step without saving
   q                       — quit (saves CSV of recorded points so far)
@@ -30,7 +30,7 @@ ZOOM_MAX_STEPS   = 41000
 ZOOM_STEP        = 100     # Motor steps between calibration points
 
 FOCUS_FINE       = 10      # Steps per arrow key press
-FOCUS_COARSE     = 100     # Steps per +/- press
+FOCUS_COARSE     = 200     # Steps per +/- press
 
 FOCUS_START      = 35000   # Initial focus position for each zoom step
 FOCUS_MIN        = 32000
@@ -97,7 +97,7 @@ def main():
     recorded = []
 
     print(f"\n{len(zoom_positions)} zoom positions  ({ZOOM_MIN_STEPS}–{ZOOM_MAX_STEPS}, step={ZOOM_STEP})")
-    print("Controls:  Up/Down = fine  |  +/- = coarse  |  Enter = save  |  s = skip  |  q = quit\n")
+    print("Controls:  Up/Down = fine  |  [/] = coarse  |  Enter = save  |  s = skip  |  q = quit\n")
 
     focus_pos = FOCUS_START
 
@@ -105,7 +105,7 @@ def main():
         print(f"\n[{idx+1}/{len(zoom_positions)}] zoom={zoom}  moving...")
         move_zoom(ser, zoom)
         move_focus(ser, focus_pos)
-        sys.stdout.write(f"  focus={focus_pos}  (Up/Down ±{FOCUS_FINE}  +/- ±{FOCUS_COARSE}  Enter=save  s=skip)\n")
+        sys.stdout.write(f"  focus={focus_pos}  (Up/Down ±{FOCUS_FINE}  [/] ±{FOCUS_COARSE}  Enter=save  s=skip)\n")
         sys.stdout.flush()
 
         while True:
@@ -123,13 +123,13 @@ def main():
                 sys.stdout.write(f"\r  focus={focus_pos}    ")
                 sys.stdout.flush()
 
-            elif key == "+":
+            elif key == "]":
                 focus_pos = min(FOCUS_MAX, focus_pos + FOCUS_COARSE)
                 move_focus(ser, focus_pos)
                 sys.stdout.write(f"\r  focus={focus_pos}    ")
                 sys.stdout.flush()
 
-            elif key == "-":
+            elif key == "[":
                 focus_pos = max(FOCUS_MIN, focus_pos - FOCUS_COARSE)
                 move_focus(ser, focus_pos)
                 sys.stdout.write(f"\r  focus={focus_pos}    ")
