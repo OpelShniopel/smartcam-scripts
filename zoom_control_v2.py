@@ -15,7 +15,7 @@ FOCUS_SPEED    = 2500
 TARGET_WIDTH            = 100   # Target ball width in pixels
 ZOOM_K                  = 2000  # Step multiplier: larger = faster zoom response
 NORM_DEADZONE           = 0.1   # Log-ratio deadzone (~±10% of target width)
-MAX_ZOOM_STEP           = 200   # Max steps per frame — keeps focus motor from falling behind
+MAX_ZOOM_STEP           = 1000   # Max steps per frame — keeps focus motor from falling behind
 VELOCITY_ZOOM_THRESHOLD = 40    # Ball horizontal speed (px/frame) that starts triggering zoom-out
 VELOCITY_ZOOM_GAIN      = 5.0   # Zoom-out steps added per px/frame above threshold
 FRAME_W                 = 1280  # Camera frame width in pixels
@@ -40,7 +40,7 @@ class ZoomController:
         self.current_zoom_pos = 32000
         self.last_ball_x = None
         self.last_cmd_time = 0
-        self.cmd_interval = 0.08  # ~12Hz - prevents serial flooding
+        self.cmd_interval = 0.05
         self.target_zoom_pos = ZOOM_BASE_POS
         self.reported_zoom_pos = ZOOM_BASE_POS # What the motor actually reached
 
@@ -98,26 +98,22 @@ class ZoomController:
             return
 
         # 3. Calculate a "Micro-Step"
-        # Don't try to reach target_zoom_pos in one go. 
-        # Move only a small distance toward it.
         diff = self.target_zoom_pos - self.current_zoom_pos
         
-        # Max steps we allow per 50ms (adjust based on motor speed)
-        # If this is 100, and zoom_speed is 1000 steps/sec, 
-        # 100 steps takes 0.1s. We are sending every 0.05s.
-        # This keeps the buffer slightly ahead but not overwhelmed.
-        max_segment = 80 
-        
-        if abs(diff) < 5: # Deadzone to stop oscillation
-            return
+        if abs(diff) < 5: return
 
-        step_to_take = max(-max_segment, min(max_segment, diff))
+        # DYNAMIC SCALING:
+        # Move 50% of the remaining distance per command, 
+        # but cap it so we don't break the focus curve too badly.
+        # Increase MAX_SEGMENT if your motors can handle it.
+        MAX_SEGMENT = 500  # Increased from 80 for much higher speed
+        step_to_take = diff * 0.5 
+        step_to_take = max(-MAX_SEGMENT, min(MAX_SEGMENT, step_to_take))
+
         new_zoom_request = self.current_zoom_pos + step_to_take
         new_focus_request = self.get_focus_for_zoom(new_zoom_request)
 
-        # 4. Send the micro-move
-        # Since G1 isn't available, we send G0. Because the distance is tiny,
-        # the "desync" between A and B is almost invisible.
+        # 4. Send command
         lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_request)} B{int(new_focus_request)}")
         
         self.current_zoom_pos = new_zoom_request
