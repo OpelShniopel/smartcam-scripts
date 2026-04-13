@@ -110,6 +110,9 @@ DEFAULT_SCORE_STATE = {
     "quarter": 1,
     "clock": "10:00",
     "visible": False,
+    "game_id": 0,
+    "updated_at": 0,
+    "milestone": None,
 }
 
 
