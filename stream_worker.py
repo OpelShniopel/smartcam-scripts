@@ -234,10 +234,32 @@ def _update_overlay(state: dict) -> None:
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
 
+    milestone_player = els.get("osd_milestone_player")
+    milestone_text = els.get("osd_milestone_text")
+    milestone = state.get("milestone")
+    now_ms = int(time.time() * 1000)
+    show_milestone = (
+        milestone is not None
+        and isinstance(milestone, dict)
+        and milestone.get("show_until", 0) > now_ms
+    )
+    if milestone_player:
+        milestone_player.set_property("silent", not show_milestone)
+        if show_milestone:
+            milestone_player.set_property("text", milestone.get("player_name", ""))
+    if milestone_text:
+        milestone_text.set_property("silent", not show_milestone)
+        if show_milestone:
+            milestone_text.set_property(
+                "text",
+                f"{milestone.get('milestone_name', '')}: {milestone.get('value_achieved', '')}",
+            )
+
 
 def _poll_score_state() -> bool:
     state = read_score_state()
-    if state != _last_score_state:
+    has_active_milestone = (_last_score_state or {}).get("milestone") is not None
+    if state != _last_score_state or has_active_milestone:
         _update_overlay(state)
     return True
 
@@ -359,6 +381,8 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     osd_score = _make("textoverlay", "strm_osd_score")
     osd_clock = _make("textoverlay", "strm_osd_clock")
     osd_fouls = _make("textoverlay", "strm_osd_fouls")
+    osd_milestone_player = _make("textoverlay", "strm_osd_milestone_player")
+    osd_milestone_text = _make("textoverlay", "strm_osd_milestone_text")
     enc = _make("x264enc", "strm_enc")
     parse_out = _make("h264parse", "strm_parse")
     flvmux = _make("flvmux", "strm_flvmux")
@@ -392,6 +416,8 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     _setup_text(osd_score, "0 - 0", xpos=0.120, ypos=0.040, font="Sans Bold 22", color=0xFFD916FF)
     _setup_text(osd_clock, "Q1 10:00", xpos=0.330, ypos=0.040, font="Sans Bold 22", color=0xB2E5FFFF)
     _setup_text(osd_fouls, "", xpos=0.022, ypos=0.068, font="Sans 13", color=0xA6A6A6FF)
+    _setup_text(osd_milestone_player, "", xpos=0.35, ypos=0.82, font="Sans Bold 24", color=0xFFD916FF)
+    _setup_text(osd_milestone_text, "", xpos=0.35, ypos=0.84, font="Sans Bold 18", color=0xFFFFFFFF)
 
     enc.set_property("pass", "cbr")
     enc.set_property("bitrate", int(cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)))
@@ -414,6 +440,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     elements = [
         src, depay, parse_in, dec, conv, caps_i420, q,
         osd_bg, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
+        osd_milestone_player, osd_milestone_text,
         enc, parse_out, flvmux, rtmpsink, audiosrc, aacenc,
     ]
     if watchdog is not None:
@@ -435,7 +462,9 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     _link(osd_away, osd_score)
     _link(osd_score, osd_clock)
     _link(osd_clock, osd_fouls)
-    _link(osd_fouls, enc)
+    _link(osd_fouls, osd_milestone_player)
+    _link(osd_milestone_player, osd_milestone_text)
+    _link(osd_milestone_text, enc)
     _link(enc, parse_out)
     if watchdog is not None:
         _link(parse_out, watchdog)
@@ -470,6 +499,8 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
         "osd_score": osd_score,
         "osd_clock": osd_clock,
         "osd_fouls": osd_fouls,
+        "osd_milestone_player": osd_milestone_player,
+        "osd_milestone_text": osd_milestone_text,
     })
 
     _enc_stream = enc
