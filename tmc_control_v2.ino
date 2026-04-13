@@ -44,22 +44,22 @@
 //  P CONTROLLER CONSTANTS  (tune these)
 // ============================================================
 #define FRAME_W             1280     // must match Python / inference resolution
-#define MIN_DEADZONE_PX     20     // pixels — no movement inside this window
+#define MIN_DEADZONE_PX     10     // pixels — no movement inside this window
 #define MAX_DEADZONE_PX     60
 
-#define SPEED_FACTOR        4.0f    // exponent of speed curve (higher = more exponential)
+#define SPEED_FACTOR        2.0f    // exponent of speed curve (higher = more exponential)
 #define MIN_VEL_SPS         100    // steps/sec at minimum error outside deadzone
-#define MAX_VEL_SPS         7000    // steps/sec at full-frame error
+#define MAX_VEL_SPS         8000    // steps/sec at full-frame error
 #define HOMING_VEL_SPS      3000
 
 #define BALL_BOOST_THR      20    // px/frame — above this, apply velocity boost
-#define BALL_BOOST_GAIN     2.0f   // boost multiplier coefficient
+#define BALL_BOOST_GAIN     4.0f   // boost multiplier coefficient
 #define BALL_TIMEOUT_MS     300    // ms without X update before auto-stop
 
 // ============================================================
 //  MOTION CONSTANTS
 // ============================================================
-#define ACCEL_PER_MS        120     // steps/sec per ms ramp rate
+#define ACCEL_PER_MS        250     // steps/sec per ms ramp rate
 
 // ============================================================
 //  SERIAL
@@ -169,7 +169,7 @@ int32_t computeVelocity(int32_t error_px, float scale) {
 
     if (abs(error_px) <= dynamic_deadzone) return 0;
 
-    float normalized   = min(1.0f, (float)abs(error_px) / (FRAME_W / 2.0f));
+    float normalized   = min(1.0f, (float)abs(error_px) / (FRAME_W / 2.5f));
     float base_factor  = powf(normalized, SPEED_FACTOR);
 
     // Velocity boost when ball is moving fast across frame
