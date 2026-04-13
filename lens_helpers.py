@@ -18,6 +18,7 @@ def send_command(ser, cmd):
 
 def parse_status(ser):
     """Query board status (!1) and return a parsed list of ints."""
+    ser.reset_input_buffer()
     raw = send_command(ser, "!1")
     return [int(v.strip()) for v in raw.split(",")]
 
