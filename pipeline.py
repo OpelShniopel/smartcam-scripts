@@ -58,6 +58,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -148,11 +149,19 @@ CLEAN_PRESET = "ultrafast"
 CLEAN_TUNE = "zerolatency"
 
 # AI branch encoder settings
-AI_BITRATE = 2000
+AI_BITRATE = 3500
 AI_KEYINT = 20
 AI_THREADS = 1
 AI_PRESET = "ultrafast"
 AI_TUNE = "zerolatency"
+
+# Local AI recording settings (debug / training capture)
+ENABLE_CAM2_AI_RECORDING = True
+RECORDINGS_DIR = os.path.join(SCRIPT_DIR, "recordings")
+RECORD_SEGMENT_SECONDS = 300
+RECORD_MUXER_FACTORY = "matroskamux"
+RECORD_FILE_EXTENSION = "mkv"
+RECORD_QUEUE_BUFFERS = 120
 
 # RTMP stream encoder settings — YouTube 1080p
 RTMP_BITRATE = 6800
@@ -796,6 +805,39 @@ def _tee_branch(tee: Gst.Element, first_el: Gst.Element) -> None:
         sys.exit(1)
 
 
+def _link_src_to_request_pad(src: Gst.Element, sink: Gst.Element, pad_name: str,
+                             err_label: str) -> None:
+    src_pad = _get_static_pad(src, "src")
+    sink_pad = sink.request_pad_simple(pad_name)
+    if not sink_pad:
+        sys.stderr.write(
+            f"ERROR: Unable to request pad '{pad_name}' from {sink.get_name()} for {err_label}\n"
+        )
+        sys.exit(1)
+    if src_pad.link(sink_pad) != Gst.PadLinkReturn.OK:
+        sys.stderr.write(
+            f"ERROR: Failed to link {src.get_name()} -> {sink.get_name()}.{pad_name} for {err_label}\n"
+        )
+        sys.exit(1)
+
+
+def _recording_enabled(cam_label: str) -> bool:
+    cam = str(cam_label).strip().upper()
+    return cam == "CAM2" and ENABLE_CAM2_AI_RECORDING and _ai_enabled(cam)
+
+
+def _recording_location_pattern(cam_label: str) -> str:
+    cam = str(cam_label).strip().lower()
+    os.makedirs(RECORDINGS_DIR, exist_ok=True)
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    return os.path.join(
+        RECORDINGS_DIR,
+        f"{cam}_ai_{ts}_part%02d.{RECORD_FILE_EXTENSION}",
+    )
+
+
 def _make_nvconv(name: str) -> Gst.Element:
     el = _make("nvvideoconvert", name)
     el.set_property("gpu-id", 0)
@@ -1234,7 +1276,16 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     q_post = _make("queue", f"q{suffix}_post")
     enc = _make("x264enc", f"enc{suffix}_ai")
     parse = _make("h264parse", f"parse{suffix}_ai")
+    parse_tee = _make("tee", f"tee{suffix}_ai_parse")
+    q_rtsp = _make("queue", f"q{suffix}_ai_rtsp")
     sink = _make("rtspclientsink", f"sink{suffix}_ai")
+
+    q_rec = None
+    rec = None
+    recording_enabled = _recording_enabled(cam_label)
+    if recording_enabled:
+        q_rec = _make("queue", f"q{suffix}_ai_record")
+        rec = _make("splitmuxsink", f"rec{suffix}_ai")
 
     mux.set_property("width", 1280)
     mux.set_property("height", 720)
@@ -1266,6 +1317,17 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     q_post.set_property("max-size-time", 0)
     q_post.set_property("leaky", 2)
 
+    q_rtsp.set_property("max-size-buffers", 2)
+    q_rtsp.set_property("max-size-bytes", 0)
+    q_rtsp.set_property("max-size-time", 0)
+    q_rtsp.set_property("leaky", 2)
+
+    if q_rec is not None:
+        q_rec.set_property("max-size-buffers", RECORD_QUEUE_BUFFERS)
+        q_rec.set_property("max-size-bytes", 0)
+        q_rec.set_property("max-size-time", 0)
+        q_rec.set_property("leaky", 2)
+
     enc.set_property("tune", AI_TUNE)
     enc.set_property("speed-preset", AI_PRESET)
     enc.set_property("bitrate", AI_BITRATE)
@@ -1275,9 +1337,20 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
     sink.set_property("protocols", 4)
 
-    for el in (q_ai, conv_ai, caps_ai, mux, pgie, tracker,
-               conv_pre, nvosd, conv_post, caps_post, q_post,
-               enc, parse, sink):
+    if rec is not None:
+        rec.set_property("location", _recording_location_pattern(cam_label))
+        rec.set_property("max-size-time", RECORD_SEGMENT_SECONDS * Gst.SECOND)
+        rec.set_property("muxer-factory", RECORD_MUXER_FACTORY)
+        rec.set_property("send-keyframe-requests", True)
+        rec.set_property("async-finalize", True)
+
+    elements = [q_ai, conv_ai, caps_ai, mux, pgie, tracker,
+                conv_pre, nvosd, conv_post, caps_post, q_post,
+                enc, parse, parse_tee, q_rtsp, sink]
+    if q_rec is not None and rec is not None:
+        elements.extend([q_rec, rec])
+
+    for el in elements:
         pipeline.add(el)
 
     _tee_branch(tee, q_ai)
@@ -1299,7 +1372,20 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     _link(caps_post, q_post)
     _link(q_post, enc)
     _link(enc, parse)
-    _link(parse, sink)
+    _link(parse, parse_tee)
+
+    _tee_branch(parse_tee, q_rtsp)
+    _link(q_rtsp, sink)
+
+    if q_rec is not None and rec is not None:
+        _tee_branch(parse_tee, q_rec)
+        _link_src_to_request_pad(q_rec, rec, "video", f"{cam_label} recording")
+        print(
+            f"{cam_label} AI recording enabled -> {RECORDINGS_DIR} "
+            f"({RECORD_SEGMENT_SECONDS}s segments, .{RECORD_FILE_EXTENSION})"
+        )
+    else:
+        print(f"{cam_label} AI recording disabled")
 
     return pgie, enc
 
