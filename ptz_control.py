@@ -5,7 +5,7 @@ import sys
 import atexit
 import signal
 from pan_control_esp_v2 import PanController
-from zoom_control import ZoomController
+from zoom_control_v2 import ZoomController
 
 # --- CONFIGURATION ---
 UNIX_SOCK  = "/tmp/pycam.sock"
