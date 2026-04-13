@@ -106,7 +106,7 @@ class ZoomController:
         # Move 50% of the remaining distance per command, 
         # but cap it so we don't break the focus curve too badly.
         # Increase MAX_SEGMENT if your motors can handle it.
-        MAX_SEGMENT = 500  # Increased from 80 for much higher speed
+        MAX_SEGMENT = 200  # Increased from 80 for much higher speed
         step_to_take = diff * 0.5 
         step_to_take = max(-MAX_SEGMENT, min(MAX_SEGMENT, step_to_take))
 
