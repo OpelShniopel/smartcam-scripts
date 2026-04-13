@@ -30,7 +30,7 @@
 // ============================================================
 #define STEPS_PER_DEG    125
 
-#define PAN_MAX_DEG       90
+#define PAN_MAX_DEG       91
 #define PAN_MIN_DEG      -35
 #define PAN_MAX_STEPS    (PAN_MAX_DEG * STEPS_PER_DEG)    //  11250
 #define PAN_MIN_STEPS    (PAN_MIN_DEG * STEPS_PER_DEG)    //  -4375
@@ -43,27 +43,28 @@
 // ============================================================
 //  P CONTROLLER CONSTANTS  (tune these)
 // ============================================================
-#define FRAME_W          1280     // must match Python / inference resolution
-#define DEADZONE_PX        50     // pixels — no movement inside this window
+#define FRAME_W             1280     // must match Python / inference resolution
+#define MIN_DEADZONE_PX     20     // pixels — no movement inside this window
+#define MAX_DEADZONE_PX     60
 
-#define SPEED_FACTOR      3.5f    // exponent of speed curve (higher = more exponential)
-#define MIN_VEL_SPS        100    // steps/sec at minimum error outside deadzone
-#define MAX_VEL_SPS       7000    // steps/sec at full-frame error
-#define HOMING_VEL_SPS    2000
+#define SPEED_FACTOR        4.0f    // exponent of speed curve (higher = more exponential)
+#define MIN_VEL_SPS         100    // steps/sec at minimum error outside deadzone
+#define MAX_VEL_SPS         7000    // steps/sec at full-frame error
+#define HOMING_VEL_SPS      3000
 
 #define BALL_BOOST_THR      20    // px/frame — above this, apply velocity boost
-#define BALL_BOOST_GAIN    1.7f   // boost multiplier coefficient
-#define BALL_TIMEOUT_MS    300    // ms without X update before auto-stop
+#define BALL_BOOST_GAIN     2.0f   // boost multiplier coefficient
+#define BALL_TIMEOUT_MS     300    // ms without X update before auto-stop
 
 // ============================================================
 //  MOTION CONSTANTS
 // ============================================================
-#define ACCEL_PER_MS      120     // steps/sec per ms ramp rate
+#define ACCEL_PER_MS        120     // steps/sec per ms ramp rate
 
 // ============================================================
 //  SERIAL
 // ============================================================
-#define CMD_BAUD        921600
+#define CMD_BAUD            921600
 
 // ============================================================
 //  GLOBALS
@@ -164,7 +165,9 @@ void updateVelocity() {
 //  Returns target velocity in steps/sec (signed).
 // ============================================================
 int32_t computeVelocity(int32_t error_px, float scale) {
-    if (abs(error_px) <= DEADZONE_PX) return 0;
+    float dynamic_deadzone = MIN_DEADZONE_PX + (MAX_DEADZONE_PX - MIN_DEADZONE_PX) * scale;
+
+    if (abs(error_px) <= dynamic_deadzone) return 0;
 
     float normalized   = min(1.0f, (float)abs(error_px) / (FRAME_W / 2.0f));
     float base_factor  = powf(normalized, SPEED_FACTOR);
