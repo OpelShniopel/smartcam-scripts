@@ -200,13 +200,17 @@ score_state = {
     "quarter": 1,
     "clock": "10:00",
     "visible": False,
+    "game_id": 0,
+    "updated_at": 0,
+    "milestone": None,
 }
 score_lock = threading.Lock()
 
 def _apply_score_patch(data: dict) -> None:
     allowed_str = {"home_name", "away_name", "clock"}
     allowed_int = {"home_points", "away_points", "home_fouls",
-                   "away_fouls", "home_timeouts", "away_timeouts", "quarter"}
+                   "away_fouls", "home_timeouts", "away_timeouts", "quarter",
+                   "game_id", "updated_at"}
     allowed_bool = {"visible"}
     with score_lock:
         for k in allowed_str:
@@ -218,6 +222,8 @@ def _apply_score_patch(data: dict) -> None:
         for k in allowed_bool:
             if k in data and isinstance(data[k], bool):
                 score_state[k] = data[k]
+        if "milestone" in data and (data["milestone"] is None or isinstance(data["milestone"], dict)):
+            score_state["milestone"] = data["milestone"]
     _persist_score_state()
 
 
