@@ -25,14 +25,11 @@ COAST_ERROR_PX   = 60  # small ghost error to keep gentle momentum during coast
 
 class PanController:
     def __init__(self):
-        self.jogging          = False
-        self.last_error_x     = 0.0
-        self.lost_frames      = 0
-        self.last_direction   = 0
-        self.rogue_patience   = 0
-        self.frame_count      = 0
-        self.sync_every_n     = 15
-        self.current_pan_pos  = 0   # tracked in steps for limit awareness
+        self.jogging        = False
+        self.last_error_x   = 0.0
+        self.lost_frames    = 0
+        self.last_direction = 0
+        self.rogue_patience = 0
 
         try:
             self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.05)
@@ -45,9 +42,8 @@ class PanController:
             else:
                 print("Homing skipped. Zeroing position.")
                 self.ser_p.write(b"Z\n")
-                self.current_pan_pos = 0
 
-            print(f"Controller Ready.")
+            print("Controller Ready.")
 
         except Exception as e:
             print(f"WARNING: Pan Motor serial port not found. ({e})")
@@ -67,26 +63,11 @@ class PanController:
             print(f"  [HOMING] {raw}")
             if raw == "OK":
                 print("Homing complete.")
-                self.current_pan_pos = 0
                 return
             if raw.startswith("ERR"):
                 print(f"Homing error: {raw}")
                 return
         print("WARNING: Homing timed out.")
-
-    # ------------------------------------------------------------------
-    def _get_position(self):
-        if not self.ser_p:
-            return self.current_pan_pos
-        try:
-            self.ser_p.reset_input_buffer()
-            self.ser_p.write(b"?\n")
-            raw = self.ser_p.readline().decode("utf-8", errors="ignore").strip()
-            if raw.startswith("P"):
-                return int(raw[1:])
-        except Exception as e:
-            DEBUG and print(f"[PAN] Sync error: {e}")
-        return self.current_pan_pos
 
     # ------------------------------------------------------------------
     def send_command(self, error_x, speed_scale=1.0):
@@ -102,22 +83,6 @@ class PanController:
 
     # ------------------------------------------------------------------
     def process_detection(self, detections, speed_scale=1.0):
-        self.frame_count += 1
-
-        # Periodic position sync
-        if self.frame_count % self.sync_every_n == 0:
-            hw_pos = self._get_position()
-            drift  = abs(hw_pos - self.current_pan_pos)
-            if drift > 500:   # >4° unexpected drift
-                DEBUG and print(f"[CRITICAL SYNC] Drift {drift} steps. Resyncing.")
-                self.ser_p.write(b"S\n")
-                time.sleep(0.02)
-                self.ser_p.reset_input_buffer()
-                self.current_pan_pos = hw_pos
-                return
-            elif drift > 0:
-                self.current_pan_pos = hw_pos
-
         ball = next((d for d in detections if d["class"] == "BALL"), None)
 
         if not ball:
@@ -151,10 +116,7 @@ class PanController:
     def _stop_jog(self):
         if not self.ser_p:
             return
-        self.ser_p.write(b"L\n")   # graceful decel via ramp
-        time.sleep(0.02)
-        self.ser_p.reset_input_buffer()
-        self.current_pan_pos = self._get_position()
+        self.ser_p.write(b"L\n")
         self.jogging = False
 
     # ------------------------------------------------------------------
@@ -164,7 +126,6 @@ class PanController:
         self.ser_p.write(b"S\n")
         time.sleep(0.05)
         self.ser_p.write(b"G0\n")
-        self.current_pan_pos = 0
 
 
 if __name__ == "__main__":
