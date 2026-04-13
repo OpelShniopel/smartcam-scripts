@@ -22,6 +22,7 @@ FRAME_W                 = 1280  # Camera frame width in pixels
 FRAME_H                 = 720
 EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
 EDGE_ZOOM_GAIN          = 4.0   # Zoom-out steps per pixel inside the edge margin
+MAX_SEGMENT             = 300   # Maximum dynamic zoom step segment
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 40000
@@ -106,7 +107,7 @@ class ZoomController:
         # Move 50% of the remaining distance per command, 
         # but cap it so we don't break the focus curve too badly.
         # Increase MAX_SEGMENT if your motors can handle it.
-        MAX_SEGMENT = 200  # Increased from 80 for much higher speed
+          # Increased from 80 for much higher speed
         step_to_take = diff * 0.5 
         step_to_take = max(-MAX_SEGMENT, min(MAX_SEGMENT, step_to_take))
 
