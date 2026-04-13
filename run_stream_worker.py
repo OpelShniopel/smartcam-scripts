@@ -12,6 +12,7 @@ from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKER_SCRIPT = os.path.join(SCRIPT_DIR, "stream_worker.py")
+OWNER_PID = int(os.environ.get("STREAM_OWNER_PID", "0") or "0")
 PID_FILE = os.path.join(SCRIPT_DIR, "stream_worker.pid")
 STREAM_ERROR_EXIT_CODE = 43
 MAX_CRASHES = 20
@@ -37,6 +38,16 @@ def _cleanup_pid() -> None:
             os.unlink(PID_FILE)
     except OSError:
         pass
+
+
+def _owner_alive() -> bool:
+    if OWNER_PID <= 0:
+        return True
+    try:
+        os.kill(OWNER_PID, 0)
+        return True
+    except OSError:
+        return False
 
 
 def _sleep_for_attempt(attempt: int) -> int:
@@ -65,6 +76,9 @@ def main() -> None:
 
     try:
         while not shutdown:
+            if not _owner_alive():
+                shutdown = True
+                break
             if crash_count >= MAX_CRASHES:
                 print(f"[{_ts()}] worker crashed {crash_count} times — giving up")
                 raise SystemExit(1)
@@ -97,6 +111,10 @@ def main() -> None:
             else:
                 crash_count += 1
 
+            if not _owner_alive():
+                shutdown = True
+                break
+
             delay = _sleep_for_attempt(crash_count)
             if ret == STREAM_ERROR_EXIT_CODE:
                 print(
@@ -108,7 +126,12 @@ def main() -> None:
                     f"[{_ts()}] worker exit code {ret} after {run_duration:.0f}s "
                     f"— retrying in {delay}s"
                 )
-            time.sleep(delay)
+            end = time.monotonic() + delay
+            while time.monotonic() < end and not shutdown:
+                if not _owner_alive():
+                    shutdown = True
+                    break
+                time.sleep(0.2)
     finally:
         _cleanup_pid()
 
