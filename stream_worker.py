@@ -199,6 +199,7 @@ def _update_overlay(state: dict) -> None:
         return
 
     visible = state.get("visible", False)
+    quarter = els.get("osd_quarter")
     home = els.get("osd_home")
     away = els.get("osd_away")
     score = els.get("osd_score")
@@ -206,6 +207,10 @@ def _update_overlay(state: dict) -> None:
     fouls = els.get("osd_fouls")
     bg = els.get("osd_bg")
 
+    if quarter:
+        quarter.set_property("silent", not visible)
+        if visible:
+            quarter.set_property("text", f"Q{state.get('quarter', 1)}")
     if home:
         home.set_property("silent", not visible)
         if visible:
@@ -217,11 +222,11 @@ def _update_overlay(state: dict) -> None:
     if score:
         score.set_property("silent", not visible)
         if visible:
-            score.set_property("text", f"{state['home_points']} - {state['away_points']}")
+            score.set_property("text", f"{state['home_points']}\n{state['away_points']}")
     if clock:
         clock.set_property("silent", not visible)
         if visible:
-            clock.set_property("text", f"Q{state['quarter']}  {state['clock']}")
+            clock.set_property("text", state.get("clock", ""))
     if fouls:
         fouls.set_property("silent", not visible)
         if visible:
@@ -376,6 +381,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     caps_i420 = _make("capsfilter", "strm_caps_i420")
     q = _make("queue", "strm_queue")
     osd_bg = _make("gdkpixbufoverlay", "strm_osd_bg")
+    osd_quarter = _make("textoverlay", "strm_osd_quarter")
     osd_home = _make("textoverlay", "strm_osd_home")
     osd_away = _make("textoverlay", "strm_osd_away")
     osd_score = _make("textoverlay", "strm_osd_score")
@@ -411,11 +417,12 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     osd_bg.set_property("overlay-height", SCOREBOARD_H)
     osd_bg.set_property("alpha", 0.0)
 
-    _setup_text(osd_home, "HOME", xpos=0.022, ypos=0.040, font="Sans Bold 22")
-    _setup_text(osd_away, "AWAY", xpos=0.230, ypos=0.040, font="Sans Bold 22")
-    _setup_text(osd_score, "0 - 0", xpos=0.120, ypos=0.040, font="Sans Bold 22", color=0xFFD916FF)
-    _setup_text(osd_clock, "Q1 10:00", xpos=0.330, ypos=0.040, font="Sans Bold 22", color=0xB2E5FFFF)
-    _setup_text(osd_fouls, "", xpos=0.022, ypos=0.068, font="Sans 13", color=0xA6A6A6FF)
+    _setup_text(osd_quarter, "Q1", xpos=0.397, ypos=0.865, font="Sans Bold 18")
+    _setup_text(osd_home, "HOME", xpos=0.420, ypos=0.876, font="Sans Bold 16")
+    _setup_text(osd_away, "AWAY", xpos=0.420, ypos=0.920, font="Sans Bold 16")
+    _setup_text(osd_score, "0\n0", xpos=0.560, ypos=0.876, font="Sans Bold 22", color=0xFFD916FF)
+    _setup_text(osd_clock, "10:00", xpos=0.565, ypos=0.865, font="Sans Bold 18", color=0xB2E5FFFF)
+    _setup_text(osd_fouls, "", xpos=0.420, ypos=0.950, font="Sans 12", color=0xA6A6A6FF)
     _setup_text(osd_milestone_player, "", xpos=0.35, ypos=0.82, font="Sans Bold 24", color=0xFFD916FF)
     _setup_text(osd_milestone_text, "", xpos=0.35, ypos=0.84, font="Sans Bold 18", color=0xFFFFFFFF)
 
@@ -439,7 +446,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     elements = [
         src, depay, parse_in, dec, conv, caps_i420, q,
-        osd_bg, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
+        osd_bg, osd_quarter, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
         osd_milestone_player, osd_milestone_text,
         enc, parse_out, flvmux, rtmpsink, audiosrc, aacenc,
     ]
@@ -457,7 +464,8 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     _link(conv, caps_i420)
     _link(caps_i420, q)
     _link(q, osd_bg)
-    _link(osd_bg, osd_home)
+    _link(osd_bg, osd_quarter)
+    _link(osd_quarter, osd_home)
     _link(osd_home, osd_away)
     _link(osd_away, osd_score)
     _link(osd_score, osd_clock)
@@ -494,6 +502,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     _osd_elements.clear()
     _osd_elements.update({
         "osd_bg": osd_bg,
+        "osd_quarter": osd_quarter,
         "osd_home": osd_home,
         "osd_away": osd_away,
         "osd_score": osd_score,
