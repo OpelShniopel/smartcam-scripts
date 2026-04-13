@@ -94,11 +94,11 @@ class ZoomController:
 
         # If we are trying to flip directions, and the move is small, ignore it.
         # This stops the "hunting" behavior.
-        if self.last_dir != 0 and current_dir != 0 and current_dir != self.last_dir:
+        if self.last_zoom_dir != 0 and current_dir != 0 and current_dir != self.last_zoom_dir:
             if abs(zoom_steps) < 150: # Threshold: ignore small direction flips
                 return
 
-        self.last_dir = current_dir
+        self.last_zoom_dir = current_dir
 
         # 1. Update the overall intended target (the "Virtual" position)
         self.target_zoom_pos += zoom_steps
