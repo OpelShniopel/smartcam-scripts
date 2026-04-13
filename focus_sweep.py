@@ -44,6 +44,9 @@ def main():
     print("Initializing lens board...")
     lens_helpers.init_lens_board(ser, ZOOM_SPEED, FOCUS_SPEED)
 
+    if not lens_helpers.verify_command(ser, "G90"):
+        print("WARNING: Lens board did not respond to G90.")
+
     print("Calibrating lens...")
     lens_helpers.calibrate_lens(ser, ZOOM_SPEED, FOCUS_SPEED)
 
