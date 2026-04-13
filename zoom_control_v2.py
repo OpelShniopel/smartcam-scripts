@@ -13,16 +13,16 @@ FOCUS_SPEED    = 1200
 
 # --- TUNING ---
 TARGET_WIDTH            = 50   # Target ball width in pixels
-ZOOM_K                  = 3000  # Step multiplier: larger = faster zoom response
-NORM_DEADZONE           = 0.1   # Log-ratio deadzone (~±10% of target width)
-MAX_ZOOM_STEP           = 1000   # Max steps per frame — keeps focus motor from falling behind
+ZOOM_K                  = 1500  # Step multiplier: larger = faster zoom response
+NORM_DEADZONE           = 0.15   # Log-ratio deadzone (~±10% of target width)
+MAX_ZOOM_STEP           = 800   # Max steps per frame — keeps focus motor from falling behind
 VELOCITY_ZOOM_THRESHOLD = 35    # Ball horizontal speed (px/frame) that starts triggering zoom-out
 VELOCITY_ZOOM_GAIN      = 6.0   # Zoom-out steps added per px/frame above threshold
 FRAME_W                 = 1280  # Camera frame width in pixels
 FRAME_H                 = 720
 EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
 EDGE_ZOOM_GAIN          = 4.0   # Zoom-out steps per pixel inside the edge margin
-MAX_SEGMENT             = 350   # Maximum dynamic zoom step segment
+MAX_SEGMENT             = 200   # Maximum dynamic zoom step segment
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 40000
@@ -120,7 +120,7 @@ class ZoomController:
         # Increase MAX_SEGMENT if your motors can handle it.
           # Increased from 80 for much higher speed
         if abs(diff) > 500:
-            step_to_take = diff * 0.7  # Be aggressive for big jumps
+            step_to_take = diff * 0.5  # Be aggressive for big jumps
         else:
             step_to_take = diff * 0.3  # Be gentle when close to target
 
