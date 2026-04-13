@@ -31,13 +31,19 @@
 #define PAN_MAX_STEPS    ( PAN_MAX_DEG * STEPS_PER_DEG)   //  11250
 #define PAN_MIN_STEPS    ( PAN_MIN_DEG * STEPS_PER_DEG)   //  -4375
 
+// Direction — flip between 0 and 1 to reverse motor direction
+#define INVERT_DIR  1
+#define DIR_FWD     (INVERT_DIR ? LOW  : HIGH)
+#define DIR_REV     (INVERT_DIR ? HIGH : LOW)
+
 // Velocity
 #define MAX_VEL_SPS     5000   // steps/sec (~40°/sec)
 #define MIN_VEL_SPS      200   // floor — below this treated as zero
+#define HOMING_VEL_SPS      2000
 
 // Acceleration: steps/sec added per 1ms tick
 // 80 → 0 to 5000 in ~62ms — snappy but not jarring
-#define ACCEL_PER_MS      80
+#define ACCEL_PER_MS      100
 
 // Serial
 #define CMD_BAUD        921600
@@ -126,8 +132,8 @@ void updateVelocity() {
     if (newVel == cv) return;
 
     // Set direction pin before changing step frequency
-    if      (newVel > 0) gpio_set_level((gpio_num_t)DIR_PIN, HIGH);
-    else if (newVel < 0) gpio_set_level((gpio_num_t)DIR_PIN, LOW);
+    if      (newVel > 0) gpio_set_level((gpio_num_t)DIR_PIN, DIR_FWD);
+    else if (newVel < 0) gpio_set_level((gpio_num_t)DIR_PIN, DIR_REV);
 
     runningVel = newVel;
     setStepFreq(newVel);
@@ -145,8 +151,8 @@ void doHoming() {
 
     // --- Fast seek rightward until limit triggers ---
     Serial.println("HOMING:SEEK");
-    gpio_set_level((gpio_num_t)DIR_PIN, HIGH);
-    runningVel = MAX_VEL_SPS;
+    gpio_set_level((gpio_num_t)DIR_PIN, DIR_FWD);
+    runningVel = HOMING_VEL_SPS;
     setStepFreq(MAX_VEL_SPS);
 
     uint32_t timeout = millis() + 15000;
@@ -161,7 +167,7 @@ void doHoming() {
     Serial.println("HOMING:BACKOFF");
     int32_t backoffSteps = 5 * STEPS_PER_DEG;
     int32_t startPos = stepPos;
-    gpio_set_level((gpio_num_t)DIR_PIN, LOW);
+    gpio_set_level((gpio_num_t)DIR_PIN, DIR_REV);
     runningVel = -(MAX_VEL_SPS / 4);
     setStepFreq(MAX_VEL_SPS / 4);
     while (abs(stepPos - startPos) < backoffSteps) delay(1);
@@ -171,7 +177,7 @@ void doHoming() {
     // --- Slow precision tap back to switch ---
     Serial.println("HOMING:TAP");
     int32_t tapVel = MAX_VEL_SPS / 10;
-    gpio_set_level((gpio_num_t)DIR_PIN, HIGH);
+    gpio_set_level((gpio_num_t)DIR_PIN, DIR_FWD);
     runningVel = tapVel;
     setStepFreq(tapVel);
 
@@ -186,7 +192,7 @@ void doHoming() {
     // At limit = PAN_MAX_STEPS from center; drive left to home (stepPos = 0)
     stepPos = PAN_MAX_STEPS;
     Serial.println("HOMING:CENTER");
-    gpio_set_level((gpio_num_t)DIR_PIN, LOW);
+    gpio_set_level((gpio_num_t)DIR_PIN, DIR_REV);
     runningVel = -(MAX_VEL_SPS / 2);
     setStepFreq(MAX_VEL_SPS / 2);
     while (stepPos > 0) delay(1);
@@ -204,8 +210,8 @@ void gotoPos(int32_t target) {
     int32_t moveVel = (target > stepPos) ? MAX_VEL_SPS / 2 : -(MAX_VEL_SPS / 2);
     int32_t slowZone = STEPS_PER_DEG * 5;   // slow within 5°
 
-    if (moveVel > 0) gpio_set_level((gpio_num_t)DIR_PIN, HIGH);
-    else             gpio_set_level((gpio_num_t)DIR_PIN, LOW);
+    if (moveVel > 0) gpio_set_level((gpio_num_t)DIR_PIN, DIR_FWD);
+    else             gpio_set_level((gpio_num_t)DIR_PIN, DIR_REV);
     runningVel = moveVel;
     setStepFreq(moveVel);
 
