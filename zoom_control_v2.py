@@ -22,7 +22,7 @@ FRAME_W                 = 1280  # Camera frame width in pixels
 FRAME_H                 = 720
 EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
 EDGE_ZOOM_GAIN          = 4.0   # Zoom-out steps per pixel inside the edge margin
-MAX_SEGMENT             = 300   # Maximum dynamic zoom step segment
+MAX_SEGMENT             = 500   # Maximum dynamic zoom step segment
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 40000
