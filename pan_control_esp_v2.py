@@ -1,7 +1,7 @@
 import serial
 import time
 
-DEBUG = True
+DEBUG = False
 
 # --- CONFIGURATION ---
 SERIAL_PORT_P = "/dev/pan_control_esp32"
@@ -21,7 +21,6 @@ MAX_ERROR_JUMP = 200   # pixels — reject detections that jump more than this p
 # Coasting — keep sending updates for this many frames after ball disappears
 MAX_COAST_FRAMES = 30
 COAST_ERROR_PX   = 60  # small ghost error to keep gentle momentum during coast
-
 
 class PanController:
     def __init__(self):

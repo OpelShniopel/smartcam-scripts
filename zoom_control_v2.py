@@ -3,7 +3,7 @@ import time
 import lens_helpers
 import math
 
-DEBUG = True
+DEBUG = False
 
 # --- CONFIGURATION ---
 CSV_FILE       = "zoom_focus_table.csv"
