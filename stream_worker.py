@@ -53,6 +53,7 @@ _status_payload: dict = {
     "worker_alive": True,
     "stream_active": False,
     "last_error": "",
+    "active_camera": "cam2",
     "updated_at": time.time(),
 }
 _worker_state: dict = {
@@ -65,6 +66,9 @@ _exit_code = 0
 _last_score_state: dict | None = None
 _last_config: dict | None = None
 _enc_stream: Gst.Element | None = None
+_selector: Gst.Element | None = None
+_selector_pads: dict[str, Gst.Pad] = {}
+_current_active_camera: str = "cam2"
 _osd_elements: dict[str, Gst.Element] = {}
 
 
@@ -80,7 +84,8 @@ def _get_local_ip() -> str:
 
 
 LOCAL_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
-SOURCE_RTSP_URL = os.environ.get("STREAM_SOURCE_RTSP") or "rtsp://127.0.0.1:8554/camera2_stream"
+SOURCE_RTSP_CAM0_URL = os.environ.get("STREAM_SOURCE_CAM0_RTSP") or "rtsp://127.0.0.1:8554/camera0_stream"
+SOURCE_RTSP_CAM2_URL = os.environ.get("STREAM_SOURCE_CAM2_RTSP") or "rtsp://127.0.0.1:8554/camera2_stream"
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
@@ -134,9 +139,35 @@ def read_score_state() -> dict:
     return state
 
 
+def _normalize_camera(value) -> str:
+    text = str(value or "cam2").strip().lower()
+    mapping = {
+        "0": "cam0",
+        "cam0": "cam0",
+        "camera0": "cam0",
+        "/dev/video0": "cam0",
+        "2": "cam2",
+        "cam2": "cam2",
+        "camera2": "cam2",
+        "/dev/video2": "cam2",
+    }
+    normalized = mapping.get(text, "cam2")
+
+    cam0_exists = os.path.exists("/dev/video0")
+    cam2_exists = os.path.exists("/dev/video2")
+
+    if normalized == "cam2" and not cam2_exists and cam0_exists:
+        return "cam0"
+    if normalized == "cam0" and not cam0_exists and cam2_exists:
+        return "cam2"
+
+    return normalized
+
+
 def read_worker_config() -> dict:
-    cfg = {"bitrateKbps": RTMP_BITRATE_DEFAULT}
+    cfg = {"bitrateKbps": RTMP_BITRATE_DEFAULT, "activeCamera": "cam2"}
     cfg.update(_read_json(STREAM_WORKER_CONFIG, cfg))
+    cfg["activeCamera"] = _normalize_camera(cfg.get("activeCamera", "cam2"))
     return cfg
 
 
@@ -269,6 +300,21 @@ def _poll_score_state() -> bool:
     return True
 
 
+def _switch_active_camera(active_camera: str) -> None:
+    global _current_active_camera
+    normalized = _normalize_camera(active_camera)
+    pad = _selector_pads.get(normalized)
+    if _selector is None or pad is None:
+        return
+    current = _selector.get_property("active-pad")
+    if current == pad and _current_active_camera == normalized:
+        return
+    _selector.set_property("active-pad", pad)
+    _current_active_camera = normalized
+    print(f"[worker] switched stream source -> {normalized}")
+    _set_status(active_camera=normalized)
+
+
 def _poll_worker_config() -> bool:
     global _last_config
     cfg = read_worker_config()
@@ -278,6 +324,7 @@ def _poll_worker_config() -> bool:
         if _enc_stream is not None:
             _enc_stream.set_property("bitrate", int(bitrate))
             print(f"[worker] updated stream bitrate -> {bitrate} kbps")
+        _switch_active_camera(cfg.get("activeCamera", "cam2"))
     return True
 
 
@@ -315,7 +362,7 @@ def _stall_check() -> bool:
     _stall_triggered = True
     msg = f"RTMP stalled — no outbound buffers for {idle_for:.1f}s"
     print(f"[worker] {msg}")
-    _set_status(stream_active=False, last_error=msg)
+    _set_status(stream_active=False, last_error=msg, active_camera=_current_active_camera)
     _exit_code = STREAM_ERROR_EXIT_CODE
     _loop.quit()
     return False
@@ -326,7 +373,7 @@ def _notify_stream_active() -> Gst.PadProbeReturn:
         _worker_state["stream_status_sent"] = True
         _mark_buffer_activity()
         print("[worker] RTMP flow verified active")
-        _set_status(stream_active=True, last_error="")
+        _set_status(stream_active=True, last_error="", active_camera=_current_active_camera)
     return Gst.PadProbeReturn.REMOVE
 
 
@@ -339,7 +386,7 @@ def _verify_timeout() -> bool:
     if not _worker_state["stream_status_sent"]:
         msg = f"RTMP connection timed out after {VERIFY_TIMEOUT_SEC}s"
         print(f"[worker] {msg}")
-        _set_status(stream_active=False, last_error=msg)
+        _set_status(stream_active=False, last_error=msg, active_camera=_current_active_camera)
         _exit_code = STREAM_ERROR_EXIT_CODE
         if _loop is not None:
             _loop.quit()
@@ -355,11 +402,22 @@ def _on_rtsp_pad_added(src: Gst.Element, pad: Gst.Pad, depay: Gst.Element) -> No
     if "application/x-rtp" not in caps_str:
         return
     if pad.link(sink_pad) != Gst.PadLinkReturn.OK:
-        raise RuntimeError("Failed to link rtspsrc to rtph264depay")
+        raise RuntimeError(f"Failed to link {src.get_name()} to {depay.get_name()}")
+
+
+def _link_branch_to_selector(last_el: Gst.Element, selector: Gst.Element, cam_name: str) -> Gst.Pad:
+    src_pad = _get_static_pad(last_el, "src")
+    sel_pad = selector.request_pad_simple("sink_%u")
+    if sel_pad is None:
+        raise RuntimeError(f"Unable to request selector sink pad for {cam_name}")
+    if src_pad.link(sel_pad) != Gst.PadLinkReturn.OK:
+        raise RuntimeError(f"Failed to link {last_el.get_name()} -> selector for {cam_name}")
+    _selector_pads[cam_name] = sel_pad
+    return sel_pad
 
 
 def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
-    global _enc_stream
+    global _enc_stream, _selector, _current_active_camera
 
     rtmp_url = read_stream_url()
     if not rtmp_url:
@@ -373,12 +431,25 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     if pipeline is None:
         raise RuntimeError("Unable to create stream-worker pipeline")
 
-    src = _make("rtspsrc", "src_rtsp")
-    depay = _make("rtph264depay", "src_depay")
-    parse_in = _make("h264parse", "src_parse")
-    dec = _make("nvv4l2decoder", "src_dec")
-    conv = _make("nvvideoconvert", "strm_conv")
-    caps_i420 = _make("capsfilter", "strm_caps_i420")
+    # CAM0 branch
+    src0 = _make("rtspsrc", "src0_rtsp")
+    depay0 = _make("rtph264depay", "src0_depay")
+    parse0 = _make("h264parse", "src0_parse")
+    dec0 = _make("nvv4l2decoder", "src0_dec")
+    conv0 = _make("nvvideoconvert", "src0_conv")
+    caps0 = _make("capsfilter", "src0_caps_i420")
+    q0 = _make("queue", "src0_queue")
+
+    # CAM2 branch
+    src2 = _make("rtspsrc", "src2_rtsp")
+    depay2 = _make("rtph264depay", "src2_depay")
+    parse2 = _make("h264parse", "src2_parse")
+    dec2 = _make("nvv4l2decoder", "src2_dec")
+    conv2 = _make("nvvideoconvert", "src2_conv")
+    caps2 = _make("capsfilter", "src2_caps_i420")
+    q2 = _make("queue", "src2_queue")
+
+    selector = _make("input-selector", "strm_selector")
     q = _make("queue", "strm_queue")
     osd_bg = _make("gdkpixbufoverlay", "strm_osd_bg")
     osd_quarter = _make("textoverlay", "strm_osd_quarter")
@@ -397,13 +468,24 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     audiosrc = _make("audiotestsrc", "strm_audiosrc")
     aacenc = _make("voaacenc", "strm_aacenc")
 
-    src.set_property("location", SOURCE_RTSP_URL)
-    src.set_property("protocols", 4)
-    src.set_property("latency", 100)
+    src0.set_property("location", SOURCE_RTSP_CAM0_URL)
+    src0.set_property("protocols", 4)
+    src0.set_property("latency", 100)
+    src2.set_property("location", SOURCE_RTSP_CAM2_URL)
+    src2.set_property("protocols", 4)
+    src2.set_property("latency", 100)
 
-    conv.set_property("gpu-id", 0)
-    conv.set_property("copy-hw", 2)
-    caps_i420.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
+    for conv in (conv0, conv2):
+        conv.set_property("gpu-id", 0)
+        conv.set_property("copy-hw", 2)
+    caps0.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
+    caps2.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
+
+    for q_in in (q0, q2):
+        q_in.set_property("max-size-buffers", 2)
+        q_in.set_property("max-size-bytes", 0)
+        q_in.set_property("max-size-time", 0)
+        q_in.set_property("leaky", 2)
 
     q.set_property("max-size-buffers", 2)
     q.set_property("max-size-bytes", 0)
@@ -445,7 +527,9 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     aacenc.set_property("bitrate", 128000)
 
     elements = [
-        src, depay, parse_in, dec, conv, caps_i420, q,
+        src0, depay0, parse0, dec0, conv0, caps0, q0,
+        src2, depay2, parse2, dec2, conv2, caps2, q2,
+        selector, q,
         osd_bg, osd_quarter, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
         osd_milestone_player, osd_milestone_text,
         enc, parse_out, flvmux, rtmpsink, audiosrc, aacenc,
@@ -456,13 +540,26 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     for el in elements:
         pipeline.add(el)
 
-    src.connect("pad-added", _on_rtsp_pad_added, depay)
+    src0.connect("pad-added", _on_rtsp_pad_added, depay0)
+    src2.connect("pad-added", _on_rtsp_pad_added, depay2)
 
-    _link(depay, parse_in)
-    _link(parse_in, dec)
-    _link(dec, conv)
-    _link(conv, caps_i420)
-    _link(caps_i420, q)
+    _link(depay0, parse0)
+    _link(parse0, dec0)
+    _link(dec0, conv0)
+    _link(conv0, caps0)
+    _link(caps0, q0)
+
+    _link(depay2, parse2)
+    _link(parse2, dec2)
+    _link(dec2, conv2)
+    _link(conv2, caps2)
+    _link(caps2, q2)
+
+    _selector_pads.clear()
+    _link_branch_to_selector(q0, selector, "cam0")
+    _link_branch_to_selector(q2, selector, "cam2")
+
+    _link(selector, q)
     _link(q, osd_bg)
     _link(osd_bg, osd_quarter)
     _link(osd_quarter, osd_home)
@@ -513,8 +610,12 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     })
 
     _enc_stream = enc
+    _selector = selector
+    _current_active_camera = _normalize_camera(cfg.get("activeCamera", "cam2"))
+    _switch_active_camera(_current_active_camera)
     _update_overlay(read_score_state())
     _last_config = read_worker_config()
+    _set_status(active_camera=_current_active_camera)
     return pipeline, rtmpsink
 
 
@@ -532,7 +633,7 @@ def bus_call(_bus, message, loop: GLib.MainLoop):
         src_name = message.src.get_name() if message.src else "unknown"
         msg = f"GStreamer error in {src_name}: {err}"
         print(f"[worker] ERROR: {err}: {dbg} (src={src_name})")
-        _set_status(stream_active=False, last_error=msg)
+        _set_status(stream_active=False, last_error=msg, active_camera=_current_active_camera)
         _exit_code = STREAM_ERROR_EXIT_CODE
         loop.quit()
     return True
@@ -578,7 +679,9 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _signal_handler)
 
     _set_status(worker_alive=True, stream_active=False, last_error="")
-    print(f"[worker] source: {SOURCE_RTSP_URL}")
+    print(f"[worker] source cam0: {SOURCE_RTSP_CAM0_URL}")
+    print(f"[worker] source cam2: {SOURCE_RTSP_CAM2_URL}")
+    print(f"[worker] active source: {_current_active_camera}")
     print(f"[worker] sink:   {rtmp_url[:80]}")
     print("[worker] starting pipeline ...")
     pipeline.set_state(Gst.State.PLAYING)

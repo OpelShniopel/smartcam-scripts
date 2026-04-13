@@ -92,7 +92,38 @@ CLASS_ID_RIM = 0
 CLASS_ID_BALL = 1
 CLASS_NAMES = {CLASS_ID_RIM: "RIM", CLASS_ID_BALL: "BALL"}
 
-PROBE_EVERY_N_FRAMES = 2
+PROBE_EVERY_N_FRAMES = 1
+
+# ---------------------------------------------------------------------------
+# Camera / AI feature flags
+# ---------------------------------------------------------------------------
+ENABLE_CAM0 = True
+ENABLE_CAM2 = True
+
+ENABLE_AI_GLOBAL = True
+ENABLE_CAM0_AI = False
+ENABLE_CAM2_AI = True
+
+
+def _cam_enabled(cam_label: str) -> bool:
+    cam = str(cam_label).strip().upper()
+    if cam == "CAM0":
+        return ENABLE_CAM0
+    if cam == "CAM2":
+        return ENABLE_CAM2
+    return False
+
+
+def _ai_enabled(cam_label: str) -> bool:
+    if not ENABLE_AI_GLOBAL:
+        return False
+    cam = str(cam_label).strip().upper()
+    if cam == "CAM0":
+        return ENABLE_CAM0 and ENABLE_CAM0_AI
+    if cam == "CAM2":
+        return ENABLE_CAM2 and ENABLE_CAM2_AI
+    return False
+
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STREAM_CONF = os.path.join(SCRIPT_DIR, "stream.conf")
@@ -104,6 +135,10 @@ STREAM_WORKER_WRAPPER = os.path.join(SCRIPT_DIR, "run_stream_worker.py")
 
 RESTART_EXIT_CODE = 42
 STREAM_ERROR_EXIT_CODE = 43  # reserved for compatibility; main pipeline no longer owns RTMP
+
+# Mutable flag set by bus_call when an RTMP error triggers a stream-error exit.
+# Using a list so the nested bus_call closure can mutate it.
+_stream_error_exit: list[bool] = [False]
 
 # Clean branch encoder settings — tuned for low latency local WebRTC viewing
 CLEAN_BITRATE = 8000
@@ -119,11 +154,18 @@ AI_THREADS = 1
 AI_PRESET = "ultrafast"
 AI_TUNE = "zerolatency"
 
-# RTMP worker config default
+# RTMP stream encoder settings — YouTube 1080p
 RTMP_BITRATE = 6800
+RTMP_KEYINT = 60
+RTMP_THREADS = 2
+RTMP_PRESET = "ultrafast"
+RTMP_TUNE = "zerolatency"
 
 # Encoder references populated by build_pipeline() — used by set_config cmd
 _encoders: dict[str, Gst.Element] = {}
+
+# RTMP stream verification timeout (seconds)
+RTMP_VERIFY_TIMEOUT_SEC = 15
 
 # ---------------------------------------------------------------------------
 # RTMP stream status tracking
@@ -170,6 +212,30 @@ def _get_cached_stream_status() -> dict | None:
         return _rtmp_status_cached
 
 
+def _rtmp_sink_pad_probe(_pad, info, _user_data):
+    """
+    Pad probe on rtmpsink's sink pad. Fires on the first buffer reaching
+    the RTMP sink — means GStreamer did the RTMP handshake and is sending data.
+    """
+    _send_stream_status(active=True)
+    return Gst.PadProbeReturn.REMOVE
+
+
+def _rtmp_verify_timeout() -> bool:
+    """
+    GLib timeout callback. If no stream_status sent yet after
+    RTMP_VERIFY_TIMEOUT_SEC, report failure.
+    """
+    with _rtmp_status_lock:
+        already_sent = _rtmp_status_sent
+    if not already_sent:
+        _send_stream_status(
+            active=False,
+            error="RTMP connection timed out — no data flowing after %ds" % RTMP_VERIFY_TIMEOUT_SEC,
+        )
+    return False
+
+
 # ---------------------------------------------------------------------------
 # FPS tracking
 # ---------------------------------------------------------------------------
@@ -206,6 +272,68 @@ score_state = {
 }
 score_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Scoreboard overlay elements
+# ---------------------------------------------------------------------------
+_osd_elements: dict[str, Gst.Element] = {}
+_osd_lock = threading.Lock()
+
+SCOREBOARD_PNG = os.path.join(SCRIPT_DIR, "scoreboard.png")
+SCOREBOARD_W = 410
+SCOREBOARD_H = 129
+SCOREBOARD_OFFSET_X = 755
+SCOREBOARD_OFFSET_Y = 931
+
+
+def _render_scoreboard_bg() -> None:
+    if not os.path.exists(SCOREBOARD_PNG):
+        print(f"WARNING: Scoreboard PNG not found: {SCOREBOARD_PNG}")
+        print("         Place scoreboard.png next to pipeline.py")
+
+
+def _update_osd_texts(state: dict) -> None:
+    with _osd_lock:
+        els = dict(_osd_elements)
+    if not els:
+        return
+
+    home = els.get("osd_home")
+    away = els.get("osd_away")
+    score = els.get("osd_score")
+    clock = els.get("osd_clock")
+    fouls = els.get("osd_fouls")
+    bg = els.get("osd_bg")
+    visible = state.get("visible", False)
+
+    if home:
+        home.set_property("silent", not visible)
+        if visible:
+            home.set_property("text", state["home_name"][:8])
+    if away:
+        away.set_property("silent", not visible)
+        if visible:
+            away.set_property("text", state["away_name"][:8])
+    if score:
+        score.set_property("silent", not visible)
+        if visible:
+            score.set_property("text",
+                               f"{state['home_points']} - {state['away_points']}")
+    if clock:
+        clock.set_property("silent", not visible)
+        if visible:
+            clock.set_property("text",
+                               f"Q{state['quarter']}  {state['clock']}")
+    if fouls:
+        fouls.set_property("silent", not visible)
+        if visible:
+            fouls.set_property("text",
+                               f"F:{state['home_fouls']} T:{state['home_timeouts']}"
+                               f"          "
+                               f"F:{state['away_fouls']} T:{state['away_timeouts']}")
+    if bg:
+        bg.set_property("alpha", 1.0 if visible else 0.0)
+
+
 def _apply_score_patch(data: dict) -> None:
     allowed_str = {"home_name", "away_name", "clock"}
     allowed_int = {"home_points", "away_points", "home_fouls",
@@ -224,6 +352,8 @@ def _apply_score_patch(data: dict) -> None:
                 score_state[k] = data[k]
         if "milestone" in data and (data["milestone"] is None or isinstance(data["milestone"], dict)):
             score_state["milestone"] = data["milestone"]
+        state = score_state.copy()
+    _update_osd_texts(state)
     _persist_score_state()
 
 
@@ -419,6 +549,20 @@ def _dispatch_cmd(msg: dict) -> None:
         print(f"[cmd] set_config bitrateKbps={bitrate} -> worker config (running={running})")
         _ack("set_config", True)
 
+    elif action == "switch_cam":
+        raw_cam = msg.get("camId", msg.get("camera", msg.get("cam")))
+        normalized = _normalize_stream_camera(raw_cam)
+        if normalized is None:
+            err = f"camId must be one of 0,2,cam0,cam2,camera0,camera2; got {raw_cam!r}"
+            print(f"[cmd] switch_cam: {err}")
+            _ack("switch_cam", False, err)
+            return
+        _persist_stream_worker_config(active_camera=normalized)
+        running = _is_stream_worker_running()
+        print(f"[cmd] switch_cam -> {normalized} (running={running})")
+        _ack("switch_cam", True)
+        _push_state()
+
     elif action == "set_osd":
         visible = msg.get("visible")
         if not isinstance(visible, bool):
@@ -448,22 +592,41 @@ AVAILABLE_MODELS = ["Basketball"]
 def _push_state() -> None:
     url = read_stream_url()
     worker_running = _is_stream_worker_running()
+    worker_cfg = _read_stream_worker_config()
+
+    webrtc = {}
+    internal_streams = {}
+
+    if ENABLE_CAM0:
+        webrtc["cam0_clean"] = f"http://{JETSON_HOST}:8889/camera0_clean"
+        if _ai_enabled("CAM0"):
+            webrtc["cam0_ai"] = f"http://{JETSON_HOST}:8889/camera0_ai"
+        internal_streams["cam0_stream"] = f"rtsp://{JETSON_HOST}:8554/camera0_stream"
+
+    if ENABLE_CAM2:
+        webrtc["cam2_clean"] = f"http://{JETSON_HOST}:8889/camera2_clean"
+        if _ai_enabled("CAM2"):
+            webrtc["cam2_ai"] = f"http://{JETSON_HOST}:8889/camera2_ai"
+        internal_streams["cam2_stream"] = f"rtsp://{JETSON_HOST}:8554/camera2_stream"
+
     _out_q.put({
         "type": "state",
         "streaming": bool(url) and worker_running,
         "stream_configured": bool(url),
         "stream_worker_running": worker_running,
+        "stream_active_camera": worker_cfg.get("activeCamera", "cam2"),
         "model": MODEL_NAME,
         "available_models": AVAILABLE_MODELS,
-        "webrtc": {
-            "cam0_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
-            "cam0_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
-            "cam2_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
-            "cam2_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
+        "enabled_cameras": {
+            "cam0": ENABLE_CAM0,
+            "cam2": ENABLE_CAM2,
         },
-        "internal_streams": {
-            "cam2_stream": f"rtsp://{JETSON_HOST}:8554/camera2_stream",
+        "enabled_ai": {
+            "cam0": _ai_enabled("CAM0"),
+            "cam2": _ai_enabled("CAM2"),
         },
+        "webrtc": webrtc,
+        "internal_streams": internal_streams,
     })
 
 
@@ -512,6 +675,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "streaming": bool(url) and _is_stream_worker_running(),
                 "stream_configured": bool(url),
                 "stream_worker_running": _is_stream_worker_running(),
+                "stream_active_camera": _read_stream_worker_config().get("activeCamera", "cam2"),
                 "rtmp_url": url or "",
                 "score_overlay": score_visible,
                 "unix_sock": UNIX_SOCK,
@@ -522,6 +686,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "device": "/dev/video0",
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
+                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
@@ -693,15 +858,40 @@ def _persist_score_state() -> None:
 def _read_stream_worker_config() -> dict:
     try:
         with open(STREAM_WORKER_CONFIG) as f:
-            return json.load(f)
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"bitrateKbps": RTMP_BITRATE}
+        pass
+    return {"bitrateKbps": RTMP_BITRATE, "activeCamera": "cam2"}
 
 
-def _persist_stream_worker_config(*, bitrate_kbps: int | None = None) -> dict:
+def _normalize_stream_camera(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    mapping = {
+        "0": "cam0",
+        "cam0": "cam0",
+        "camera0": "cam0",
+        "/dev/video0": "cam0",
+        "2": "cam2",
+        "cam2": "cam2",
+        "camera2": "cam2",
+        "/dev/video2": "cam2",
+    }
+    return mapping.get(text)
+
+
+def _persist_stream_worker_config(*, bitrate_kbps: int | None = None, active_camera: str | None = None) -> dict:
     cfg = _read_stream_worker_config()
     if bitrate_kbps is not None:
         cfg["bitrateKbps"] = bitrate_kbps
+    if active_camera is not None:
+        normalized = _normalize_stream_camera(active_camera)
+        if normalized is not None:
+            cfg["activeCamera"] = normalized
+    cfg.setdefault("activeCamera", "cam2")
     _atomic_write_json(STREAM_WORKER_CONFIG, cfg)
     return cfg
 
@@ -789,9 +979,12 @@ def _start_stream_worker() -> tuple[bool, str]:
         if not os.path.exists(STREAM_WORKER_WRAPPER):
             return False, f"missing stream worker wrapper: {STREAM_WORKER_WRAPPER}"
         try:
+            env = os.environ.copy()
+            env["STREAM_OWNER_PID"] = str(os.getpid())
             proc = subprocess.Popen(
                 [sys.executable, STREAM_WORKER_WRAPPER],
                 cwd=SCRIPT_DIR,
+                env=env,
                 start_new_session=True,
                 stdout=None,
                 stderr=None,
@@ -885,12 +1078,24 @@ def pgie_src_pad_buffer_probe(_pad, info, cam_label):
         except StopIteration:
             break
 
+        # Count real pipeline FPS even if we skip detection work
         with _fps_lock:
-            _fps_counters[cam_label] += 1
+            if cam_label in _fps_counters:
+                _fps_counters[cam_label] += 1
 
+        # AI disabled for this camera -> do nothing else, but keep pipeline healthy
+        if not _ai_enabled(cam_label):
+            try:
+                l_frame = l_frame.next
+            except StopIteration:
+                break
+            continue
+
+        # Only inspect metadata every Nth frame
         if frame_meta.frame_num % PROBE_EVERY_N_FRAMES == 0:
             detections = []
             l_obj = frame_meta.obj_meta_list
+
             while l_obj is not None:
                 try:
                     obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
@@ -1144,6 +1349,136 @@ def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) ->
 
 
 # ---------------------------------------------------------------------------
+# RTMP stream branch
+# ---------------------------------------------------------------------------
+def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | None, Gst.Element | None]:
+    """Returns (enc_stream, rtmpsink)."""
+    global _osd_elements
+
+    if not os.path.exists(SCOREBOARD_PNG):
+        print(f"ERROR: Scoreboard PNG not found: {SCOREBOARD_PNG}")
+        print("       Streaming without scoreboard overlay is not supported.")
+        print("       Place scoreboard.png next to pipeline.py, then restart.")
+        _send_stream_status(
+            active=False,
+            error=f"Missing scoreboard.png: {SCOREBOARD_PNG}",
+        )
+        return None, None
+
+    _render_scoreboard_bg()
+
+    q_stream = _make("queue", "strm_queue")
+    conv_strm = _make_nvconv("strm_conv")
+    caps_strm = _capsfilter("strm_caps_i420", "video/x-raw,format=I420")
+    osd_bg = _make("gdkpixbufoverlay", "strm_osd_bg")
+    osd_home = _make("textoverlay", "strm_osd_home")
+    osd_away = _make("textoverlay", "strm_osd_away")
+    osd_score = _make("textoverlay", "strm_osd_score")
+    osd_clock = _make("textoverlay", "strm_osd_clock")
+    osd_fouls = _make("textoverlay", "strm_osd_fouls")
+    enc_stream = _make("x264enc", "strm_enc")
+    parse_stream = _make("h264parse", "strm_parse")
+    flvmux = _make("flvmux", "strm_flvmux")
+    rtmpsink = _make("rtmpsink", "strm_rtmpsink")
+    audiosrc = _make("audiotestsrc", "strm_audiosrc")
+    aacenc = _make("voaacenc", "strm_aacenc")
+
+    q_stream.set_property("max-size-buffers", 2)
+    q_stream.set_property("max-size-bytes", 0)
+    q_stream.set_property("max-size-time", 0)
+    q_stream.set_property("leaky", 2)
+
+    osd_bg.set_property("location", SCOREBOARD_PNG)
+    osd_bg.set_property("offset-x", SCOREBOARD_OFFSET_X)
+    osd_bg.set_property("offset-y", SCOREBOARD_OFFSET_Y)
+    osd_bg.set_property("overlay-width", SCOREBOARD_W)
+    osd_bg.set_property("overlay-height", SCOREBOARD_H)
+    osd_bg.set_property("alpha", 0.0)
+
+    def _setup_text(el, text, xpos, ypos, font="Sans Bold 20",
+                    color=0xFFFFFFFF, shadow=True):
+        el.set_property("text", text)
+        el.set_property("font-desc", font)
+        el.set_property("halignment", 4)
+        el.set_property("valignment", 3)
+        el.set_property("xpos", xpos)
+        el.set_property("ypos", ypos)
+        el.set_property("color", color)
+        el.set_property("draw-shadow", shadow)
+        el.set_property("auto-resize", False)
+        el.set_property("wait-text", False)
+        el.set_property("silent", True)
+
+    _setup_text(osd_home, "HOME", xpos=0.022, ypos=0.040,
+                font="Sans Bold 22", color=0xFFFFFFFF)
+    _setup_text(osd_away, "AWAY", xpos=0.230, ypos=0.040,
+                font="Sans Bold 22", color=0xFFFFFFFF)
+    _setup_text(osd_score, "0 - 0", xpos=0.120, ypos=0.040,
+                font="Sans Bold 22", color=0xFFD916FF)
+    _setup_text(osd_clock, "Q1 10:00", xpos=0.330, ypos=0.040,
+                font="Sans Bold 22", color=0xB2E5FFFF)
+    _setup_text(osd_fouls, "", xpos=0.022, ypos=0.068,
+                font="Sans 13", color=0xA6A6A6FF)
+
+    enc_stream.set_property("pass", "cbr")
+    enc_stream.set_property("bitrate", RTMP_BITRATE)
+    enc_stream.set_property("vbv-buf-capacity", 200)
+    enc_stream.set_property("tune", RTMP_TUNE)
+    enc_stream.set_property("speed-preset", RTMP_PRESET)
+    enc_stream.set_property("key-int-max", RTMP_KEYINT)
+    enc_stream.set_property("threads", RTMP_THREADS)
+
+    flvmux.set_property("streamable", True)
+    rtmpsink.set_property("location", rtmp_url)
+    rtmpsink.set_property("async", False)
+    audiosrc.set_property("wave", 4)
+    aacenc.set_property("bitrate", 128000)
+
+    for el in (q_stream, conv_strm, caps_strm,
+               osd_bg, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
+               enc_stream, parse_stream, flvmux, rtmpsink, audiosrc, aacenc):
+        pipeline.add(el)
+
+    _tee_branch(tee, q_stream)
+    _link(q_stream, conv_strm)
+    _link(conv_strm, caps_strm)
+    _link(caps_strm, osd_bg)
+    _link(osd_bg, osd_home)
+    _link(osd_home, osd_away)
+    _link(osd_away, osd_score)
+    _link(osd_score, osd_clock)
+    _link(osd_clock, osd_fouls)
+    _link(osd_fouls, enc_stream)
+    _link(enc_stream, parse_stream)
+    _link(parse_stream, flvmux)
+
+    _link_filtered(audiosrc, aacenc, "audio/x-raw,rate=44100,channels=2")
+    aacenc_src = _get_static_pad(aacenc, "src")
+    flvmux_audio = flvmux.request_pad_simple("audio")
+    if not flvmux_audio:
+        sys.stderr.write("ERROR: Unable to get audio pad from flvmux\n")
+        sys.exit(1)
+    if aacenc_src.link(flvmux_audio) != Gst.PadLinkReturn.OK:
+        sys.stderr.write("ERROR: Failed to link aacenc -> flvmux.audio\n")
+        sys.exit(1)
+
+    _link(flvmux, rtmpsink)
+
+    with _osd_lock:
+        _osd_elements.update({
+            "osd_bg": osd_bg,
+            "osd_home": osd_home,
+            "osd_away": osd_away,
+            "osd_score": osd_score,
+            "osd_clock": osd_clock,
+            "osd_fouls": osd_fouls,
+        })
+
+    print("Scoreboard overlay: gdkpixbufoverlay (bg PNG) + textoverlay x5 (text)")
+    return enc_stream, rtmpsink
+
+
+# ---------------------------------------------------------------------------
 # Main pipeline builder
 # ---------------------------------------------------------------------------
 def build_pipeline() -> tuple:
@@ -1155,35 +1490,58 @@ def build_pipeline() -> tuple:
         sys.stderr.write("ERROR: Unable to create Pipeline\n")
         sys.exit(1)
 
-    print("Building CAM0 source ...")
-    tee0 = _build_camera_source(pipeline, "/dev/video0", "0")
+    pgie0 = None
+    pgie2 = None
 
-    print("Building CAM0 clean RTSP branch (1080p high quality low latency) ...")
-    enc0_clean = _build_clean_branch(pipeline, tee0, "0", "camera0_clean")
-    _encoders["enc0_clean"] = enc0_clean
+    if ENABLE_CAM0:
+        print("Building CAM0 source ...")
+        tee0 = _build_camera_source(pipeline, "/dev/video0", "0")
 
-    print("Building CAM0 AI RTSP branch (720p debug) ...")
-    pgie0, enc0_ai = _build_ai_branch(
-        pipeline, tee0, "0", "camera0_ai",
-        "config_infer_primary_yoloV8_cam0.txt", "CAM0")
-    _encoders["enc0_ai"] = enc0_ai
+        print("Building CAM0 clean RTSP branch (1080p high quality low latency) ...")
+        enc0_clean = _build_clean_branch(pipeline, tee0, "0", "camera0_clean")
+        _encoders["enc0_clean"] = enc0_clean
 
-    print("Building CAM2 source ...")
-    tee2 = _build_camera_source(pipeline, "/dev/video2", "2")
+        if _ai_enabled("CAM0"):
+            print("Building CAM0 AI RTSP branch (720p debug) ...")
+            pgie0, enc0_ai = _build_ai_branch(
+                pipeline, tee0, "0", "camera0_ai",
+                "config_infer_primary_yoloV8_cam0.txt", "CAM0")
+            _encoders["enc0_ai"] = enc0_ai
+        else:
+            print("CAM0 AI disabled — skipping AI RTSP branch")
 
-    print("Building CAM2 clean RTSP branch (1080p high quality low latency) ...")
-    enc2_clean = _build_clean_branch(pipeline, tee2, "2", "camera2_clean")
-    _encoders["enc2_clean"] = enc2_clean
+        print("Building CAM0 internal RTSP branch for stream worker ...")
+        enc0_streamsrc = _build_internal_stream_branch(pipeline, tee0, "0", "camera0_stream")
+        _encoders["enc0_streamsrc"] = enc0_streamsrc
+    else:
+        print("CAM0 disabled — skipping source and all branches")
 
-    print("Building CAM2 AI RTSP branch (720p debug) ...")
-    pgie2, enc2_ai = _build_ai_branch(
-        pipeline, tee2, "2", "camera2_ai",
-        "config_infer_primary_yoloV8_cam2.txt", "CAM2")
-    _encoders["enc2_ai"] = enc2_ai
+    if ENABLE_CAM2:
+        print("Building CAM2 source ...")
+        tee2 = _build_camera_source(pipeline, "/dev/video2", "2")
 
-    print("Building CAM2 internal RTSP branch for stream worker ...")
-    enc2_streamsrc = _build_internal_stream_branch(pipeline, tee2, "2", "camera2_stream")
-    _encoders["enc2_streamsrc"] = enc2_streamsrc
+        print("Building CAM2 clean RTSP branch (1080p high quality low latency) ...")
+        enc2_clean = _build_clean_branch(pipeline, tee2, "2", "camera2_clean")
+        _encoders["enc2_clean"] = enc2_clean
+
+        if _ai_enabled("CAM2"):
+            print("Building CAM2 AI RTSP branch (720p debug) ...")
+            pgie2, enc2_ai = _build_ai_branch(
+                pipeline, tee2, "2", "camera2_ai",
+                "config_infer_primary_yoloV8_cam2.txt", "CAM2")
+            _encoders["enc2_ai"] = enc2_ai
+        else:
+            print("CAM2 AI disabled — skipping AI RTSP branch")
+
+        print("Building CAM2 internal RTSP branch for stream worker ...")
+        enc2_streamsrc = _build_internal_stream_branch(pipeline, tee2, "2", "camera2_stream")
+        _encoders["enc2_streamsrc"] = enc2_streamsrc
+    else:
+        print("CAM2 disabled — skipping source and all branches")
+
+    if not ENABLE_CAM0 and not ENABLE_CAM2:
+        sys.stderr.write("ERROR: All cameras are disabled\n")
+        sys.exit(1)
 
     return pipeline, pgie0, pgie2
 
@@ -1195,6 +1553,7 @@ def main():
     global _rtmp_status_sent, _rtmp_status_cached
     _rtmp_status_sent = False
     _rtmp_status_cached = None
+    _stream_error_exit[0] = False
 
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         os.environ.setdefault("DISPLAY", ":0")
@@ -1219,10 +1578,15 @@ def main():
     pipeline, pgie0, pgie2 = build_pipeline()
 
     for pgie, cam_label in [(pgie0, "CAM0"), (pgie2, "CAM2")]:
+        if pgie is None:
+            print(f"Probe skipped -> {cam_label} (camera or AI disabled)")
+            continue
+
         srcpad = pgie.get_static_pad("src")
         if not srcpad:
             sys.stderr.write(f"ERROR: Cannot get src pad of {pgie.get_name()}\n")
             sys.exit(1)
+
         srcpad.add_probe(Gst.PadProbeType.BUFFER, pgie_src_pad_buffer_probe, cam_label)
         print(f"Probe attached -> {pgie.get_name()} ({cam_label})")
 
@@ -1255,6 +1619,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        _stop_stream_worker()
         print("Stopping pipeline ...")
         pipeline.set_state(Gst.State.NULL)
         pipeline.get_state(Gst.CLOCK_TIME_NONE)
