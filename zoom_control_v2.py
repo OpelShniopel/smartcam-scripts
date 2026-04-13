@@ -12,7 +12,7 @@ ZOOM_SPEED     = 1000
 FOCUS_SPEED    = 1200
 
 # --- TUNING ---
-TARGET_WIDTH            = 50   # Target ball width in pixels
+TARGET_WIDTH            = 70   # Target ball width in pixels
 ZOOM_K                  = 1500  # Step multiplier: larger = faster zoom response
 NORM_DEADZONE           = 0.15   # Log-ratio deadzone (~±10% of target width)
 MAX_ZOOM_STEP           = 800   # Max steps per frame — keeps focus motor from falling behind
@@ -22,7 +22,7 @@ FRAME_W                 = 1280  # Camera frame width in pixels
 FRAME_H                 = 720
 EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
 EDGE_ZOOM_GAIN          = 4.0   # Zoom-out steps per pixel inside the edge margin
-MAX_SEGMENT             = 200   # Maximum dynamic zoom step segment
+MAX_SEGMENT             = 250   # Maximum dynamic zoom step segment
 
 # --- PRESET POSITION ---
 ZOOM_BASE_POS  = 40000
@@ -44,7 +44,6 @@ class ZoomController:
         self.cmd_interval = 0.05
         self.target_zoom_pos = ZOOM_BASE_POS
         self.reported_zoom_pos = ZOOM_BASE_POS # What the motor actually reached
-        self.last_zoom_dir = 0 # -1 for in, 1 for out
 
         try:
             self.ser_z = serial.Serial(SERIAL_PORT_Z, 115200, timeout=1)
@@ -90,16 +89,6 @@ class ZoomController:
     def send_zoom(self, zoom_steps):
         if not self.ser_z: return
 
-        current_dir = -1 if zoom_steps < 0 else 1 if zoom_steps > 0 else 0
-
-        # If we are trying to flip directions, and the move is small, ignore it.
-        # This stops the "hunting" behavior.
-        if self.last_zoom_dir != 0 and current_dir != 0 and current_dir != self.last_zoom_dir:
-            if abs(zoom_steps) < 150: # Threshold: ignore small direction flips
-                return
-
-        self.last_zoom_dir = current_dir
-
         # 1. Update the overall intended target (the "Virtual" position)
         self.target_zoom_pos += zoom_steps
         self.target_zoom_pos = max(ZOOM_MIN_STEPS, min(ZOOM_MAX_STEPS, self.target_zoom_pos))
@@ -119,10 +108,8 @@ class ZoomController:
         # but cap it so we don't break the focus curve too badly.
         # Increase MAX_SEGMENT if your motors can handle it.
           # Increased from 80 for much higher speed
-        if abs(diff) > 500:
-            step_to_take = diff * 0.5  # Be aggressive for big jumps
-        else:
-            step_to_take = diff * 0.3  # Be gentle when close to target
+        step_to_take = diff * 0.5 
+        step_to_take = max(-MAX_SEGMENT, min(MAX_SEGMENT, step_to_take))
 
         new_zoom_request = self.current_zoom_pos + step_to_take
         new_focus_request = self.get_focus_for_zoom(new_zoom_request)
@@ -143,20 +130,12 @@ class ZoomController:
         ball_velocity_x = abs(ball['center_x'] - self.last_ball_x) if self.last_ball_x is not None else 0.0
         self.last_ball_x = ball['center_x']
 
+        # Size-based zoom: proportional log error, suppressed inside deadzone
         ratio = ball['width'] / TARGET_WIDTH
         norm_error = math.log(ratio)
         zoom_step = 0.0
-        
-        # Deadzone logic
-        # Negative error = ball too small (Zoom In)
-        # Positive error = ball too big (Zoom Out)
-        
-        if norm_error < -NORM_DEADZONE: 
-            # Normal zoom-in response
-            zoom_step = norm_error * ZOOM_K
-        elif norm_error > (NORM_DEADZONE * 2.0): 
-            # Require the ball to be much larger before backing off
-            zoom_step = norm_error * ZOOM_K
+        if abs(norm_error) >= NORM_DEADZONE:
+            zoom_step = max(-MAX_ZOOM_STEP, min(MAX_ZOOM_STEP, norm_error * ZOOM_K))
 
         # Velocity-based zoom-out: fast horizontal movement → widen FOV
         if ball_velocity_x > VELOCITY_ZOOM_THRESHOLD:
@@ -192,13 +171,6 @@ class ZoomController:
             # Suppress zoom-in and apply the edge bias
             zoom_step = max(0.0, zoom_step) + edge_bias
             DEBUG and print(f"[ZOOM] Edge Alert! bias=+{edge_bias:.0f}")
-
-        if self.last_zoom_dir == -1 and zoom_step > 0:
-            if zoom_step < (MAX_ZOOM_STEP * 0.3): # Threshold for "panic" zoom out
-                zoom_step = 0 
-        
-        if zoom_step != 0:
-            self.last_zoom_dir = -1 if zoom_step < 0 else 1
 
         # 5. Final Send
         self.send_zoom(zoom_step)
