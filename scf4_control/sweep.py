@@ -2,10 +2,10 @@ import cv2
 import os
 import serial
 import sys
-import scf4_tools
+import scf4_control.scf4_tools as scf4_tools
 import time
 import threading
-import camera
+import scf4_control.camera as camera
 import csv
 import numpy as np
 from scipy.interpolate import interp1d
@@ -15,7 +15,7 @@ CHA_MOVE    = 6
 CHB_PI      = 4
 CHA_PI      = 3
 
-CSV_FILE = "zoom_focus_table_updated.csv"
+CSV_FILE = "zoom_focus_table.csv"
 
 # ──────────────────────────────────────────────
 # Tune these

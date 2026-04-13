@@ -2,10 +2,10 @@ import cv2
 import os
 import serial
 import sys
-import scf4_tools
+import scf4_control.scf4_tools as scf4_tools
 import time
 import threading
-import camera
+import scf4_control.camera as camera
 
 # --- Axis status bit indices ---
 CHC_MOVE    = 8
