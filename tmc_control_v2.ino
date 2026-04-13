@@ -45,9 +45,12 @@
 // ============================================================
 #define FRAME_W          1280     // must match Python / inference resolution
 #define DEADZONE_PX        50     // pixels — no movement inside this window
+
 #define SPEED_FACTOR      3.5f    // exponent of speed curve (higher = more exponential)
 #define MIN_VEL_SPS        100    // steps/sec at minimum error outside deadzone
 #define MAX_VEL_SPS       7000    // steps/sec at full-frame error
+#define HOMING_VEL_SPS    2000
+
 #define BALL_BOOST_THR      20    // px/frame — above this, apply velocity boost
 #define BALL_BOOST_GAIN    1.7f   // boost multiplier coefficient
 #define BALL_TIMEOUT_MS    300    // ms without X update before auto-stop
@@ -55,7 +58,7 @@
 // ============================================================
 //  MOTION CONSTANTS
 // ============================================================
-#define ACCEL_PER_MS      100     // steps/sec per ms ramp rate
+#define ACCEL_PER_MS      120     // steps/sec per ms ramp rate
 
 // ============================================================
 //  SERIAL
@@ -103,10 +106,11 @@ void setStepFreq(int32_t velSPS) {
         gpio_set_level((gpio_num_t)STEP_PIN, 0);
         stepPhase = false;
     } else {
+        // Half-period in timer ticks (1 MHz base) = 500 000 / |vel|
         uint32_t halfUs = 500000UL / (uint32_t)abs(velSPS);
-        if (halfUs < 20) halfUs = 20;
+        if (halfUs < 20) halfUs = 20;   // cap at 25 kHz edge = 12.5 kHz step rate
         timerAlarm(stepTimer, halfUs, true, 0);
-        timerRestart(stepTimer);
+        timerStart(stepTimer);
     }
 }
 
@@ -187,8 +191,8 @@ void doHoming() {
 
     Serial.println("HOMING:SEEK");
     gpio_set_level((gpio_num_t)DIR_PIN, DIR_FWD);
-    runningVel = MAX_VEL_SPS / 3;
-    setStepFreq(MAX_VEL_SPS);
+    runningVel = HOMING_VEL_SPS;
+    setStepFreq(HOMING_VEL_SPS);
 
     uint32_t timeout = millis() + 15000;
     while (digitalRead(LIMIT_PIN) == HIGH) {
