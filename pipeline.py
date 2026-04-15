@@ -93,7 +93,7 @@ CLASS_ID_RIM = 0
 CLASS_ID_BALL = 1
 CLASS_NAMES = {CLASS_ID_RIM: "RIM", CLASS_ID_BALL: "BALL"}
 
-PROBE_EVERY_N_FRAMES = 1
+PROBE_EVERY_N_FRAMES = 2
 
 # ---------------------------------------------------------------------------
 # Camera / AI feature flags
@@ -102,7 +102,7 @@ ENABLE_CAM0 = True
 ENABLE_CAM2 = True
 
 ENABLE_AI_GLOBAL = True
-ENABLE_CAM0_AI = False
+ENABLE_CAM0_AI = True
 ENABLE_CAM2_AI = True
 
 
@@ -156,7 +156,7 @@ AI_PRESET = "ultrafast"
 AI_TUNE = "zerolatency"
 
 # Local AI recording settings (debug / training capture)
-ENABLE_CAM2_AI_RECORDING = True
+ENABLE_CAM2_AI_RECORDING = False
 RECORDINGS_DIR = os.path.join(SCRIPT_DIR, "recordings")
 RECORD_SEGMENT_SECONDS = 300
 RECORD_MUXER_FACTORY = "matroskamux"
