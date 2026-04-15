@@ -23,7 +23,7 @@ if [ -z "$SERIAL" ]; then
 fi
 
 # Construct the rule
-RULE="ACTION==\"add\", SUBSYSTEM==\"tty\", ENV{ID_VENDOR_ID}==\"$ID_VENDOR\", ENV{ID_MODEL_ID}==\"$ID_PRODUCT\", ENV{ID_SERIAL_SHORT}==\"$SERIAL\", SYMLINK+=\"$SYMLINK_NAME\""
+RULE="SUBSYSTEM==\"tty\", ATTRS{idVendor}==\"$ID_VENDOR\", ATTRS{idProduct}==\"$ID_PRODUCT\", ATTRS{serial}==\"$SERIAL\", SYMLINK+=\"$SYMLINK_NAME\", MODE=\"0666\""
 
 # Check if this serial already exists in the file to avoid duplicates
 if grep -q "$SERIAL" "$RULE_FILE" 2>/dev/null; then
