@@ -142,16 +142,16 @@ def _normalize_camera(value) -> str:
         "0": "cam0",
         "cam0": "cam0",
         "camera0": "cam0",
-        "/dev/video0": "cam0",
+        "/dev/fixed_camera": "cam0",
         "2": "cam2",
         "cam2": "cam2",
         "camera2": "cam2",
-        "/dev/video2": "cam2",
+        "/dev/ptz_camera": "cam2",
     }
     normalized = mapping.get(text, "cam2")
 
-    cam0_exists = os.path.exists("/dev/video0")
-    cam2_exists = os.path.exists("/dev/video2")
+    cam0_exists = os.path.exists("/dev/fixed_camera")
+    cam2_exists = os.path.exists("/dev/ptz_camera")
 
     if normalized == "cam2" and not cam2_exists and cam0_exists:
         return "cam0"

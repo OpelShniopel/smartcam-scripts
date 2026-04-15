@@ -24,7 +24,7 @@ restart exit codes.
 ## Runtime requirements
 
 - Jetson with DeepStream/GStreamer/Python bindings installed.
-- Camera devices at `/dev/video0` and `/dev/video2`.
+- Camera devices at `/dev/fixed_camera` and `/dev/ptz_camera`.
 - MediaMTX accepting local RTSP publishing on port `8554`; WebRTC URLs are
   reported on port `8889`.
 - DeepStream-Yolo model/config files in `/home/smartcam/DeepStream-Yolo`.

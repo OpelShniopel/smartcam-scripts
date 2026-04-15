@@ -686,7 +686,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "encoders": list(_encoders.keys()),
                 "cameras": {
                     "cam0": {
-                        "device": "/dev/video0",
+                        "device": "/dev/fixed_camera",
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
                         "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
@@ -694,7 +694,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
                     "cam2": {
-                        "device": "/dev/video2",
+                        "device": "/dev/ptz_camera",
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera2_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
@@ -910,11 +910,11 @@ def _normalize_stream_camera(value) -> str | None:
         "0": "cam0",
         "cam0": "cam0",
         "camera0": "cam0",
-        "/dev/video0": "cam0",
+        "/dev/fixed_camera": "cam0",
         "2": "cam2",
         "cam2": "cam2",
         "camera2": "cam2",
-        "/dev/video2": "cam2",
+        "/dev/ptz_camera": "cam2",
     }
     return mapping.get(text)
 
@@ -1575,7 +1575,7 @@ def build_pipeline() -> tuple:
 
     if ENABLE_CAM0:
         print("Building CAM0 source ...")
-        tee0 = _build_camera_source(pipeline, "/dev/video0", "0")
+        tee0 = _build_camera_source(pipeline, "/dev/fixed_camera", "0")
 
         print("Building CAM0 clean RTSP branch (1080p high quality low latency) ...")
         enc0_clean = _build_clean_branch(pipeline, tee0, "0", "camera0_clean")
@@ -1598,7 +1598,7 @@ def build_pipeline() -> tuple:
 
     if ENABLE_CAM2:
         print("Building CAM2 source ...")
-        tee2 = _build_camera_source(pipeline, "/dev/video2", "2")
+        tee2 = _build_camera_source(pipeline, "/dev/ptz_camera", "2")
 
         print("Building CAM2 clean RTSP branch (1080p high quality low latency) ...")
         enc2_clean = _build_clean_branch(pipeline, tee2, "2", "camera2_clean")
