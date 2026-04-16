@@ -99,17 +99,20 @@ def _atomic_write_json(path: str, data: dict) -> None:
 
 
 DEFAULT_SCORE_STATE = {
-    "home_name": "HOME",
-    "away_name": "AWAY",
-    "home_points": 0,
-    "away_points": 0,
-    "home_fouls": 0,
-    "away_fouls": 0,
+    "home_name":     "HOME",
+    "away_name":     "AWAY",
+    "home_points":   0,
+    "away_points":   0,
+    "home_fouls":    0,
+    "away_fouls":    0,
     "home_timeouts": 3,
     "away_timeouts": 3,
-    "quarter": 1,
-    "clock": "10:00",
-    "visible": False,
+    "quarter":       1,
+    "clock":         "10:00",
+    "visible":       False,
+    "game_id":       0,
+    "updated_at":    0,
+    "milestone":     None,
 }
 
 
@@ -227,6 +230,7 @@ def _update_overlay(state: dict) -> None:
         return
 
     visible = state.get("visible", False)
+    quarter = els.get("osd_quarter")
     home = els.get("osd_home")
     away = els.get("osd_away")
     score = els.get("osd_score")
@@ -234,33 +238,54 @@ def _update_overlay(state: dict) -> None:
     fouls = els.get("osd_fouls")
     bg = els.get("osd_bg")
 
+    if quarter:
+        quarter.set_property("silent", not visible)
+        if visible:
+            quarter.set_property("text", f"Q{state.get('quarter', 1)}")
     if home:
         home.set_property("silent", not visible)
         if visible:
-            home.set_property("text", state["home_name"][:8])
+            home.set_property("text", state.get("home_name", "HOME")[:8])
     if away:
         away.set_property("silent", not visible)
         if visible:
-            away.set_property("text", state["away_name"][:8])
+            away.set_property("text", state.get("away_name", "AWAY")[:8])
     if score:
         score.set_property("silent", not visible)
         if visible:
-            score.set_property("text", f"{state['home_points']} - {state['away_points']}")
+            score.set_property("text", f"{state.get('home_points', 0)} - {state.get('away_points', 0)}")
     if clock:
         clock.set_property("silent", not visible)
         if visible:
-            clock.set_property("text", f"Q{state['quarter']}  {state['clock']}")
+            clock.set_property("text", state.get("clock", "10:00"))
     if fouls:
         fouls.set_property("silent", not visible)
         if visible:
             fouls.set_property(
                 "text",
-                f"F:{state['home_fouls']} T:{state['home_timeouts']}"
+                f"F:{state.get('home_fouls', 0)} T:{state.get('home_timeouts', 3)}"
                 f"          "
-                f"F:{state['away_fouls']} T:{state['away_timeouts']}",
+                f"F:{state.get('away_fouls', 0)} T:{state.get('away_timeouts', 3)}",
             )
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
+
+    milestone = state.get("milestone")
+    now_ms = int(time.time() * 1000)
+    show_milestone = milestone is not None and milestone.get("show_until", 0) > now_ms
+    m_player = els.get("osd_milestone_player")
+    m_text = els.get("osd_milestone_text")
+    if m_player:
+        m_player.set_property("silent", not show_milestone)
+        if show_milestone:
+            m_player.set_property("text", milestone.get("player_name", ""))
+    if m_text:
+        m_text.set_property("silent", not show_milestone)
+        if show_milestone:
+            m_text.set_property(
+                "text",
+                f"{milestone.get('milestone_name', '')}: {milestone.get('value_achieved', 0)}",
+            )
 
 
 def _poll_score_state() -> bool:
@@ -426,7 +451,10 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     osd_away = _make("textoverlay", "strm_osd_away")
     osd_score = _make("textoverlay", "strm_osd_score")
     osd_clock = _make("textoverlay", "strm_osd_clock")
+    osd_quarter = _make("textoverlay", "strm_osd_quarter")
     osd_fouls = _make("textoverlay", "strm_osd_fouls")
+    osd_milestone_player = _make("textoverlay", "strm_osd_milestone_player")
+    osd_milestone_text = _make("textoverlay", "strm_osd_milestone_text")
     enc = _make("x264enc", "strm_enc")
     parse_out = _make("h264parse", "strm_parse")
     flvmux = _make("flvmux", "strm_flvmux")
@@ -466,11 +494,14 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     osd_bg.set_property("overlay-height", SCOREBOARD_H)
     osd_bg.set_property("alpha", 0.0)
 
-    _setup_text(osd_home, "HOME", xpos=0.022, ypos=0.040, font="Sans Bold 22")
-    _setup_text(osd_away, "AWAY", xpos=0.230, ypos=0.040, font="Sans Bold 22")
-    _setup_text(osd_score, "0 - 0", xpos=0.120, ypos=0.040, font="Sans Bold 22", color=0xFFD916FF)
-    _setup_text(osd_clock, "Q1 10:00", xpos=0.330, ypos=0.040, font="Sans Bold 22", color=0xB2E5FFFF)
-    _setup_text(osd_fouls, "", xpos=0.022, ypos=0.068, font="Sans 13", color=0xA6A6A6FF)
+    _setup_text(osd_quarter, "Q1", xpos=0.397, ypos=0.865, font="Sans Bold 18", color=0xFFFFFFFF)
+    _setup_text(osd_home, "HOME", xpos=0.420, ypos=0.876, font="Sans Bold 16")
+    _setup_text(osd_away, "AWAY", xpos=0.420, ypos=0.920, font="Sans Bold 16")
+    _setup_text(osd_score, "0 - 0", xpos=0.560, ypos=0.876, font="Sans Bold 22", color=0xFFD916FF)
+    _setup_text(osd_clock, "10:00", xpos=0.565, ypos=0.865, font="Sans Bold 18", color=0xB2E5FFFF)
+    _setup_text(osd_fouls, "", xpos=0.420, ypos=0.950, font="Sans 12", color=0xA6A6A6FF)
+    _setup_text(osd_milestone_player, "", xpos=0.35, ypos=0.82, font="Sans Bold 24", color=0xFFD916FF)
+    _setup_text(osd_milestone_text, "", xpos=0.35, ypos=0.84, font="Sans Bold 18", color=0xFFFFFFFF)
 
     enc.set_property("pass", "cbr")
     enc.set_property("bitrate", int(cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)))
@@ -494,7 +525,8 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
         src0, depay0, parse0, dec0, conv0, caps0, q0,
         src2, depay2, parse2, dec2, conv2, caps2, q2,
         selector, q,
-        osd_bg, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
+        osd_bg, osd_quarter, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
+        osd_milestone_player, osd_milestone_text,
         enc, parse_out, flvmux, rtmpsink, audiosrc, aacenc,
     ]
     if watchdog is not None:
@@ -524,12 +556,15 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     _link(selector, q)
     _link(q, osd_bg)
-    _link(osd_bg, osd_home)
+    _link(osd_bg, osd_quarter)
+    _link(osd_quarter, osd_home)
     _link(osd_home, osd_away)
     _link(osd_away, osd_score)
     _link(osd_score, osd_clock)
     _link(osd_clock, osd_fouls)
-    _link(osd_fouls, enc)
+    _link(osd_fouls, osd_milestone_player)
+    _link(osd_milestone_player, osd_milestone_text)
+    _link(osd_milestone_text, enc)
     _link(enc, parse_out)
     if watchdog is not None:
         _link(parse_out, watchdog)
@@ -559,11 +594,14 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     _osd_elements.clear()
     _osd_elements.update({
         "osd_bg": osd_bg,
+        "osd_quarter": osd_quarter,
         "osd_home": osd_home,
         "osd_away": osd_away,
         "osd_score": osd_score,
         "osd_clock": osd_clock,
         "osd_fouls": osd_fouls,
+        "osd_milestone_player": osd_milestone_player,
+        "osd_milestone_text": osd_milestone_text,
     })
 
     _enc_stream = enc
