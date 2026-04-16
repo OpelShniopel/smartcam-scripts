@@ -12,8 +12,8 @@ ZOOM_SPEED     = 1000
 FOCUS_SPEED    = 1200
 
 # --- TUNING ---
-TARGET_WIDTH            = 70   # Target ball width in pixels
-ZOOM_K                  = 1500  # Step multiplier: larger = faster zoom response
+TARGET_WIDTH            = 30   # Target ball width in pixels
+ZOOM_K                  = 1000  # Step multiplier: larger = faster zoom response
 NORM_DEADZONE           = 0.15   # Log-ratio deadzone (~±10% of target width)
 MAX_ZOOM_STEP           = 800   # Max steps per frame — keeps focus motor from falling behind
 VELOCITY_ZOOM_THRESHOLD = 35    # Ball horizontal speed (px/frame) that starts triggering zoom-out
