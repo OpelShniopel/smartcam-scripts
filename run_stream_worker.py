@@ -99,13 +99,16 @@ def _pid_file_matches_current_process() -> bool:
     if not data or data.get("pid") != os.getpid():
         return False
 
-    start_ticks = data.get("start_ticks")
-    if start_ticks is None:
+    if "start_ticks" not in data:
         return True
+    start_ticks_raw = data["start_ticks"]
+    if isinstance(start_ticks_raw, bool) or not isinstance(start_ticks_raw, (int, str)):
+        return False
     try:
-        return int(start_ticks) == _process_start_ticks(os.getpid())
+        start_ticks = int(start_ticks_raw)
     except (TypeError, ValueError):
         return False
+    return start_ticks == _process_start_ticks(os.getpid())
 
 
 def _cleanup_pid() -> None:
@@ -181,7 +184,6 @@ def main() -> None:
     try:
         while not shutdown:
             if not _owner_alive():
-                shutdown = True
                 break
             if crash_count >= MAX_CRASHES:
                 print(f"[{_ts()}] worker crashed {crash_count} times — giving up")
@@ -189,19 +191,20 @@ def main() -> None:
 
             print(f"[{_ts()}] launching RTMP worker (crash count: {crash_count})")
             start = time.monotonic()
-            child = subprocess.Popen([sys.executable, WORKER_SCRIPT], cwd=SCRIPT_DIR)
+            worker_proc = subprocess.Popen([sys.executable, WORKER_SCRIPT], cwd=SCRIPT_DIR)
+            child = worker_proc
 
+            ret: int | None = None
             try:
-                while child.poll() is None:
+                while worker_proc.poll() is None:
                     if not _owner_alive():
                         shutdown = True
-                        _stop_child(child)
+                        _stop_child(worker_proc)
                         break
                     time.sleep(0.2)
-                ret = child.poll()
+                ret = worker_proc.poll()
             except KeyboardInterrupt:
-                shutdown = True
-                _stop_child(child)
+                _stop_child(worker_proc)
                 break
             finally:
                 child = None
@@ -218,7 +221,6 @@ def main() -> None:
                 break
 
             if not _owner_alive():
-                shutdown = True
                 break
 
             if ret == ProcessExitCode.STREAM_ERROR:
