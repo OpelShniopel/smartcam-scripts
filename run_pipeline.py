@@ -6,10 +6,10 @@ Spawns the pipeline as a subprocess so that segfaults (SIGSEGV)
 don't kill the restart loop.
 
 Exit code convention from pipeline:
-  0   - clean shutdown (SIGINT/SIGTERM from operator), do NOT restart
-  42  - intentional restart (stream config changed), relaunch immediately
-  43  - RTMP stream error, stream.conf already cleared, relaunch without stream
-  other - crash or error, relaunch after delay
+  0                           - clean shutdown, do NOT restart
+  ProcessExitCode.RESTART     - intentional restart, relaunch immediately
+  ProcessExitCode.STREAM_ERROR - reserved stream error, restart without counting crash
+  other                       - crash or error, relaunch after delay
 
 Usage:  python3 run_pipeline.py [--no-stream]
 """
@@ -20,9 +20,9 @@ import sys
 import time
 from datetime import datetime
 
+from exit_codes import ProcessExitCode
+
 RESTART_DELAY_SEC = 2
-RESTART_EXIT_CODE = 42
-STREAM_ERROR_EXIT_CODE = 43  # reserved for compatibility
 MAX_CRASHES = 10  # stop looping if we crash this many times without a clean run
 CRASH_RESET_SEC = 300  # reset crash counter if pipeline ran cleanly for this long
 
@@ -88,13 +88,13 @@ def main():
             print(f"\n[{_ts()}] *** Pipeline exited cleanly (ran {run_duration:.0f}s) — not restarting ***")
             break
 
-        if ret == RESTART_EXIT_CODE:
+        if ret == ProcessExitCode.RESTART:
             print(f"\n[{_ts()}] *** Config change restart (ran {run_duration:.0f}s) ***")
             # Reset crash count — this was an intentional restart, not a crash
             crash_count = 0
             continue
 
-        if ret == STREAM_ERROR_EXIT_CODE:
+        if ret == ProcessExitCode.STREAM_ERROR:
             print(f"\n[{_ts()}] *** Reserved stream error exit (ran {run_duration:.0f}s) — restarting ***")
             # stream.conf already cleared by pipeline, reset crash count — not a crash
             crash_count = 0

@@ -69,6 +69,7 @@ from gi.repository import GLib, Gst
 
 import pyds
 
+from exit_codes import ProcessExitCode
 from score_utils import truncate_team_name
 
 
@@ -135,9 +136,6 @@ STREAM_WORKER_CONFIG = os.path.join(SCRIPT_DIR, "stream_worker_config.json")
 STREAM_WORKER_STATUS = os.path.join(SCRIPT_DIR, "stream_worker_status.json")
 STREAM_WORKER_PID = os.path.join(SCRIPT_DIR, "stream_worker.pid")
 STREAM_WORKER_WRAPPER = os.path.join(SCRIPT_DIR, "run_stream_worker.py")
-
-RESTART_EXIT_CODE = 42
-STREAM_ERROR_EXIT_CODE = 43  # reserved for compatibility; main pipeline no longer owns RTMP
 
 # Mutable flag set by bus_call when an RTMP error triggers a stream-error exit.
 # Using a list so the nested bus_call closure can mutate it.
@@ -1638,7 +1636,7 @@ def main():
         print("WARNING: DISPLAY not set — defaulting to :0")
 
     def _restart_handler(_sig, _frame):
-        raise SystemExit(RESTART_EXIT_CODE)
+        raise SystemExit(int(ProcessExitCode.RESTART))
 
     signal.signal(signal.SIGUSR1, _restart_handler)
 

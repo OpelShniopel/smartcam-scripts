@@ -21,6 +21,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from exit_codes import ProcessExitCode
 from score_utils import truncate_team_name
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -46,8 +47,6 @@ CONFIG_POLL_SEC = 1
 STATE_POLL_SEC = 1
 STALL_CHECK_SEC = 1
 STALL_TIMEOUT_SEC = 8
-
-STREAM_ERROR_EXIT_CODE = 43
 
 _loop: GLib.MainLoop | None = None
 _status_lock = threading.Lock()
@@ -350,7 +349,7 @@ def _stall_check() -> bool:
     msg = f"RTMP stalled — no outbound buffers for {idle_for:.1f}s"
     print(f"[worker] {msg}")
     _set_status(stream_active=False, last_error=msg, active_camera=_current_active_camera)
-    _exit_code = STREAM_ERROR_EXIT_CODE
+    _exit_code = int(ProcessExitCode.STREAM_ERROR)
     _loop.quit()
     return False
 
@@ -374,7 +373,7 @@ def _verify_timeout() -> bool:
         msg = f"RTMP connection timed out after {VERIFY_TIMEOUT_SEC}s"
         print(f"[worker] {msg}")
         _set_status(stream_active=False, last_error=msg, active_camera=_current_active_camera)
-        _exit_code = STREAM_ERROR_EXIT_CODE
+        _exit_code = int(ProcessExitCode.STREAM_ERROR)
         if _loop is not None:
             _loop.quit()
     return False
@@ -593,7 +592,7 @@ def bus_call(_bus, message, loop: GLib.MainLoop):
         msg = f"GStreamer error in {src_name}: {err}"
         print(f"[worker] ERROR: {err}: {dbg} (src={src_name})")
         _set_status(stream_active=False, last_error=msg, active_camera=_current_active_camera)
-        _exit_code = STREAM_ERROR_EXIT_CODE
+        _exit_code = int(ProcessExitCode.STREAM_ERROR)
         loop.quit()
     return True
 
@@ -656,7 +655,7 @@ def main() -> None:
     if _exit_code:
         raise SystemExit(_exit_code)
     if not _worker_state["stream_status_sent"]:
-        raise SystemExit(STREAM_ERROR_EXIT_CODE)
+        raise SystemExit(int(ProcessExitCode.STREAM_ERROR))
 
 
 if __name__ == "__main__":

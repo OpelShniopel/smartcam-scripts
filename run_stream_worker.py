@@ -10,11 +10,12 @@ import sys
 import time
 from datetime import datetime
 
+from exit_codes import ProcessExitCode
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKER_SCRIPT = os.path.join(SCRIPT_DIR, "stream_worker.py")
 OWNER_PID = int(os.environ.get("STREAM_OWNER_PID", "0") or "0")
 PID_FILE = os.path.join(SCRIPT_DIR, "stream_worker.pid")
-STREAM_ERROR_EXIT_CODE = 43
 MAX_CRASHES = 20
 CRASH_RESET_SEC = 300
 
@@ -116,7 +117,7 @@ def main() -> None:
                 break
 
             delay = _sleep_for_attempt(crash_count)
-            if ret == STREAM_ERROR_EXIT_CODE:
+            if ret == ProcessExitCode.STREAM_ERROR:
                 print(
                     f"[{_ts()}] RTMP/connectivity error after {run_duration:.0f}s "
                     f"— retrying worker in {delay}s"
