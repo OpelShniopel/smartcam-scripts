@@ -91,6 +91,19 @@ AVAILABLE_CAMERAS = {
     "cam0": os.path.exists("/dev/video0"),
     "cam2": os.path.exists("/dev/video2"),
 }
+CAMERA_SOURCE_ENV_KEYS = {
+    "cam0": "STREAM_SOURCE_CAM0_RTSP",
+    "cam2": "STREAM_SOURCE_CAM2_RTSP",
+}
+CAMERA_SOURCE_URLS = {
+    "cam0": SOURCE_RTSP_CAM0_URL,
+    "cam2": SOURCE_RTSP_CAM2_URL,
+}
+CAMERA_SOURCE_SUFFIXES = {
+    "cam0": "0",
+    "cam2": "2",
+}
+CAMERA_FALLBACK_ORDER = ("cam2", "cam0")
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
@@ -141,7 +154,20 @@ def read_score_state() -> dict:
     return state
 
 
-def _normalize_camera(value) -> str:
+def _camera_input_available(camera: str) -> bool:
+    env_key = CAMERA_SOURCE_ENV_KEYS.get(camera)
+    return bool(AVAILABLE_CAMERAS.get(camera, False) or (env_key and os.environ.get(env_key)))
+
+
+def _available_camera_names() -> list[str]:
+    return [
+        camera
+        for camera in CAMERA_FALLBACK_ORDER
+        if _camera_input_available(camera)
+    ]
+
+
+def _normalize_camera(value, available_cameras: set[str] | None = None) -> str:
     text = str(value or "cam2").strip().lower()
     mapping = {
         "0": "cam0",
@@ -155,18 +181,14 @@ def _normalize_camera(value) -> str:
     }
     normalized = mapping.get(text, "cam2")
 
-    if (
-        normalized == "cam2"
-        and not AVAILABLE_CAMERAS["cam2"]
-        and AVAILABLE_CAMERAS["cam0"]
-    ):
-        return "cam0"
-    if (
-        normalized == "cam0"
-        and not AVAILABLE_CAMERAS["cam0"]
-        and AVAILABLE_CAMERAS["cam2"]
-    ):
-        return "cam2"
+    if available_cameras is None:
+        available_cameras = set(_available_camera_names())
+    if not available_cameras or normalized in available_cameras:
+        return normalized
+
+    for camera in CAMERA_FALLBACK_ORDER:
+        if camera in available_cameras:
+            return camera
 
     return normalized
 
@@ -288,7 +310,7 @@ def _poll_score_state() -> bool:
 
 def _switch_active_camera(active_camera: str) -> None:
     global _current_active_camera
-    normalized = _normalize_camera(active_camera)
+    normalized = _normalize_camera(active_camera, set(_selector_pads))
     pad = _selector_pads.get(normalized)
     if _selector is None or pad is None:
         return
@@ -439,7 +461,7 @@ def _link_branch_to_selector(last_el: Gst.Element, selector: Gst.Element, cam_na
 
 
 def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
-    global _enc_stream, _selector, _current_active_camera
+    global _enc_stream, _selector, _current_active_camera, _last_config
 
     rtmp_url = read_stream_url()
     if not rtmp_url:
@@ -453,8 +475,25 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     if pipeline is None:
         raise RuntimeError("Unable to create stream-worker pipeline")
 
-    q0 = _build_rtsp_input_branch(pipeline, "0", SOURCE_RTSP_CAM0_URL)
-    q2 = _build_rtsp_input_branch(pipeline, "2", SOURCE_RTSP_CAM2_URL)
+    input_branches: dict[str, Gst.Element] = {}
+    for camera in ("cam0", "cam2"):
+        if not _camera_input_available(camera):
+            print(
+                f"[worker] skipping {camera} RTSP source: "
+                f"device unavailable and {CAMERA_SOURCE_ENV_KEYS[camera]} not set"
+            )
+            continue
+        input_branches[camera] = _build_rtsp_input_branch(
+            pipeline,
+            CAMERA_SOURCE_SUFFIXES[camera],
+            CAMERA_SOURCE_URLS[camera],
+        )
+
+    if not input_branches:
+        raise RuntimeError(
+            "No available RTSP input sources; expected /dev/video0, /dev/video2, "
+            "or explicit STREAM_SOURCE_CAM0_RTSP/STREAM_SOURCE_CAM2_RTSP override"
+        )
 
     selector = _make("input-selector", "strm_selector")
     q = _make("queue", "strm_queue")
@@ -520,8 +559,8 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
         pipeline.add(el)
 
     _selector_pads.clear()
-    _link_branch_to_selector(q0, selector, "cam0")
-    _link_branch_to_selector(q2, selector, "cam2")
+    for camera, branch in input_branches.items():
+        _link_branch_to_selector(branch, selector, camera)
 
     _link(selector, q)
     _link(q, osd_bg)
@@ -569,7 +608,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     _enc_stream = enc
     _selector = selector
-    _current_active_camera = _normalize_camera(cfg.get("activeCamera", "cam2"))
+    _current_active_camera = _normalize_camera(cfg.get("activeCamera", "cam2"), set(_selector_pads))
     _switch_active_camera(_current_active_camera)
     _update_overlay(read_score_state())
     _last_config = read_worker_config()
