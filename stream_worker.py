@@ -33,6 +33,7 @@ from runtime_paths import (
 from rtmp_elements import (
     configure_rtmp_branch,
     make_rtmp_elements,
+    update_score_clock_overlays,
 )
 from score_utils import truncate_team_name
 
@@ -255,14 +256,7 @@ def _update_overlay(state: dict) -> None:
                 "text",
                 truncate_team_name("away_name", state["away_name"], log_prefix="[worker]"),
             )
-    if score:
-        score.set_property("silent", not visible)
-        if visible:
-            score.set_property("text", f"{state['home_points']} - {state['away_points']}")
-    if clock:
-        clock.set_property("silent", not visible)
-        if visible:
-            clock.set_property("text", f"Q{state['quarter']}  {state['clock']}")
+    update_score_clock_overlays(score, clock, visible, state)
     if fouls:
         fouls.set_property("silent", not visible)
         if visible:

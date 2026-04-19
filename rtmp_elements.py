@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from runtime_paths import SCOREBOARD_PNG
 
@@ -187,13 +187,39 @@ def configure_rtmp_output(elements: RtmpElements, rtmp_url: str) -> None:
 
 
 def configure_rtmp_branch(
-        elements: RtmpElements,
-        queue_element: Any,
-        bitrate: int,
-        rtmp_url: str,
+    elements: RtmpElements,
+    queue_element: Any,
+    bitrate: int,
+    rtmp_url: str,
 ) -> None:
     configure_leaky_queue(queue_element)
     configure_scoreboard_background(elements.osd_bg)
     configure_scoreboard_texts(elements)
     configure_rtmp_encoder(elements.enc, bitrate)
     configure_rtmp_output(elements, rtmp_url)
+
+
+def set_overlay_text(element: Any | None, visible: bool, text: str) -> None:
+    if not element:
+        return
+    element.set_property("silent", not visible)
+    if visible:
+        element.set_property("text", text)
+
+
+def update_score_clock_overlays(
+    score_element: Any | None,
+    clock_element: Any | None,
+    visible: bool,
+    state: Mapping[str, Any],
+) -> None:
+    set_overlay_text(
+        score_element,
+        visible,
+        f"{state['home_points']} - {state['away_points']}",
+    )
+    set_overlay_text(
+        clock_element,
+        visible,
+        f"Q{state['quarter']}  {state['clock']}",
+    )
