@@ -513,10 +513,7 @@ def _dispatch_cmd(msg: dict) -> None:
             _ack("start_stream", False, err)
             return
 
-        with open(STREAM_CONF, "w") as f:
-            f.write(rtmp_url + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        _atomic_write_text(STREAM_CONF, rtmp_url + "\n")
 
         ok, info = _start_stream_worker()
         if ok:
@@ -530,10 +527,7 @@ def _dispatch_cmd(msg: dict) -> None:
             _ack("start_stream", False, err)
 
     elif action == "stop_stream":
-        with open(STREAM_CONF, "w") as f:
-            f.write("# disabled\n")
-            f.flush()
-            os.fsync(f.fileno())
+        _atomic_write_text(STREAM_CONF, "# disabled\n")
         ok, info = _stop_stream_worker()
         print(f"[cmd] stop_stream ({info})")
         _ack("stop_stream", ok, "" if ok else info)
@@ -856,8 +850,7 @@ def _capsfilter(name: str, caps_str: str) -> Gst.Element:
 # ---------------------------------------------------------------------------
 def read_stream_url() -> str | None:
     if not os.path.exists(STREAM_CONF):
-        with open(STREAM_CONF, "w") as f:
-            f.write("# disabled\n")
+        _atomic_write_text(STREAM_CONF, "# disabled\n")
         return None
     with open(STREAM_CONF) as f:
         url = f.read().strip()
