@@ -377,6 +377,29 @@ _pycam_clients_lock = threading.Lock()
 _pycam_q: queue.SimpleQueue = queue.SimpleQueue()
 
 
+def _json_socket_sender_loop(
+    out_q: queue.SimpleQueue,
+    clients: list[socket.socket],
+    clients_lock,
+) -> None:
+    while True:
+        msg = out_q.get()
+        line = (json.dumps(msg) + "\n").encode()
+        with clients_lock:
+            dead = []
+            for conn in clients:
+                try:
+                    conn.sendall(line)
+                except OSError:
+                    dead.append(conn)
+            for conn in dead:
+                clients.remove(conn)
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+
+
 def start_pycam_server() -> None:
     try:
         os.unlink(PYCAM_SOCK)
@@ -388,24 +411,6 @@ def start_pycam_server() -> None:
     srv.listen(2)
     print(f"Pycam socket -> {PYCAM_SOCK}")
 
-    def _sender_loop():
-        while True:
-            msg = _pycam_q.get()
-            line = (json.dumps(msg) + "\n").encode()
-            with _pycam_clients_lock:
-                dead = []
-                for conn in _pycam_clients:
-                    try:
-                        conn.sendall(line)
-                    except OSError:
-                        dead.append(conn)
-                for c in dead:
-                    _pycam_clients.remove(c)
-                    try:
-                        c.close()
-                    except OSError:
-                        pass
-
     def _accept_loop():
         while True:
             try:
@@ -416,7 +421,12 @@ def start_pycam_server() -> None:
             except OSError:
                 break
 
-    threading.Thread(target=_sender_loop, daemon=True, name="pycam-sender").start()
+    threading.Thread(
+        target=_json_socket_sender_loop,
+        args=(_pycam_q, _pycam_clients, _pycam_clients_lock),
+        daemon=True,
+        name="pycam-sender",
+    ).start()
     threading.Thread(target=_accept_loop, daemon=True, name="pycam-accept").start()
 
 
@@ -435,25 +445,6 @@ def send_to_pycam(cam_label: str, frame_num: int, detections: list) -> None:
 _sock_clients: list[socket.socket] = []
 _sock_clients_lock = threading.Lock()
 _out_q: queue.SimpleQueue = queue.SimpleQueue()
-
-
-def _sender_loop() -> None:
-    while True:
-        msg = _out_q.get()
-        line = (json.dumps(msg) + "\n").encode()
-        with _sock_clients_lock:
-            dead = []
-            for conn in _sock_clients:
-                try:
-                    conn.sendall(line)
-                except OSError:
-                    dead.append(conn)
-            for conn in dead:
-                _sock_clients.remove(conn)
-                try:
-                    conn.close()
-                except OSError:
-                    pass
 
 
 def _handle_go_connection(conn: socket.socket) -> None:
@@ -672,7 +663,12 @@ def start_unix_server() -> None:
     os.chmod(UNIX_SOCK, 0o660)
     srv.listen(4)
     print(f"Unix socket -> {UNIX_SOCK}")
-    threading.Thread(target=_sender_loop, daemon=True, name="unix-sender").start()
+    threading.Thread(
+        target=_json_socket_sender_loop,
+        args=(_out_q, _sock_clients, _sock_clients_lock),
+        daemon=True,
+        name="unix-sender",
+    ).start()
 
     def _accept_loop():
         while True:
@@ -797,6 +793,11 @@ def _link(src: Gst.Element, dst: Gst.Element) -> None:
     if not src.link(dst):
         sys.stderr.write(f"ERROR: Failed to link {src.get_name()} -> {dst.get_name()}\n")
         sys.exit(1)
+
+
+def _link_many(*elements: Gst.Element) -> None:
+    for src, dst in zip(elements, elements[1:]):
+        _link(src, dst)
 
 
 def _link_filtered(src: Gst.Element, dst: Gst.Element, caps_str: str) -> None:
@@ -1380,6 +1381,27 @@ def _build_camera_source(pipeline, device: str, suffix: str):
     return tee
 
 
+def _configure_x264_encoder(
+    enc: Gst.Element,
+    *,
+    tune: str,
+    preset: str,
+    bitrate: int,
+    keyint: int,
+    threads: int,
+) -> None:
+    enc.set_property("tune", tune)
+    enc.set_property("speed-preset", preset)
+    enc.set_property("bitrate", bitrate)
+    enc.set_property("key-int-max", keyint)
+    enc.set_property("threads", threads)
+
+
+def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
+    sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
+    sink.set_property("protocols", 4)
+
+
 # ---------------------------------------------------------------------------
 # Clean branch
 # ---------------------------------------------------------------------------
@@ -1396,14 +1418,15 @@ def _build_clean_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Eleme
     q.set_property("max-size-time", 0)
     q.set_property("leaky", 2)
 
-    enc.set_property("tune", CLEAN_TUNE)
-    enc.set_property("speed-preset", CLEAN_PRESET)
-    enc.set_property("bitrate", CLEAN_BITRATE)
-    enc.set_property("key-int-max", CLEAN_KEYINT)
-    enc.set_property("threads", CLEAN_THREADS)
-
-    sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
-    sink.set_property("protocols", 4)
+    _configure_x264_encoder(
+        enc,
+        tune=CLEAN_TUNE,
+        preset=CLEAN_PRESET,
+        bitrate=CLEAN_BITRATE,
+        keyint=CLEAN_KEYINT,
+        threads=CLEAN_THREADS,
+    )
+    _configure_rtsp_sink(sink, rtsp_path)
 
     for el in (q, conv, caps, enc, parse, sink):
         pipeline.add(el)
@@ -1489,14 +1512,15 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         q_rec.set_property("max-size-time", 0)
         q_rec.set_property("leaky", 2)
 
-    enc.set_property("tune", AI_TUNE)
-    enc.set_property("speed-preset", AI_PRESET)
-    enc.set_property("bitrate", AI_BITRATE)
-    enc.set_property("key-int-max", AI_KEYINT)
-    enc.set_property("threads", AI_THREADS)
-
-    sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
-    sink.set_property("protocols", 4)
+    _configure_x264_encoder(
+        enc,
+        tune=AI_TUNE,
+        preset=AI_PRESET,
+        bitrate=AI_BITRATE,
+        keyint=AI_KEYINT,
+        threads=AI_THREADS,
+    )
+    _configure_rtsp_sink(sink, rtsp_path)
 
     if rec is not None:
         rec.set_property("location", _recording_location_pattern(cam_label))
@@ -1524,16 +1548,10 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         sys.stderr.write(f"ERROR: Failed to link caps{suffix}_ai -> mux{suffix}.sink_0\n")
         sys.exit(1)
 
-    _link(mux, pgie)
-    _link(pgie, tracker)
-    _link(tracker, conv_pre)
-    _link(conv_pre, nvosd)
-    _link(nvosd, conv_post)
-    _link(conv_post, caps_post)
-    _link(caps_post, q_post)
-    _link(q_post, enc)
-    _link(enc, parse)
-    _link(parse, parse_tee)
+    _link_many(
+        mux, pgie, tracker, conv_pre, nvosd, conv_post,
+        caps_post, q_post, enc, parse, parse_tee,
+    )
 
     _tee_branch(parse_tee, q_rtsp)
     _link(q_rtsp, sink)
@@ -1567,14 +1585,15 @@ def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) ->
     q.set_property("max-size-time", 0)
     q.set_property("leaky", 2)
 
-    enc.set_property("tune", CLEAN_TUNE)
-    enc.set_property("speed-preset", CLEAN_PRESET)
-    enc.set_property("bitrate", 10000)
-    enc.set_property("key-int-max", CLEAN_KEYINT)
-    enc.set_property("threads", CLEAN_THREADS)
-
-    sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
-    sink.set_property("protocols", 4)
+    _configure_x264_encoder(
+        enc,
+        tune=CLEAN_TUNE,
+        preset=CLEAN_PRESET,
+        bitrate=10000,
+        keyint=CLEAN_KEYINT,
+        threads=CLEAN_THREADS,
+    )
+    _configure_rtsp_sink(sink, rtsp_path)
 
     for el in (q, conv, caps, enc, parse, sink):
         pipeline.add(el)
@@ -1681,17 +1700,10 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
         pipeline.add(el)
 
     _tee_branch(tee, q_stream)
-    _link(q_stream, conv_strm)
-    _link(conv_strm, caps_strm)
-    _link(caps_strm, osd_bg)
-    _link(osd_bg, osd_home)
-    _link(osd_home, osd_away)
-    _link(osd_away, osd_score)
-    _link(osd_score, osd_clock)
-    _link(osd_clock, osd_fouls)
-    _link(osd_fouls, enc_stream)
-    _link(enc_stream, parse_stream)
-    _link(parse_stream, flvmux)
+    _link_many(
+        q_stream, conv_strm, caps_strm, osd_bg, osd_home, osd_away,
+        osd_score, osd_clock, osd_fouls, enc_stream, parse_stream, flvmux,
+    )
 
     _link_filtered(audiosrc, aacenc, "audio/x-raw,rate=44100,channels=2")
     aacenc_src = _get_static_pad(aacenc, "src")
