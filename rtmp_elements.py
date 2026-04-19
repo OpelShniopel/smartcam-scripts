@@ -7,7 +7,6 @@ from typing import Any, Callable
 
 from runtime_paths import SCOREBOARD_PNG
 
-
 RTMP_KEYINT = 60
 RTMP_THREADS = 2
 RTMP_PRESET = "ultrafast"
@@ -107,13 +106,13 @@ def configure_scoreboard_background(osd_bg: Any) -> None:
 
 
 def setup_text_overlay(
-    element: Any,
-    text: str,
-    xpos: float,
-    ypos: float,
-    font: str = "Sans Bold 20",
-    color: int = 0xFFFFFFFF,
-    shadow: bool = True,
+        element: Any,
+        text: str,
+        xpos: float,
+        ypos: float,
+        font: str = "Sans Bold 20",
+        color: int = 0xFFFFFFFF,
+        shadow: bool = True,
 ) -> None:
     element.set_property("text", text)
     element.set_property("font-desc", font)
@@ -188,10 +187,10 @@ def configure_rtmp_output(elements: RtmpElements, rtmp_url: str) -> None:
 
 
 def configure_rtmp_branch(
-    elements: RtmpElements,
-    queue_element: Any,
-    bitrate: int,
-    rtmp_url: str,
+        elements: RtmpElements,
+        queue_element: Any,
+        bitrate: int,
+        rtmp_url: str,
 ) -> None:
     configure_leaky_queue(queue_element)
     configure_scoreboard_background(elements.osd_bg)

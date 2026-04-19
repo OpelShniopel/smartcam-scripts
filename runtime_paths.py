@@ -2,7 +2,6 @@
 
 import os
 
-
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 STREAM_CONF = os.path.join(SCRIPT_DIR, "stream.conf")
@@ -16,7 +15,6 @@ STREAM_WORKER_WRAPPER = os.path.join(SCRIPT_DIR, "run_stream_worker.py")
 STREAM_WORKER_PID_ROLE = "smartcam_stream_worker_wrapper"
 
 SCOREBOARD_PNG = os.path.join(SCRIPT_DIR, "scoreboard.png")
-
 
 __all__ = [
     "SCOREBOARD_PNG",

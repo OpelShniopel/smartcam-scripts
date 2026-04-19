@@ -288,6 +288,7 @@ score_lock = threading.Lock()
 _osd_elements: dict[str, Gst.Element] = {}
 _osd_lock = threading.Lock()
 
+
 def _render_scoreboard_bg() -> None:
     if not os.path.exists(SCOREBOARD_PNG):
         print(f"WARNING: Scoreboard PNG not found: {SCOREBOARD_PNG}")
@@ -372,9 +373,9 @@ _pycam_q: queue.SimpleQueue = queue.SimpleQueue()
 
 
 def _json_socket_sender_loop(
-    out_q: queue.SimpleQueue,
-    clients: list[socket.socket],
-    clients_lock,
+        out_q: queue.SimpleQueue,
+        clients: list[socket.socket],
+        clients_lock,
 ) -> None:
     while True:
         msg = out_q.get()
@@ -1376,13 +1377,13 @@ def _build_camera_source(pipeline, device: str, suffix: str):
 
 
 def _configure_x264_encoder(
-    enc: Gst.Element,
-    *,
-    tune: str,
-    preset: str,
-    bitrate: int,
-    keyint: int,
-    threads: int,
+        enc: Gst.Element,
+        *,
+        tune: str,
+        preset: str,
+        bitrate: int,
+        keyint: int,
+        threads: int,
 ) -> None:
     enc.set_property("tune", tune)
     enc.set_property("speed-preset", preset)
@@ -1397,12 +1398,12 @@ def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
 
 
 def _build_simple_rtsp_encode_branch(
-    pipeline,
-    tee,
-    suffix: str,
-    branch_name: str,
-    rtsp_path: str,
-    caps_name: str | None = None,
+        pipeline,
+        tee,
+        suffix: str,
+        branch_name: str,
+        rtsp_path: str,
+        caps_name: str | None = None,
 ) -> Gst.Element:
     q = _make("queue", f"q{suffix}_{branch_name}")
     conv = _make_nvconv(f"conv{suffix}_{branch_name}")

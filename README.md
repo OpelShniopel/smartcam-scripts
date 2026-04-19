@@ -40,20 +40,20 @@ restart exit codes.
 The main process publishes:
 
 - Clean RTSP/WebRTC streams:
-  - `rtsp://<jetson-ip>:8554/camera0_clean`
-  - `rtsp://<jetson-ip>:8554/camera2_clean`
+    - `rtsp://<jetson-ip>:8554/camera0_clean`
+    - `rtsp://<jetson-ip>:8554/camera2_clean`
 - AI/debug RTSP/WebRTC streams:
-  - `rtsp://<jetson-ip>:8554/camera0_ai`
-  - `rtsp://<jetson-ip>:8554/camera2_ai`
+    - `rtsp://<jetson-ip>:8554/camera0_ai`
+    - `rtsp://<jetson-ip>:8554/camera2_ai`
 - Internal CAM2 stream for the RTMP worker:
-  - `rtsp://<jetson-ip>:8554/camera2_stream`
+    - `rtsp://<jetson-ip>:8554/camera2_stream`
 - Local HTTP debug API:
-  - `GET http://127.0.0.1:9101/status`
-  - `POST http://127.0.0.1:9101/score`
+    - `GET http://127.0.0.1:9101/status`
+    - `POST http://127.0.0.1:9101/score`
 - Unix socket for the Go bridge:
-  - `/tmp/smartcam.sock`
+    - `/tmp/smartcam.sock`
 - Unix socket for camera control detections:
-  - `/tmp/pycam.sock`
+    - `/tmp/pycam.sock`
 
 Example score update:
 

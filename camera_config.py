@@ -2,7 +2,6 @@
 
 import os
 
-
 # Current working defaults. Change these to /dev/fixed_camera and /dev/ptz_camera
 # when those stable device links are fixed on the Jetson.
 CAM0_DEVICE = os.environ.get("SMARTCAM_CAM0_DEVICE") or "/dev/video0"
@@ -23,7 +22,6 @@ CAMERA_DEVICE_ALIASES = {
     "camera2": "cam2",
     CAM2_DEVICE.lower(): "cam2",
 }
-
 
 __all__ = [
     "CAM0_DEVICE",
