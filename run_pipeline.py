@@ -38,10 +38,22 @@ def main():
     shutdown = False
     crash_count = 0
     extra_args = sys.argv[1:]
+    child: subprocess.Popen | None = None
+    stop_signal = signal.SIGTERM
+
+    def _signal_child(proc: subprocess.Popen, sig: int) -> None:
+        if proc.poll() is None:
+            try:
+                proc.send_signal(sig)
+            except OSError:
+                pass
 
     def _handler(_sig, _frame):
-        nonlocal shutdown
+        nonlocal shutdown, child, stop_signal
         shutdown = True
+        stop_signal = _sig
+        if child is not None:
+            _signal_child(child, stop_signal)
 
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
@@ -58,6 +70,9 @@ def main():
 
         start_time = time.monotonic()
         proc = subprocess.Popen([sys.executable, SCRIPT_PATH] + extra_args)
+        child = proc
+        if shutdown:
+            _signal_child(proc, stop_signal)
 
         try:
             ret = proc.wait()
@@ -71,17 +86,20 @@ def main():
                 proc.kill()
                 proc.wait()
             break
+        finally:
+            child = None
 
         run_duration = time.monotonic() - start_time
 
         if shutdown:
-            # SIGTERM arrived while pipeline was running
-            proc.send_signal(signal.SIGINT)
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
+            # A wrapper shutdown signal arrived while the pipeline was running.
+            if proc.poll() is None:
+                _signal_child(proc, stop_signal)
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
             break
 
         if ret == 0:
