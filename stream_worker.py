@@ -30,18 +30,13 @@ from runtime_paths import (
     STREAM_WORKER_CONFIG,
     STREAM_WORKER_STATUS,
 )
+from rtmp_elements import (
+    configure_rtmp_branch,
+    make_rtmp_elements,
+)
 from score_utils import truncate_team_name
 
 RTMP_BITRATE_DEFAULT = 6800
-RTMP_KEYINT = 60
-RTMP_THREADS = 2
-RTMP_PRESET = "ultrafast"
-RTMP_TUNE = "zerolatency"
-
-SCOREBOARD_W = 410
-SCOREBOARD_H = 129
-SCOREBOARD_OFFSET_X = 755
-SCOREBOARD_OFFSET_Y = 931
 
 VERIFY_TIMEOUT_SEC = 15
 CONFIG_POLL_SEC = 1
@@ -211,6 +206,11 @@ def _link(src: Gst.Element, dst: Gst.Element) -> None:
         raise RuntimeError(f"Failed to link {src.get_name()} -> {dst.get_name()}")
 
 
+def _link_many(*elements: Gst.Element) -> None:
+    for src, dst in zip(elements, elements[1:]):
+        _link(src, dst)
+
+
 def _link_filtered(src: Gst.Element, dst: Gst.Element, caps_str: str) -> None:
     caps = Gst.Caps.from_string(caps_str)
     if not src.link_filtered(dst, caps):
@@ -224,22 +224,6 @@ def _get_static_pad(el: Gst.Element, pad_name: str) -> Gst.Pad:
     if not pad:
         raise RuntimeError(f"Unable to get pad {pad_name!r} from {el.get_name()}")
     return pad
-
-
-def _setup_text(el: Gst.Element, text: str, xpos: float, ypos: float,
-                font: str = "Sans Bold 20", color: int = 0xFFFFFFFF,
-                shadow: bool = True) -> None:
-    el.set_property("text", text)
-    el.set_property("font-desc", font)
-    el.set_property("halignment", 4)
-    el.set_property("valignment", 3)
-    el.set_property("xpos", xpos)
-    el.set_property("ypos", ypos)
-    el.set_property("color", color)
-    el.set_property("draw-shadow", shadow)
-    el.set_property("auto-resize", False)
-    el.set_property("wait-text", False)
-    el.set_property("silent", True)
 
 
 def _update_overlay(state: dict) -> None:
@@ -488,61 +472,20 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     selector = _make("input-selector", "strm_selector")
     q = _make("queue", "strm_queue")
-    osd_bg = _make("gdkpixbufoverlay", "strm_osd_bg")
-    osd_home = _make("textoverlay", "strm_osd_home")
-    osd_away = _make("textoverlay", "strm_osd_away")
-    osd_score = _make("textoverlay", "strm_osd_score")
-    osd_clock = _make("textoverlay", "strm_osd_clock")
-    osd_fouls = _make("textoverlay", "strm_osd_fouls")
-    enc = _make("x264enc", "strm_enc")
-    parse_out = _make("h264parse", "strm_parse")
-    flvmux = _make("flvmux", "strm_flvmux")
+    rtmp = make_rtmp_elements(_make)
     watchdog = Gst.ElementFactory.make("watchdog", "strm_watchdog")
-    rtmpsink = _make("rtmpsink", "strm_rtmpsink")
-    audiosrc = _make("audiotestsrc", "strm_audiosrc")
-    aacenc = _make("voaacenc", "strm_aacenc")
-
-    q.set_property("max-size-buffers", 2)
-    q.set_property("max-size-bytes", 0)
-    q.set_property("max-size-time", 0)
-    q.set_property("leaky", 2)
-
-    osd_bg.set_property("location", SCOREBOARD_PNG)
-    osd_bg.set_property("offset-x", SCOREBOARD_OFFSET_X)
-    osd_bg.set_property("offset-y", SCOREBOARD_OFFSET_Y)
-    osd_bg.set_property("overlay-width", SCOREBOARD_W)
-    osd_bg.set_property("overlay-height", SCOREBOARD_H)
-    osd_bg.set_property("alpha", 0.0)
-
-    _setup_text(osd_home, "HOME", xpos=0.022, ypos=0.040, font="Sans Bold 22")
-    _setup_text(osd_away, "AWAY", xpos=0.230, ypos=0.040, font="Sans Bold 22")
-    _setup_text(osd_score, "0 - 0", xpos=0.120, ypos=0.040, font="Sans Bold 22", color=0xFFD916FF)
-    _setup_text(osd_clock, "Q1 10:00", xpos=0.330, ypos=0.040, font="Sans Bold 22", color=0xB2E5FFFF)
-    _setup_text(osd_fouls, "", xpos=0.022, ypos=0.068, font="Sans 13", color=0xA6A6A6FF)
-
-    enc.set_property("pass", "cbr")
-    enc.set_property("bitrate", int(cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)))
-    enc.set_property("vbv-buf-capacity", 200)
-    enc.set_property("tune", RTMP_TUNE)
-    enc.set_property("speed-preset", RTMP_PRESET)
-    enc.set_property("key-int-max", RTMP_KEYINT)
-    enc.set_property("threads", RTMP_THREADS)
-
-    flvmux.set_property("streamable", True)
+    configure_rtmp_branch(
+        rtmp,
+        q,
+        int(cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)),
+        rtmp_url,
+    )
     if watchdog is not None:
         watchdog.set_property("timeout", int(STALL_TIMEOUT_SEC * 1000))
     else:
         print("[worker] WARNING: watchdog plugin unavailable; using custom stall detector only")
-    rtmpsink.set_property("location", rtmp_url)
-    rtmpsink.set_property("async", False)
-    audiosrc.set_property("wave", 4)
-    aacenc.set_property("bitrate", 128000)
 
-    elements = [
-        selector, q,
-        osd_bg, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
-        enc, parse_out, flvmux, rtmpsink, audiosrc, aacenc,
-    ]
+    elements = [selector, q, *rtmp.base_elements()]
     if watchdog is not None:
         elements.insert(-3, watchdog)
 
@@ -554,57 +497,43 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
         _link_branch_to_selector(branch, selector, camera)
 
     _link(selector, q)
-    _link(q, osd_bg)
-    _link(osd_bg, osd_home)
-    _link(osd_home, osd_away)
-    _link(osd_away, osd_score)
-    _link(osd_score, osd_clock)
-    _link(osd_clock, osd_fouls)
-    _link(osd_fouls, enc)
-    _link(enc, parse_out)
+    _link_many(q, *rtmp.overlay_chain())
     if watchdog is not None:
-        _link(parse_out, watchdog)
-        _link(watchdog, flvmux)
+        _link(rtmp.parse, watchdog)
+        _link(watchdog, rtmp.flvmux)
     else:
-        _link(parse_out, flvmux)
+        _link(rtmp.parse, rtmp.flvmux)
 
-    _link_filtered(audiosrc, aacenc, "audio/x-raw,rate=44100,channels=2")
-    aacenc_src = _get_static_pad(aacenc, "src")
-    flvmux_audio = flvmux.request_pad_simple("audio")
+    _link_filtered(rtmp.audiosrc, rtmp.aacenc, "audio/x-raw,rate=44100,channels=2")
+    aacenc_src = _get_static_pad(rtmp.aacenc, "src")
+    flvmux_audio = rtmp.flvmux.request_pad_simple("audio")
     if flvmux_audio is None:
         raise RuntimeError("Unable to request flvmux audio pad")
     if aacenc_src.link(flvmux_audio) != Gst.PadLinkReturn.OK:
         raise RuntimeError("Failed to link audio encoder to flvmux audio pad")
 
-    _link(flvmux, rtmpsink)
+    _link(rtmp.flvmux, rtmp.rtmpsink)
 
-    activity_pad_owner = watchdog if watchdog is not None else parse_out
+    activity_pad_owner = watchdog if watchdog is not None else rtmp.parse
     activity_pad = activity_pad_owner.get_static_pad("src")
     if activity_pad is not None:
         activity_pad.add_probe(Gst.PadProbeType.BUFFER, _activity_probe, None)
 
-    sink_pad = rtmpsink.get_static_pad("sink")
+    sink_pad = rtmp.rtmpsink.get_static_pad("sink")
     if sink_pad is not None:
         sink_pad.add_probe(Gst.PadProbeType.BUFFER, _rtmp_probe, None)
 
     _osd_elements.clear()
-    _osd_elements.update({
-        "osd_bg": osd_bg,
-        "osd_home": osd_home,
-        "osd_away": osd_away,
-        "osd_score": osd_score,
-        "osd_clock": osd_clock,
-        "osd_fouls": osd_fouls,
-    })
+    _osd_elements.update(rtmp.osd_map())
 
-    _enc_stream = enc
+    _enc_stream = rtmp.enc
     _selector = selector
     _current_active_camera = _normalize_camera(cfg.get("activeCamera", "cam2"), set(_selector_pads))
     _switch_active_camera(_current_active_camera)
     _update_overlay(read_score_state())
     _last_config = read_worker_config()
     _set_status(active_camera=_current_active_camera)
-    return pipeline, rtmpsink
+    return pipeline, rtmp.rtmpsink
 
 
 def bus_call(_bus, message, loop: GLib.MainLoop):

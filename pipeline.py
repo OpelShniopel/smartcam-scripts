@@ -82,6 +82,10 @@ from runtime_paths import (
     STREAM_WORKER_STATUS,
     STREAM_WORKER_WRAPPER,
 )
+from rtmp_elements import (
+    configure_rtmp_branch,
+    make_rtmp_elements,
+)
 from score_utils import truncate_team_name
 
 
@@ -169,10 +173,6 @@ RECORD_QUEUE_BUFFERS = 120
 
 # RTMP stream encoder settings — YouTube 1080p
 RTMP_BITRATE = 6800
-RTMP_KEYINT = 60
-RTMP_THREADS = 2
-RTMP_PRESET = "ultrafast"
-RTMP_TUNE = "zerolatency"
 
 # Encoder references populated by build_pipeline() — used by set_config cmd
 _encoders: dict[str, Gst.Element] = {}
@@ -287,12 +287,6 @@ score_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 _osd_elements: dict[str, Gst.Element] = {}
 _osd_lock = threading.Lock()
-
-SCOREBOARD_W = 410
-SCOREBOARD_H = 129
-SCOREBOARD_OFFSET_X = 755
-SCOREBOARD_OFFSET_Y = 931
-
 
 def _render_scoreboard_bg() -> None:
     if not os.path.exists(SCOREBOARD_PNG):
@@ -1622,84 +1616,20 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
     q_stream = _make("queue", "strm_queue")
     conv_strm = _make_nvconv("strm_conv")
     caps_strm = _capsfilter("strm_caps_i420", "video/x-raw,format=I420")
-    osd_bg = _make("gdkpixbufoverlay", "strm_osd_bg")
-    osd_home = _make("textoverlay", "strm_osd_home")
-    osd_away = _make("textoverlay", "strm_osd_away")
-    osd_score = _make("textoverlay", "strm_osd_score")
-    osd_clock = _make("textoverlay", "strm_osd_clock")
-    osd_fouls = _make("textoverlay", "strm_osd_fouls")
-    enc_stream = _make("x264enc", "strm_enc")
-    parse_stream = _make("h264parse", "strm_parse")
-    flvmux = _make("flvmux", "strm_flvmux")
-    rtmpsink = _make("rtmpsink", "strm_rtmpsink")
-    audiosrc = _make("audiotestsrc", "strm_audiosrc")
-    aacenc = _make("voaacenc", "strm_aacenc")
+    rtmp = make_rtmp_elements(_make)
+    configure_rtmp_branch(rtmp, q_stream, RTMP_BITRATE, rtmp_url)
 
-    q_stream.set_property("max-size-buffers", 2)
-    q_stream.set_property("max-size-bytes", 0)
-    q_stream.set_property("max-size-time", 0)
-    q_stream.set_property("leaky", 2)
-
-    osd_bg.set_property("location", SCOREBOARD_PNG)
-    osd_bg.set_property("offset-x", SCOREBOARD_OFFSET_X)
-    osd_bg.set_property("offset-y", SCOREBOARD_OFFSET_Y)
-    osd_bg.set_property("overlay-width", SCOREBOARD_W)
-    osd_bg.set_property("overlay-height", SCOREBOARD_H)
-    osd_bg.set_property("alpha", 0.0)
-
-    def _setup_text(el, text, xpos, ypos, font="Sans Bold 20",
-                    color=0xFFFFFFFF, shadow=True):
-        el.set_property("text", text)
-        el.set_property("font-desc", font)
-        el.set_property("halignment", 4)
-        el.set_property("valignment", 3)
-        el.set_property("xpos", xpos)
-        el.set_property("ypos", ypos)
-        el.set_property("color", color)
-        el.set_property("draw-shadow", shadow)
-        el.set_property("auto-resize", False)
-        el.set_property("wait-text", False)
-        el.set_property("silent", True)
-
-    _setup_text(osd_home, "HOME", xpos=0.022, ypos=0.040,
-                font="Sans Bold 22", color=0xFFFFFFFF)
-    _setup_text(osd_away, "AWAY", xpos=0.230, ypos=0.040,
-                font="Sans Bold 22", color=0xFFFFFFFF)
-    _setup_text(osd_score, "0 - 0", xpos=0.120, ypos=0.040,
-                font="Sans Bold 22", color=0xFFD916FF)
-    _setup_text(osd_clock, "Q1 10:00", xpos=0.330, ypos=0.040,
-                font="Sans Bold 22", color=0xB2E5FFFF)
-    _setup_text(osd_fouls, "", xpos=0.022, ypos=0.068,
-                font="Sans 13", color=0xA6A6A6FF)
-
-    enc_stream.set_property("pass", "cbr")
-    enc_stream.set_property("bitrate", RTMP_BITRATE)
-    enc_stream.set_property("vbv-buf-capacity", 200)
-    enc_stream.set_property("tune", RTMP_TUNE)
-    enc_stream.set_property("speed-preset", RTMP_PRESET)
-    enc_stream.set_property("key-int-max", RTMP_KEYINT)
-    enc_stream.set_property("threads", RTMP_THREADS)
-
-    flvmux.set_property("streamable", True)
-    rtmpsink.set_property("location", rtmp_url)
-    rtmpsink.set_property("async", False)
-    audiosrc.set_property("wave", 4)
-    aacenc.set_property("bitrate", 128000)
-
-    for el in (q_stream, conv_strm, caps_strm,
-               osd_bg, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
-               enc_stream, parse_stream, flvmux, rtmpsink, audiosrc, aacenc):
+    for el in (q_stream, conv_strm, caps_strm, *rtmp.base_elements()):
         pipeline.add(el)
 
     _tee_branch(tee, q_stream)
     _link_many(
-        q_stream, conv_strm, caps_strm, osd_bg, osd_home, osd_away,
-        osd_score, osd_clock, osd_fouls, enc_stream, parse_stream, flvmux,
+        q_stream, conv_strm, caps_strm, *rtmp.overlay_chain(), rtmp.flvmux,
     )
 
-    _link_filtered(audiosrc, aacenc, "audio/x-raw,rate=44100,channels=2")
-    aacenc_src = _get_static_pad(aacenc, "src")
-    flvmux_audio = flvmux.request_pad_simple("audio")
+    _link_filtered(rtmp.audiosrc, rtmp.aacenc, "audio/x-raw,rate=44100,channels=2")
+    aacenc_src = _get_static_pad(rtmp.aacenc, "src")
+    flvmux_audio = rtmp.flvmux.request_pad_simple("audio")
     if not flvmux_audio:
         sys.stderr.write("ERROR: Unable to get audio pad from flvmux\n")
         sys.exit(1)
@@ -1707,20 +1637,13 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
         sys.stderr.write("ERROR: Failed to link aacenc -> flvmux.audio\n")
         sys.exit(1)
 
-    _link(flvmux, rtmpsink)
+    _link(rtmp.flvmux, rtmp.rtmpsink)
 
     with _osd_lock:
-        _osd_elements.update({
-            "osd_bg": osd_bg,
-            "osd_home": osd_home,
-            "osd_away": osd_away,
-            "osd_score": osd_score,
-            "osd_clock": osd_clock,
-            "osd_fouls": osd_fouls,
-        })
+        _osd_elements.update(rtmp.osd_map())
 
     print("Scoreboard overlay: gdkpixbufoverlay (bg PNG) + textoverlay x5 (text)")
-    return enc_stream, rtmpsink
+    return rtmp.enc, rtmp.rtmpsink
 
 
 # ---------------------------------------------------------------------------
