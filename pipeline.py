@@ -342,6 +342,9 @@ def _update_osd_texts(state: dict) -> None:
 
 
 def _apply_score_patch(data: dict) -> None:
+    if not isinstance(data, dict):
+        raise ValueError("score patch must be a JSON object")
+
     allowed_str = {"home_name", "away_name", "clock"}
     allowed_int = {"home_points", "away_points", "home_fouls",
                    "away_fouls", "home_timeouts", "away_timeouts", "quarter"}
@@ -354,7 +357,7 @@ def _apply_score_patch(data: dict) -> None:
                 else:
                     score_state[k] = data[k]
         for k in allowed_int:
-            if k in data and isinstance(data[k], int):
+            if k in data and isinstance(data[k], int) and not isinstance(data[k], bool):
                 score_state[k] = data[k]
         for k in allowed_bool:
             if k in data and isinstance(data[k], bool):
@@ -481,6 +484,9 @@ def _handle_go_connection(conn: socket.socket) -> None:
                     msg = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(msg, dict):
+                    print(f"[go] ignoring non-object message: {msg!r}")
+                    continue
                 if msg.get("type") == "cmd":
                     _dispatch_cmd(msg)
                 elif msg.get("type") == "ping":
@@ -507,10 +513,22 @@ def _ack(action: str, ok: bool, error: str = "") -> None:
 
 
 def _dispatch_cmd(msg: dict) -> None:
-    action = msg.get("action", "")
+    raw_action = msg.get("action", "")
+    if not isinstance(raw_action, str):
+        err = f"action must be string, got {raw_action!r}"
+        print(f"[cmd] {err}")
+        _ack("", False, err)
+        return
+    action = raw_action
 
     if action == "start_stream":
-        rtmp_url = msg.get("rtmp_url", "").strip()
+        raw_url = msg.get("rtmp_url")
+        if not isinstance(raw_url, str):
+            err = f"rtmp_url must be string, got {raw_url!r}"
+            print(f"[cmd] start_stream: {err}")
+            _ack("start_stream", False, err)
+            return
+        rtmp_url = raw_url.strip()
         if not (rtmp_url.startswith("rtmp://") or rtmp_url.startswith("rtmps://")):
             err = f"invalid rtmp_url: {rtmp_url!r}"
             print(f"[cmd] start_stream: {err}")
@@ -540,7 +558,7 @@ def _dispatch_cmd(msg: dict) -> None:
 
     elif action == "set_config":
         bitrate = msg.get("bitrateKbps")
-        if not isinstance(bitrate, int) or not (100 <= bitrate <= 50000):
+        if not isinstance(bitrate, int) or isinstance(bitrate, bool) or not (100 <= bitrate <= 50000):
             err = f"bitrateKbps must be int 100-50000, got {bitrate!r}"
             print(f"[cmd] set_config: {err}")
             _ack("set_config", False, err)
@@ -576,7 +594,13 @@ def _dispatch_cmd(msg: dict) -> None:
         _ack("set_osd", True)
 
     elif action == "set_score":
-        _apply_score_patch(msg)
+        try:
+            _apply_score_patch(msg)
+        except ValueError as e:
+            err = str(e)
+            print(f"[cmd] set_score: {err}")
+            _ack("set_score", False, err)
+            return
         print("[cmd] set_score applied")
         _ack("set_score", True)
 
@@ -712,7 +736,11 @@ class ControlHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, AttributeError):
                 self._json(400, {"error": "invalid json"})
                 return
-            _apply_score_patch(data)
+            try:
+                _apply_score_patch(data)
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
             with score_lock:
                 self._json(200, score_state.copy())
         else:
@@ -736,7 +764,10 @@ class ControlHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _read_body(self):
-        length = int(self.headers.get("Content-Length", 0))
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            length = 0
         return self.rfile.read(length).decode() if length else ""
 
     def log_message(self, format, *args):
