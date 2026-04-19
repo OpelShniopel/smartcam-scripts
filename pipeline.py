@@ -1402,21 +1402,43 @@ def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
     sink.set_property("protocols", 4)
 
 
-# ---------------------------------------------------------------------------
-# Clean branch
-# ---------------------------------------------------------------------------
-def _build_clean_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Element:
-    q = _make("queue", f"q{suffix}_clean")
-    conv = _make_nvconv(f"conv{suffix}_clean")
-    caps = _capsfilter(f"caps{suffix}_i420", "video/x-raw,format=I420")
-    enc = _make("x264enc", f"enc{suffix}_clean")
-    parse = _make("h264parse", f"parse{suffix}_clean")
-    sink = _make("rtspclientsink", f"sink{suffix}_clean")
+def _build_simple_rtsp_encode_branch(
+    pipeline,
+    tee,
+    suffix: str,
+    branch_name: str,
+    rtsp_path: str,
+    caps_name: str | None = None,
+) -> Gst.Element:
+    q = _make("queue", f"q{suffix}_{branch_name}")
+    conv = _make_nvconv(f"conv{suffix}_{branch_name}")
+    caps = _capsfilter(caps_name or f"caps{suffix}_{branch_name}", "video/x-raw,format=I420")
+    enc = _make("x264enc", f"enc{suffix}_{branch_name}")
+    parse = _make("h264parse", f"parse{suffix}_{branch_name}")
+    sink = _make("rtspclientsink", f"sink{suffix}_{branch_name}")
 
     q.set_property("max-size-buffers", 2)
     q.set_property("max-size-bytes", 0)
     q.set_property("max-size-time", 0)
     q.set_property("leaky", 2)
+    _configure_rtsp_sink(sink, rtsp_path)
+
+    for el in (q, conv, caps, enc, parse, sink):
+        pipeline.add(el)
+
+    _tee_branch(tee, q)
+    _link_many(q, conv, caps, enc, parse, sink)
+
+    return enc
+
+
+# ---------------------------------------------------------------------------
+# Clean branch
+# ---------------------------------------------------------------------------
+def _build_clean_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Element:
+    enc = _build_simple_rtsp_encode_branch(
+        pipeline, tee, suffix, "clean", rtsp_path, caps_name=f"caps{suffix}_i420",
+    )
 
     _configure_x264_encoder(
         enc,
@@ -1426,17 +1448,6 @@ def _build_clean_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Eleme
         keyint=CLEAN_KEYINT,
         threads=CLEAN_THREADS,
     )
-    _configure_rtsp_sink(sink, rtsp_path)
-
-    for el in (q, conv, caps, enc, parse, sink):
-        pipeline.add(el)
-
-    _tee_branch(tee, q)
-    _link(q, conv)
-    _link(conv, caps)
-    _link(caps, enc)
-    _link(enc, parse)
-    _link(parse, sink)
 
     return enc
 
@@ -1573,17 +1584,9 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
 # Internal CAM2 stream branch for external RTMP worker
 # ---------------------------------------------------------------------------
 def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Element:
-    q = _make("queue", f"q{suffix}_streamsrc")
-    conv = _make_nvconv(f"conv{suffix}_streamsrc")
-    caps = _capsfilter(f"caps{suffix}_streamsrc", "video/x-raw,format=I420")
-    enc = _make("x264enc", f"enc{suffix}_streamsrc")
-    parse = _make("h264parse", f"parse{suffix}_streamsrc")
-    sink = _make("rtspclientsink", f"sink{suffix}_streamsrc")
-
-    q.set_property("max-size-buffers", 2)
-    q.set_property("max-size-bytes", 0)
-    q.set_property("max-size-time", 0)
-    q.set_property("leaky", 2)
+    enc = _build_simple_rtsp_encode_branch(
+        pipeline, tee, suffix, "streamsrc", rtsp_path,
+    )
 
     _configure_x264_encoder(
         enc,
@@ -1593,17 +1596,6 @@ def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) ->
         keyint=CLEAN_KEYINT,
         threads=CLEAN_THREADS,
     )
-    _configure_rtsp_sink(sink, rtsp_path)
-
-    for el in (q, conv, caps, enc, parse, sink):
-        pipeline.add(el)
-
-    _tee_branch(tee, q)
-    _link(q, conv)
-    _link(conv, caps)
-    _link(caps, enc)
-    _link(enc, parse)
-    _link(parse, sink)
 
     return enc
 
