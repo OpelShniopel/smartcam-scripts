@@ -383,6 +383,42 @@ def _on_rtsp_pad_added(src: Gst.Element, pad: Gst.Pad, depay: Gst.Element) -> No
         raise RuntimeError(f"Failed to link {src.get_name()} to {depay.get_name()}")
 
 
+def _build_rtsp_input_branch(pipeline: Gst.Pipeline, suffix: str, url: str) -> Gst.Element:
+    src = _make("rtspsrc", f"src{suffix}_rtsp")
+    depay = _make("rtph264depay", f"src{suffix}_depay")
+    parse = _make("h264parse", f"src{suffix}_parse")
+    dec = _make("nvv4l2decoder", f"src{suffix}_dec")
+    conv = _make("nvvideoconvert", f"src{suffix}_conv")
+    caps = _make("capsfilter", f"src{suffix}_caps_i420")
+    q = _make("queue", f"src{suffix}_queue")
+
+    src.set_property("location", url)
+    src.set_property("protocols", 4)
+    src.set_property("latency", 100)
+
+    conv.set_property("gpu-id", 0)
+    conv.set_property("copy-hw", 2)
+    caps.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
+
+    q.set_property("max-size-buffers", 2)
+    q.set_property("max-size-bytes", 0)
+    q.set_property("max-size-time", 0)
+    q.set_property("leaky", 2)
+
+    for el in (src, depay, parse, dec, conv, caps, q):
+        pipeline.add(el)
+
+    src.connect("pad-added", _on_rtsp_pad_added, depay)
+
+    _link(depay, parse)
+    _link(parse, dec)
+    _link(dec, conv)
+    _link(conv, caps)
+    _link(caps, q)
+
+    return q
+
+
 def _link_branch_to_selector(last_el: Gst.Element, selector: Gst.Element, cam_name: str) -> Gst.Pad:
     src_pad = _get_static_pad(last_el, "src")
     sel_pad = selector.request_pad_simple("sink_%u")
@@ -409,23 +445,8 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     if pipeline is None:
         raise RuntimeError("Unable to create stream-worker pipeline")
 
-    # CAM0 branch
-    src0 = _make("rtspsrc", "src0_rtsp")
-    depay0 = _make("rtph264depay", "src0_depay")
-    parse0 = _make("h264parse", "src0_parse")
-    dec0 = _make("nvv4l2decoder", "src0_dec")
-    conv0 = _make("nvvideoconvert", "src0_conv")
-    caps0 = _make("capsfilter", "src0_caps_i420")
-    q0 = _make("queue", "src0_queue")
-
-    # CAM2 branch
-    src2 = _make("rtspsrc", "src2_rtsp")
-    depay2 = _make("rtph264depay", "src2_depay")
-    parse2 = _make("h264parse", "src2_parse")
-    dec2 = _make("nvv4l2decoder", "src2_dec")
-    conv2 = _make("nvvideoconvert", "src2_conv")
-    caps2 = _make("capsfilter", "src2_caps_i420")
-    q2 = _make("queue", "src2_queue")
+    q0 = _build_rtsp_input_branch(pipeline, "0", SOURCE_RTSP_CAM0_URL)
+    q2 = _build_rtsp_input_branch(pipeline, "2", SOURCE_RTSP_CAM2_URL)
 
     selector = _make("input-selector", "strm_selector")
     q = _make("queue", "strm_queue")
@@ -442,25 +463,6 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     rtmpsink = _make("rtmpsink", "strm_rtmpsink")
     audiosrc = _make("audiotestsrc", "strm_audiosrc")
     aacenc = _make("voaacenc", "strm_aacenc")
-
-    src0.set_property("location", SOURCE_RTSP_CAM0_URL)
-    src0.set_property("protocols", 4)
-    src0.set_property("latency", 100)
-    src2.set_property("location", SOURCE_RTSP_CAM2_URL)
-    src2.set_property("protocols", 4)
-    src2.set_property("latency", 100)
-
-    for conv in (conv0, conv2):
-        conv.set_property("gpu-id", 0)
-        conv.set_property("copy-hw", 2)
-    caps0.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
-    caps2.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
-
-    for q_in in (q0, q2):
-        q_in.set_property("max-size-buffers", 2)
-        q_in.set_property("max-size-bytes", 0)
-        q_in.set_property("max-size-time", 0)
-        q_in.set_property("leaky", 2)
 
     q.set_property("max-size-buffers", 2)
     q.set_property("max-size-bytes", 0)
@@ -499,8 +501,6 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     aacenc.set_property("bitrate", 128000)
 
     elements = [
-        src0, depay0, parse0, dec0, conv0, caps0, q0,
-        src2, depay2, parse2, dec2, conv2, caps2, q2,
         selector, q,
         osd_bg, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
         enc, parse_out, flvmux, rtmpsink, audiosrc, aacenc,
@@ -510,21 +510,6 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     for el in elements:
         pipeline.add(el)
-
-    src0.connect("pad-added", _on_rtsp_pad_added, depay0)
-    src2.connect("pad-added", _on_rtsp_pad_added, depay2)
-
-    _link(depay0, parse0)
-    _link(parse0, dec0)
-    _link(dec0, conv0)
-    _link(conv0, caps0)
-    _link(caps0, q0)
-
-    _link(depay2, parse2)
-    _link(parse2, dec2)
-    _link(dec2, conv2)
-    _link(conv2, caps2)
-    _link(caps2, q2)
 
     _selector_pads.clear()
     _link_branch_to_selector(q0, selector, "cam0")
