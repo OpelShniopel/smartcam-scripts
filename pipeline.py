@@ -975,16 +975,16 @@ def _poll_stream_worker_status() -> bool:
     status = _read_stream_worker_status()
 
     if not configured or not running:
-        next_state = {"active": False, "error": status.get("last_error", "") if configured else ""}
+        active = False
+        error = str(status.get("last_error", "") if configured else "")
     else:
-        next_state = {
-            "active": bool(status.get("stream_active", False)),
-            "error": str(status.get("last_error", "") or ""),
-        }
+        active = bool(status.get("stream_active", False))
+        error = str(status.get("last_error", "") or "")
 
+    next_state = {"active": active, "error": error}
     if _last_worker_status_seen != next_state:
         _last_worker_status_seen = next_state
-        _send_stream_status(next_state["active"], next_state["error"])
+        _send_stream_status(active, error)
     return True
 
 
