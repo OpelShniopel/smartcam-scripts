@@ -226,7 +226,7 @@ def _get_cached_stream_status() -> dict | None:
         return _rtmp_status_cached
 
 
-def _rtmp_sink_pad_probe(_pad, info, _user_data):
+def _rtmp_sink_pad_probe(_pad, _info, _user_data):
     """
     Pad probe on rtmpsink's sink pad. Fires on the first buffer reaching
     the RTMP sink — means GStreamer did the RTMP handshake and is sending data.
@@ -755,7 +755,7 @@ class ControlHandler(BaseHTTPRequestHandler):
             length = 0
         return self.rfile.read(length).decode() if length else ""
 
-    def log_message(self, format, *args):
+    def log_message(self, format_string, *args):
         pass
 
 
