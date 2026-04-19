@@ -23,13 +23,14 @@ from gi.repository import GLib, Gst
 
 from camera_config import CAMERA_DEVICE_ALIASES, CAMERA_DEVICE_BY_STREAM_CAMERA
 from exit_codes import ProcessExitCode
+from runtime_paths import (
+    SCOREBOARD_PNG,
+    SCORE_STATE_FILE,
+    STREAM_CONF,
+    STREAM_WORKER_CONFIG,
+    STREAM_WORKER_STATUS,
+)
 from score_utils import truncate_team_name
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-STREAM_CONF = os.path.join(SCRIPT_DIR, "stream.conf")
-SCORE_STATE_FILE = os.path.join(SCRIPT_DIR, "score_state.json")
-STREAM_WORKER_CONFIG = os.path.join(SCRIPT_DIR, "stream_worker_config.json")
-STREAM_WORKER_STATUS = os.path.join(SCRIPT_DIR, "stream_worker_status.json")
 
 RTMP_BITRATE_DEFAULT = 6800
 RTMP_KEYINT = 60
@@ -37,7 +38,6 @@ RTMP_THREADS = 2
 RTMP_PRESET = "ultrafast"
 RTMP_TUNE = "zerolatency"
 
-SCOREBOARD_PNG = os.path.join(SCRIPT_DIR, "scoreboard.png")
 SCOREBOARD_W = 410
 SCOREBOARD_H = 129
 SCOREBOARD_OFFSET_X = 755

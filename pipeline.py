@@ -71,6 +71,17 @@ import pyds
 
 from camera_config import CAM0_DEVICE, CAM2_DEVICE, CAMERA_DEVICE_ALIASES
 from exit_codes import ProcessExitCode
+from runtime_paths import (
+    SCOREBOARD_PNG,
+    SCORE_STATE_FILE,
+    SCRIPT_DIR,
+    STREAM_CONF,
+    STREAM_WORKER_CONFIG,
+    STREAM_WORKER_PID,
+    STREAM_WORKER_PID_ROLE,
+    STREAM_WORKER_STATUS,
+    STREAM_WORKER_WRAPPER,
+)
 from score_utils import truncate_team_name
 
 
@@ -129,15 +140,6 @@ def _ai_enabled(cam_label: str) -> bool:
         return ENABLE_CAM2 and ENABLE_CAM2_AI
     return False
 
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-STREAM_CONF = os.path.join(SCRIPT_DIR, "stream.conf")
-SCORE_STATE_FILE = os.path.join(SCRIPT_DIR, "score_state.json")
-STREAM_WORKER_CONFIG = os.path.join(SCRIPT_DIR, "stream_worker_config.json")
-STREAM_WORKER_STATUS = os.path.join(SCRIPT_DIR, "stream_worker_status.json")
-STREAM_WORKER_PID = os.path.join(SCRIPT_DIR, "stream_worker.pid")
-STREAM_WORKER_WRAPPER = os.path.join(SCRIPT_DIR, "run_stream_worker.py")
-STREAM_WORKER_PID_ROLE = "smartcam_stream_worker_wrapper"
 
 # Mutable flag set by bus_call when an RTMP error triggers a stream-error exit.
 # Using a list so the nested bus_call closure can mutate it.
@@ -286,7 +288,6 @@ score_lock = threading.Lock()
 _osd_elements: dict[str, Gst.Element] = {}
 _osd_lock = threading.Lock()
 
-SCOREBOARD_PNG = os.path.join(SCRIPT_DIR, "scoreboard.png")
 SCOREBOARD_W = 410
 SCOREBOARD_H = 129
 SCOREBOARD_OFFSET_X = 755

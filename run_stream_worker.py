@@ -12,16 +12,18 @@ import time
 from datetime import datetime
 
 from exit_codes import ProcessExitCode
+from runtime_paths import (
+    SCRIPT_DIR,
+    STREAM_WORKER_PID as PID_FILE,
+    STREAM_WORKER_PID_ROLE as PID_FILE_ROLE,
+    STREAM_WORKER_SCRIPT as WORKER_SCRIPT,
+)
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKER_SCRIPT = os.path.join(SCRIPT_DIR, "stream_worker.py")
 OWNER_PID = int(os.environ.get("STREAM_OWNER_PID", "0") or "0")
 try:
     OWNER_START_TICKS = int(os.environ.get("STREAM_OWNER_START_TICKS", "") or "0") or None
 except ValueError:
     OWNER_START_TICKS = None
-PID_FILE = os.path.join(SCRIPT_DIR, "stream_worker.pid")
-PID_FILE_ROLE = "smartcam_stream_worker_wrapper"
 MAX_CRASHES = 20
 CRASH_RESET_SEC = 300
 
