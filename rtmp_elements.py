@@ -187,10 +187,10 @@ def configure_rtmp_output(elements: RtmpElements, rtmp_url: str) -> None:
 
 
 def configure_rtmp_branch(
-    elements: RtmpElements,
-    queue_element: Any,
-    bitrate: int,
-    rtmp_url: str,
+        elements: RtmpElements,
+        queue_element: Any,
+        bitrate: int,
+        rtmp_url: str,
 ) -> None:
     configure_leaky_queue(queue_element)
     configure_scoreboard_background(elements.osd_bg)
@@ -208,10 +208,10 @@ def set_overlay_text(element: Any | None, visible: bool, text: str) -> None:
 
 
 def update_score_clock_overlays(
-    score_element: Any | None,
-    clock_element: Any | None,
-    visible: bool,
-    state: Mapping[str, Any],
+        score_element: Any | None,
+        clock_element: Any | None,
+        visible: bool,
+        state: Mapping[str, Any],
 ) -> None:
     set_overlay_text(
         score_element,
