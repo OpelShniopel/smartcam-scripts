@@ -1089,14 +1089,27 @@ def _worker_cmdline_matches(pid: int) -> bool:
     return False
 
 
+def _pid_metadata_int(info: dict, key: str, *, required: bool = False) -> int | None:
+    if key not in info:
+        if required:
+            raise ValueError(f"missing {key}")
+        return None
+
+    raw_value = info[key]
+    if isinstance(raw_value, bool) or not isinstance(raw_value, (int, str)):
+        raise ValueError(f"{key} must be int-compatible")
+    return int(raw_value)
+
+
 def _worker_pid_info_is_current(info: dict | None) -> bool:
     if not info:
         return False
 
     try:
-        pid = int(info["pid"])
-    except (KeyError, TypeError, ValueError):
+        pid = _pid_metadata_int(info, "pid", required=True)
+    except ValueError:
         return False
+    assert pid is not None
     if not _pid_exists(pid):
         return False
 
@@ -1108,32 +1121,29 @@ def _worker_pid_info_is_current(info: dict | None) -> bool:
     if script is not None and os.path.abspath(str(script)) != os.path.abspath(STREAM_WORKER_WRAPPER):
         return False
 
-    owner_pid = info.get("owner_pid")
+    try:
+        owner_pid = _pid_metadata_int(info, "owner_pid")
+    except ValueError:
+        return False
     if owner_pid is not None:
-        try:
-            owner_pid = int(owner_pid)
-        except (TypeError, ValueError):
-            return False
         if owner_pid not in (0, os.getpid()):
             return False
 
-    owner_start_ticks = info.get("owner_start_ticks")
+    try:
+        owner_start_ticks = _pid_metadata_int(info, "owner_start_ticks")
+    except ValueError:
+        return False
     if owner_start_ticks is not None:
-        try:
-            owner_start_ticks = int(owner_start_ticks)
-        except (TypeError, ValueError):
-            return False
         current_owner_start_ticks = _process_start_ticks(os.getpid())
         if current_owner_start_ticks is None or current_owner_start_ticks != owner_start_ticks:
             return False
 
-    expected_start_ticks = info.get("start_ticks")
+    try:
+        expected_start_ticks = _pid_metadata_int(info, "start_ticks")
+    except ValueError:
+        return False
     if expected_start_ticks is not None:
         current_start_ticks = _process_start_ticks(pid)
-        try:
-            expected_start_ticks = int(expected_start_ticks)
-        except (TypeError, ValueError):
-            return False
         if current_start_ticks is None or current_start_ticks != expected_start_ticks:
             return False
 
