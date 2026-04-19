@@ -136,6 +136,7 @@ STREAM_WORKER_CONFIG = os.path.join(SCRIPT_DIR, "stream_worker_config.json")
 STREAM_WORKER_STATUS = os.path.join(SCRIPT_DIR, "stream_worker_status.json")
 STREAM_WORKER_PID = os.path.join(SCRIPT_DIR, "stream_worker.pid")
 STREAM_WORKER_WRAPPER = os.path.join(SCRIPT_DIR, "run_stream_worker.py")
+STREAM_WORKER_PID_ROLE = "smartcam_stream_worker_wrapper"
 
 # Mutable flag set by bus_call when an RTMP error triggers a stream-error exit.
 # Using a list so the nested bus_call closure can mutate it.
@@ -965,13 +966,41 @@ def _poll_stream_worker_status() -> bool:
     return True
 
 
+def _process_start_ticks(pid: int) -> int | None:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        fields_after_comm = stat.rsplit(") ", 1)[1].split()
+        return int(fields_after_comm[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _process_cmdline(pid: int) -> list[str]:
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return []
+    return [os.fsdecode(part) for part in raw.split(b"\0") if part]
+
+
+def _worker_pid_payload(pid: int) -> dict:
+    payload = {
+        "pid": pid,
+        "role": STREAM_WORKER_PID_ROLE,
+        "script": STREAM_WORKER_WRAPPER,
+        "owner_pid": os.getpid(),
+    }
+    start_ticks = _process_start_ticks(pid)
+    if start_ticks is not None:
+        payload["start_ticks"] = start_ticks
+    owner_start_ticks = _process_start_ticks(os.getpid())
+    if owner_start_ticks is not None:
+        payload["owner_start_ticks"] = owner_start_ticks
+    return payload
+
+
 def _write_worker_pid(pid: int) -> None:
-    tmp = f"{STREAM_WORKER_PID}.tmp"
-    with open(tmp, "w") as f:
-        f.write(f"{pid}\n")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, STREAM_WORKER_PID)
+    _atomic_write_json(STREAM_WORKER_PID, _worker_pid_payload(pid))
 
 
 def _set_worker_status(worker_alive: bool, stream_active: bool, last_error: str = "") -> None:
@@ -982,26 +1011,126 @@ def _set_worker_status(worker_alive: bool, stream_active: bool, last_error: str 
     })
 
 
-def _read_worker_pid() -> int | None:
+def _read_worker_pid_info() -> dict | None:
     try:
         raw = Path(STREAM_WORKER_PID).read_text().strip()
-        return int(raw) if raw else None
-    except (FileNotFoundError, ValueError):
+    except FileNotFoundError:
+        return None
+    if not raw:
         return None
 
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        try:
+            pid = int(raw)
+        except ValueError:
+            return None
+        return {"pid": pid, "legacy": True}
 
-def _pid_is_alive(pid: int | None) -> bool:
+    if isinstance(data, int) and not isinstance(data, bool):
+        return {"pid": data, "legacy": True}
+
+    if isinstance(data, dict):
+        try:
+            pid = int(data.get("pid", 0))
+        except (TypeError, ValueError):
+            return None
+        if pid <= 0:
+            return None
+        data = dict(data)
+        data["pid"] = pid
+        return data
+
+    return None
+
+
+def _pid_exists(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
     try:
         os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
     except OSError:
         return False
     return True
 
 
+def _worker_cmdline_matches(pid: int) -> bool:
+    wrapper_path = os.path.abspath(STREAM_WORKER_WRAPPER)
+    for arg in _process_cmdline(pid):
+        if os.path.abspath(arg) == wrapper_path:
+            return True
+    return False
+
+
+def _worker_pid_info_is_current(info: dict | None) -> bool:
+    if not info:
+        return False
+
+    try:
+        pid = int(info["pid"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not _pid_exists(pid):
+        return False
+
+    role = info.get("role")
+    if role is not None and role != STREAM_WORKER_PID_ROLE:
+        return False
+
+    script = info.get("script")
+    if script is not None and os.path.abspath(str(script)) != os.path.abspath(STREAM_WORKER_WRAPPER):
+        return False
+
+    owner_pid = info.get("owner_pid")
+    if owner_pid is not None:
+        try:
+            owner_pid = int(owner_pid)
+        except (TypeError, ValueError):
+            return False
+        if owner_pid not in (0, os.getpid()):
+            return False
+
+    owner_start_ticks = info.get("owner_start_ticks")
+    if owner_start_ticks is not None:
+        try:
+            owner_start_ticks = int(owner_start_ticks)
+        except (TypeError, ValueError):
+            return False
+        current_owner_start_ticks = _process_start_ticks(os.getpid())
+        if current_owner_start_ticks is None or current_owner_start_ticks != owner_start_ticks:
+            return False
+
+    expected_start_ticks = info.get("start_ticks")
+    if expected_start_ticks is not None:
+        current_start_ticks = _process_start_ticks(pid)
+        try:
+            expected_start_ticks = int(expected_start_ticks)
+        except (TypeError, ValueError):
+            return False
+        if current_start_ticks is None or current_start_ticks != expected_start_ticks:
+            return False
+
+    return _worker_cmdline_matches(pid)
+
+
+def _signal_worker_process(pid: int, sig: signal.Signals) -> None:
+    try:
+        os.killpg(pid, sig)
+        return
+    except ProcessLookupError:
+        pass
+    except OSError:
+        pass
+    os.kill(pid, sig)
+
+
 def _is_stream_worker_running() -> bool:
-    return _pid_is_alive(_read_worker_pid())
+    return _worker_pid_info_is_current(_read_worker_pid_info())
 
 
 def _start_stream_worker() -> tuple[bool, str]:
@@ -1013,6 +1142,9 @@ def _start_stream_worker() -> tuple[bool, str]:
         try:
             env = os.environ.copy()
             env["STREAM_OWNER_PID"] = str(os.getpid())
+            owner_start_ticks = _process_start_ticks(os.getpid())
+            if owner_start_ticks is not None:
+                env["STREAM_OWNER_START_TICKS"] = str(owner_start_ticks)
             proc = subprocess.Popen(
                 [sys.executable, STREAM_WORKER_WRAPPER],
                 cwd=SCRIPT_DIR,
@@ -1033,8 +1165,8 @@ def _start_stream_worker() -> tuple[bool, str]:
 
 def _stop_stream_worker(timeout_sec: float = 5.0) -> tuple[bool, str]:
     with _worker_ctl_lock:
-        pid = _read_worker_pid()
-        if not _pid_is_alive(pid):
+        pid_info = _read_worker_pid_info()
+        if not _worker_pid_info_is_current(pid_info):
             try:
                 os.unlink(STREAM_WORKER_PID)
             except FileNotFoundError:
@@ -1042,21 +1174,21 @@ def _stop_stream_worker(timeout_sec: float = 5.0) -> tuple[bool, str]:
             _set_worker_status(worker_alive=False, stream_active=False, last_error="")
             return True, "already stopped"
 
-        assert pid is not None
+        pid = int(pid_info["pid"])
         try:
-            os.kill(pid, signal.SIGTERM)
+            _signal_worker_process(pid, signal.SIGTERM)
         except OSError as e:
             return False, str(e)
 
         deadline = time.time() + timeout_sec
         while time.time() < deadline:
-            if not _pid_is_alive(pid):
+            if not _worker_pid_info_is_current(pid_info):
                 break
             time.sleep(0.1)
 
-        if _pid_is_alive(pid):
+        if _worker_pid_info_is_current(pid_info):
             try:
-                os.kill(pid, signal.SIGKILL)
+                _signal_worker_process(pid, signal.SIGKILL)
             except OSError as e:
                 return False, f"failed to terminate stream worker pid {pid}: {e}"
 
