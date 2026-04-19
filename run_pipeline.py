@@ -74,6 +74,7 @@ def main():
         if shutdown:
             _signal_child(proc, stop_signal)
 
+        ret: int | None = None
         try:
             ret = proc.wait()
         except KeyboardInterrupt:
@@ -90,6 +91,8 @@ def main():
             child = None
 
         run_duration = time.monotonic() - start_time
+        if ret is None:
+            break
 
         if shutdown:
             # A wrapper shutdown signal arrived while the pipeline was running.
