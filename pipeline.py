@@ -69,6 +69,7 @@ from gi.repository import GLib, Gst
 
 import pyds
 
+from camera_config import CAM0_DEVICE, CAM2_DEVICE, CAMERA_DEVICE_ALIASES
 from exit_codes import ProcessExitCode
 from score_utils import truncate_team_name
 
@@ -708,7 +709,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "encoders": list(_encoders.keys()),
                 "cameras": {
                     "cam0": {
-                        "device": "/dev/video0",
+                        "device": CAM0_DEVICE,
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
                         "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
@@ -716,7 +717,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
                     "cam2": {
-                        "device": "/dev/video2",
+                        "device": CAM2_DEVICE,
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera2_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
@@ -934,17 +935,7 @@ def _normalize_stream_camera(value) -> str | None:
     if value is None:
         return None
     text = str(value).strip().lower()
-    mapping = {
-        "0": "cam0",
-        "cam0": "cam0",
-        "camera0": "cam0",
-        "/dev/video0": "cam0",
-        "2": "cam2",
-        "cam2": "cam2",
-        "camera2": "cam2",
-        "/dev/video2": "cam2",
-    }
-    return mapping.get(text)
+    return CAMERA_DEVICE_ALIASES.get(text)
 
 
 def _persist_stream_worker_config(*, bitrate_kbps: int | None = None, active_camera: str | None = None) -> dict:
@@ -1734,7 +1725,7 @@ def build_pipeline() -> tuple:
 
     if ENABLE_CAM0:
         print("Building CAM0 source ...")
-        tee0 = _build_camera_source(pipeline, "/dev/video0", "0")
+        tee0 = _build_camera_source(pipeline, CAM0_DEVICE, "0")
 
         print("Building CAM0 clean RTSP branch (1080p high quality low latency) ...")
         enc0_clean = _build_clean_branch(pipeline, tee0, "0", "camera0_clean")
@@ -1757,7 +1748,7 @@ def build_pipeline() -> tuple:
 
     if ENABLE_CAM2:
         print("Building CAM2 source ...")
-        tee2 = _build_camera_source(pipeline, "/dev/video2", "2")
+        tee2 = _build_camera_source(pipeline, CAM2_DEVICE, "2")
 
         print("Building CAM2 clean RTSP branch (1080p high quality low latency) ...")
         enc2_clean = _build_clean_branch(pipeline, tee2, "2", "camera2_clean")

@@ -21,6 +21,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from camera_config import CAMERA_DEVICE_ALIASES, CAMERA_DEVICE_BY_STREAM_CAMERA
 from exit_codes import ProcessExitCode
 from score_utils import truncate_team_name
 
@@ -88,8 +89,8 @@ LOCAL_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
 SOURCE_RTSP_CAM0_URL = os.environ.get("STREAM_SOURCE_CAM0_RTSP") or "rtsp://127.0.0.1:8554/camera0_stream"
 SOURCE_RTSP_CAM2_URL = os.environ.get("STREAM_SOURCE_CAM2_RTSP") or "rtsp://127.0.0.1:8554/camera2_stream"
 AVAILABLE_CAMERAS = {
-    "cam0": os.path.exists("/dev/video0"),
-    "cam2": os.path.exists("/dev/video2"),
+    camera: os.path.exists(device)
+    for camera, device in CAMERA_DEVICE_BY_STREAM_CAMERA.items()
 }
 CAMERA_SOURCE_ENV_KEYS = {
     "cam0": "STREAM_SOURCE_CAM0_RTSP",
@@ -169,17 +170,7 @@ def _available_camera_names() -> list[str]:
 
 def _normalize_camera(value, available_cameras: set[str] | None = None) -> str:
     text = str(value or "cam2").strip().lower()
-    mapping = {
-        "0": "cam0",
-        "cam0": "cam0",
-        "camera0": "cam0",
-        "/dev/video0": "cam0",
-        "2": "cam2",
-        "cam2": "cam2",
-        "camera2": "cam2",
-        "/dev/video2": "cam2",
-    }
-    normalized = mapping.get(text, "cam2")
+    normalized = CAMERA_DEVICE_ALIASES.get(text, "cam2")
 
     if available_cameras is None:
         available_cameras = set(_available_camera_names())
@@ -491,7 +482,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     if not input_branches:
         raise RuntimeError(
-            "No available RTSP input sources; expected /dev/video0, /dev/video2, "
+            "No available RTSP input sources; expected configured camera devices "
             "or explicit STREAM_SOURCE_CAM0_RTSP/STREAM_SOURCE_CAM2_RTSP override"
         )
 
