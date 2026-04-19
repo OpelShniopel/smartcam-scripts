@@ -88,6 +88,10 @@ def _get_local_ip() -> str:
 LOCAL_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
 SOURCE_RTSP_CAM0_URL = os.environ.get("STREAM_SOURCE_CAM0_RTSP") or "rtsp://127.0.0.1:8554/camera0_stream"
 SOURCE_RTSP_CAM2_URL = os.environ.get("STREAM_SOURCE_CAM2_RTSP") or "rtsp://127.0.0.1:8554/camera2_stream"
+AVAILABLE_CAMERAS = {
+    "cam0": os.path.exists("/dev/video0"),
+    "cam2": os.path.exists("/dev/video2"),
+}
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
@@ -152,12 +156,17 @@ def _normalize_camera(value) -> str:
     }
     normalized = mapping.get(text, "cam2")
 
-    cam0_exists = os.path.exists("/dev/video0")
-    cam2_exists = os.path.exists("/dev/video2")
-
-    if normalized == "cam2" and not cam2_exists and cam0_exists:
+    if (
+        normalized == "cam2"
+        and not AVAILABLE_CAMERAS["cam2"]
+        and AVAILABLE_CAMERAS["cam0"]
+    ):
         return "cam0"
-    if normalized == "cam0" and not cam0_exists and cam2_exists:
+    if (
+        normalized == "cam0"
+        and not AVAILABLE_CAMERAS["cam0"]
+        and AVAILABLE_CAMERAS["cam2"]
+    ):
         return "cam2"
 
     return normalized
