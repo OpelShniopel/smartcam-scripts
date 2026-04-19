@@ -41,10 +41,10 @@ def main():
     child: subprocess.Popen | None = None
     stop_signal = signal.SIGTERM
 
-    def _signal_child(proc: subprocess.Popen, sig: int) -> None:
-        if proc.poll() is None:
+    def _signal_child(child_proc: subprocess.Popen, sig: int) -> None:
+        if child_proc.poll() is None:
             try:
-                proc.send_signal(sig)
+                child_proc.send_signal(sig)
             except OSError:
                 pass
 
