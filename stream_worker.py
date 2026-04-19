@@ -21,6 +21,8 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from score_utils import truncate_team_name
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STREAM_CONF = os.path.join(SCRIPT_DIR, "stream.conf")
 SCORE_STATE_FILE = os.path.join(SCRIPT_DIR, "score_state.json")
@@ -237,11 +239,17 @@ def _update_overlay(state: dict) -> None:
     if home:
         home.set_property("silent", not visible)
         if visible:
-            home.set_property("text", state["home_name"][:8])
+            home.set_property(
+                "text",
+                truncate_team_name("home_name", state["home_name"], log_prefix="[worker]"),
+            )
     if away:
         away.set_property("silent", not visible)
         if visible:
-            away.set_property("text", state["away_name"][:8])
+            away.set_property(
+                "text",
+                truncate_team_name("away_name", state["away_name"], log_prefix="[worker]"),
+            )
     if score:
         score.set_property("silent", not visible)
         if visible:

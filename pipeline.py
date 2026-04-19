@@ -69,6 +69,8 @@ from gi.repository import GLib, Gst
 
 import pyds
 
+from score_utils import truncate_team_name
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -314,11 +316,11 @@ def _update_osd_texts(state: dict) -> None:
     if home:
         home.set_property("silent", not visible)
         if visible:
-            home.set_property("text", state["home_name"][:8])
+            home.set_property("text", state["home_name"])
     if away:
         away.set_property("silent", not visible)
         if visible:
-            away.set_property("text", state["away_name"][:8])
+            away.set_property("text", state["away_name"])
     if score:
         score.set_property("silent", not visible)
         if visible:
@@ -348,7 +350,10 @@ def _apply_score_patch(data: dict) -> None:
     with score_lock:
         for k in allowed_str:
             if k in data and isinstance(data[k], str):
-                score_state[k] = data[k]
+                if k in {"home_name", "away_name"}:
+                    score_state[k] = truncate_team_name(k, data[k], log_prefix="[score]")
+                else:
+                    score_state[k] = data[k]
         for k in allowed_int:
             if k in data and isinstance(data[k], int):
                 score_state[k] = data[k]
