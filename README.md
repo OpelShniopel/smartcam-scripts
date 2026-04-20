@@ -60,8 +60,8 @@ The main process publishes:
     - `POST http://127.0.0.1:9101/score`
 - Unix socket for the Go bridge:
     - `/tmp/smartcam.sock`
-- Unix socket for camera control detections:
-    - `/tmp/pycam.sock`
+- Unix socket for PTZ control detections:
+    - `/tmp/ptz-control.sock`
 
 Example score update:
 
