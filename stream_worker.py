@@ -356,18 +356,14 @@ def _activity_probe(_pad, _info, _user_data):
 
 def _rtmp_fps_report() -> bool:
     global _rtmp_fps_frames
-    if not (ENABLE_TERMINAL_FPS_METRICS and ENABLE_RTMP_FPS_METRICS):
-        return True
+    if ENABLE_TERMINAL_FPS_METRICS and ENABLE_RTMP_FPS_METRICS:
+        with _fps_lock:
+            frames = _rtmp_fps_frames
+            _rtmp_fps_frames = 0
 
-    with _fps_lock:
-        frames = _rtmp_fps_frames
-        _rtmp_fps_frames = 0
-
-    if not _worker_state["stream_status_sent"] or frames <= 0:
-        return True
-
-    fps = frames / TERMINAL_FPS_INTERVAL_SEC
-    print(f"[fps] RTMP {_current_active_camera}: {fps:.1f} fps")
+        if _worker_state["stream_status_sent"] and frames > 0:
+            fps = frames / TERMINAL_FPS_INTERVAL_SEC
+            print(f"[fps] RTMP {_current_active_camera}: {fps:.1f} fps")
     return True
 
 
