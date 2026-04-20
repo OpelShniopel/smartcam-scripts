@@ -475,6 +475,81 @@ def _link_branch_to_selector(last_el: Gst.Element, selector: Gst.Element, cam_na
     return sel_pad
 
 
+def _build_available_input_branches(pipeline: Gst.Pipeline) -> dict[str, Gst.Element]:
+    input_branches: dict[str, Gst.Element] = {}
+    for camera in (FIXED_CAMERA, PTZ_CAMERA):
+        if _camera_input_available(camera):
+            input_branches[camera] = _build_rtsp_input_branch(
+                pipeline,
+                CAMERA_SOURCE_SUFFIXES[camera],
+                CAMERA_SOURCE_URLS[camera],
+            )
+            continue
+
+        env_keys = "/".join(CAMERA_SOURCE_ENV_KEYS[camera])
+        print(
+            f"[worker] skipping {camera} RTSP source: "
+            f"device unavailable and {env_keys} not set"
+        )
+
+    if not input_branches:
+        raise RuntimeError(
+            "No available RTSP input sources; expected configured camera devices "
+            "or explicit STREAM_SOURCE_FIXED_RTSP/STREAM_SOURCE_PTZ_RTSP override"
+        )
+    return input_branches
+
+
+def _make_watchdog() -> Gst.Element | None:
+    watchdog = Gst.ElementFactory.make("watchdog", "strm_watchdog")
+    if watchdog is None:
+        print("[worker] WARNING: watchdog plugin unavailable; using custom stall detector only")
+        return None
+
+    watchdog.set_property("timeout", int(STALL_TIMEOUT_SEC * 1000))
+    return watchdog
+
+
+def _add_output_elements(
+    pipeline: Gst.Pipeline,
+    selector: Gst.Element,
+    q: Gst.Element,
+    rtmp,
+    watchdog: Gst.Element | None,
+) -> None:
+    elements = [selector, q, *rtmp.base_elements()]
+    if watchdog is not None:
+        elements.insert(-3, watchdog)
+
+    for el in elements:
+        pipeline.add(el)
+
+
+def _link_parse_to_mux(rtmp, watchdog: Gst.Element | None) -> None:
+    if watchdog is None:
+        _link(rtmp.parse, rtmp.flvmux)
+        return
+
+    _link(rtmp.parse, watchdog)
+    _link(watchdog, rtmp.flvmux)
+
+
+def _link_audio_encoder_to_mux(rtmp) -> None:
+    _link_filtered(rtmp.audiosrc, rtmp.aacenc, "audio/x-raw,rate=44100,channels=2")
+    aacenc_src = _get_static_pad(rtmp.aacenc, "src")
+    flvmux_audio = rtmp.flvmux.request_pad_simple("audio")
+    if flvmux_audio is None:
+        raise RuntimeError("Unable to request flvmux audio pad")
+    if aacenc_src.link(flvmux_audio) != Gst.PadLinkReturn.OK:
+        raise RuntimeError("Failed to link audio encoder to flvmux audio pad")
+
+
+def _add_buffer_probe_if_present(element: Gst.Element, pad_name: str, callback) -> None:
+    pad = element.get_static_pad(pad_name)
+    if pad is not None:
+        pad.add_probe(Gst.PadProbeType.BUFFER, callback, None)
+
+
 def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     global _enc_stream, _selector, _current_active_camera, _last_config
 
@@ -490,48 +565,19 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     if pipeline is None:
         raise RuntimeError("Unable to create stream-worker pipeline")
 
-    input_branches: dict[str, Gst.Element] = {}
-    for camera in (FIXED_CAMERA, PTZ_CAMERA):
-        if not _camera_input_available(camera):
-            env_keys = "/".join(CAMERA_SOURCE_ENV_KEYS[camera])
-            print(
-                f"[worker] skipping {camera} RTSP source: "
-                f"device unavailable and {env_keys} not set"
-            )
-            continue
-        input_branches[camera] = _build_rtsp_input_branch(
-            pipeline,
-            CAMERA_SOURCE_SUFFIXES[camera],
-            CAMERA_SOURCE_URLS[camera],
-        )
-
-    if not input_branches:
-        raise RuntimeError(
-            "No available RTSP input sources; expected configured camera devices "
-            "or explicit STREAM_SOURCE_FIXED_RTSP/STREAM_SOURCE_PTZ_RTSP override"
-        )
+    input_branches = _build_available_input_branches(pipeline)
 
     selector = _make("input-selector", "strm_selector")
     q = _make("queue", "strm_queue")
     rtmp = make_rtmp_elements(_make)
-    watchdog = Gst.ElementFactory.make("watchdog", "strm_watchdog")
+    watchdog = _make_watchdog()
     configure_rtmp_branch(
         rtmp,
         q,
         int(cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)),
         rtmp_url,
     )
-    if watchdog is not None:
-        watchdog.set_property("timeout", int(STALL_TIMEOUT_SEC * 1000))
-    else:
-        print("[worker] WARNING: watchdog plugin unavailable; using custom stall detector only")
-
-    elements = [selector, q, *rtmp.base_elements()]
-    if watchdog is not None:
-        elements.insert(-3, watchdog)
-
-    for el in elements:
-        pipeline.add(el)
+    _add_output_elements(pipeline, selector, q, rtmp, watchdog)
 
     _selector_pads.clear()
     for camera, branch in input_branches.items():
@@ -539,30 +585,13 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     _link(selector, q)
     _link_many(q, *rtmp.overlay_chain())
-    if watchdog is not None:
-        _link(rtmp.parse, watchdog)
-        _link(watchdog, rtmp.flvmux)
-    else:
-        _link(rtmp.parse, rtmp.flvmux)
-
-    _link_filtered(rtmp.audiosrc, rtmp.aacenc, "audio/x-raw,rate=44100,channels=2")
-    aacenc_src = _get_static_pad(rtmp.aacenc, "src")
-    flvmux_audio = rtmp.flvmux.request_pad_simple("audio")
-    if flvmux_audio is None:
-        raise RuntimeError("Unable to request flvmux audio pad")
-    if aacenc_src.link(flvmux_audio) != Gst.PadLinkReturn.OK:
-        raise RuntimeError("Failed to link audio encoder to flvmux audio pad")
-
+    _link_parse_to_mux(rtmp, watchdog)
+    _link_audio_encoder_to_mux(rtmp)
     _link(rtmp.flvmux, rtmp.rtmpsink)
 
     activity_pad_owner = watchdog if watchdog is not None else rtmp.parse
-    activity_pad = activity_pad_owner.get_static_pad("src")
-    if activity_pad is not None:
-        activity_pad.add_probe(Gst.PadProbeType.BUFFER, _activity_probe, None)
-
-    sink_pad = rtmp.rtmpsink.get_static_pad("sink")
-    if sink_pad is not None:
-        sink_pad.add_probe(Gst.PadProbeType.BUFFER, _rtmp_probe, None)
+    _add_buffer_probe_if_present(activity_pad_owner, "src", _activity_probe)
+    _add_buffer_probe_if_present(rtmp.rtmpsink, "sink", _rtmp_probe)
 
     _osd_elements.clear()
     _osd_elements.update(rtmp.osd_map())
