@@ -21,7 +21,12 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
-from camera_config import CAMERA_DEVICE_ALIASES, CAMERA_DEVICE_BY_STREAM_CAMERA
+from camera_config import (
+    CAMERA_DEVICE_ALIASES,
+    CAMERA_DEVICE_BY_STREAM_CAMERA,
+    FIXED_CAMERA,
+    PTZ_CAMERA,
+)
 from exit_codes import ProcessExitCode
 from runtime_paths import (
     SCOREBOARD_PNG,
@@ -59,7 +64,7 @@ _status_payload: dict = {
     "worker_alive": True,
     "stream_active": False,
     "last_error": "",
-    "active_camera": "cam2",
+    "active_camera": PTZ_CAMERA,
     "updated_at": time.time(),
 }
 _worker_state: dict = {
@@ -76,7 +81,7 @@ _last_config: dict | None = None
 _enc_stream: Gst.Element | None = None
 _selector: Gst.Element | None = None
 _selector_pads: dict[str, Gst.Pad] = {}
-_current_active_camera: str = "cam2"
+_current_active_camera: str = PTZ_CAMERA
 _osd_elements: dict[str, Gst.Element] = {}
 
 
@@ -92,25 +97,33 @@ def _get_local_ip() -> str:
 
 
 LOCAL_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
-SOURCE_RTSP_CAM0_URL = os.environ.get("STREAM_SOURCE_CAM0_RTSP") or "rtsp://127.0.0.1:8554/camera0_stream"
-SOURCE_RTSP_CAM2_URL = os.environ.get("STREAM_SOURCE_CAM2_RTSP") or "rtsp://127.0.0.1:8554/camera2_stream"
+SOURCE_RTSP_FIXED_URL = (
+    os.environ.get("STREAM_SOURCE_FIXED_RTSP")
+    or os.environ.get("STREAM_SOURCE_CAM0_RTSP")
+    or "rtsp://127.0.0.1:8554/camera0_stream"
+)
+SOURCE_RTSP_PTZ_URL = (
+    os.environ.get("STREAM_SOURCE_PTZ_RTSP")
+    or os.environ.get("STREAM_SOURCE_CAM2_RTSP")
+    or "rtsp://127.0.0.1:8554/camera2_stream"
+)
 AVAILABLE_CAMERAS = {
     camera: os.path.exists(device)
     for camera, device in CAMERA_DEVICE_BY_STREAM_CAMERA.items()
 }
 CAMERA_SOURCE_ENV_KEYS = {
-    "cam0": "STREAM_SOURCE_CAM0_RTSP",
-    "cam2": "STREAM_SOURCE_CAM2_RTSP",
+    FIXED_CAMERA: ("STREAM_SOURCE_FIXED_RTSP", "STREAM_SOURCE_CAM0_RTSP"),
+    PTZ_CAMERA: ("STREAM_SOURCE_PTZ_RTSP", "STREAM_SOURCE_CAM2_RTSP"),
 }
 CAMERA_SOURCE_URLS = {
-    "cam0": SOURCE_RTSP_CAM0_URL,
-    "cam2": SOURCE_RTSP_CAM2_URL,
+    FIXED_CAMERA: SOURCE_RTSP_FIXED_URL,
+    PTZ_CAMERA: SOURCE_RTSP_PTZ_URL,
 }
 CAMERA_SOURCE_SUFFIXES = {
-    "cam0": "0",
-    "cam2": "2",
+    FIXED_CAMERA: "0",
+    PTZ_CAMERA: "2",
 }
-CAMERA_FALLBACK_ORDER = ("cam2", "cam0")
+CAMERA_FALLBACK_ORDER = (PTZ_CAMERA, FIXED_CAMERA)
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
@@ -147,8 +160,11 @@ def read_score_state() -> dict:
 
 
 def _camera_input_available(camera: str) -> bool:
-    env_key = CAMERA_SOURCE_ENV_KEYS.get(camera)
-    return bool(AVAILABLE_CAMERAS.get(camera, False) or (env_key and os.environ.get(env_key)))
+    env_keys = CAMERA_SOURCE_ENV_KEYS.get(camera, ())
+    return bool(
+        AVAILABLE_CAMERAS.get(camera, False)
+        or any(os.environ.get(env_key) for env_key in env_keys)
+    )
 
 
 def _available_camera_names() -> list[str]:
@@ -160,8 +176,8 @@ def _available_camera_names() -> list[str]:
 
 
 def _normalize_camera(value, available_cameras: set[str] | None = None) -> str:
-    text = str(value or "cam2").strip().lower()
-    normalized = CAMERA_DEVICE_ALIASES.get(text, "cam2")
+    text = str(value or PTZ_CAMERA).strip().lower()
+    normalized = CAMERA_DEVICE_ALIASES.get(text, PTZ_CAMERA)
 
     if available_cameras is None:
         available_cameras = set(_available_camera_names())
@@ -176,9 +192,9 @@ def _normalize_camera(value, available_cameras: set[str] | None = None) -> str:
 
 
 def read_worker_config() -> dict:
-    cfg = {"bitrateKbps": RTMP_BITRATE_DEFAULT, "activeCamera": "cam2"}
+    cfg = {"bitrateKbps": RTMP_BITRATE_DEFAULT, "activeCamera": PTZ_CAMERA}
     cfg.update(_read_json(STREAM_WORKER_CONFIG, cfg))
-    cfg["activeCamera"] = _normalize_camera(cfg.get("activeCamera", "cam2"))
+    cfg["activeCamera"] = _normalize_camera(cfg.get("activeCamera", PTZ_CAMERA))
     return cfg
 
 
@@ -309,7 +325,7 @@ def _poll_worker_config() -> bool:
         if _enc_stream is not None:
             _enc_stream.set_property("bitrate", int(bitrate))
             print(f"[worker] updated stream bitrate -> {bitrate} kbps")
-        _switch_active_camera(cfg.get("activeCamera", "cam2"))
+        _switch_active_camera(cfg.get("activeCamera", PTZ_CAMERA))
     return True
 
 
@@ -479,11 +495,12 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
         raise RuntimeError("Unable to create stream-worker pipeline")
 
     input_branches: dict[str, Gst.Element] = {}
-    for camera in ("cam0", "cam2"):
+    for camera in (FIXED_CAMERA, PTZ_CAMERA):
         if not _camera_input_available(camera):
+            env_keys = "/".join(CAMERA_SOURCE_ENV_KEYS[camera])
             print(
                 f"[worker] skipping {camera} RTSP source: "
-                f"device unavailable and {CAMERA_SOURCE_ENV_KEYS[camera]} not set"
+                f"device unavailable and {env_keys} not set"
             )
             continue
         input_branches[camera] = _build_rtsp_input_branch(
@@ -495,7 +512,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     if not input_branches:
         raise RuntimeError(
             "No available RTSP input sources; expected configured camera devices "
-            "or explicit STREAM_SOURCE_CAM0_RTSP/STREAM_SOURCE_CAM2_RTSP override"
+            "or explicit STREAM_SOURCE_FIXED_RTSP/STREAM_SOURCE_PTZ_RTSP override"
         )
 
     selector = _make("input-selector", "strm_selector")
@@ -556,7 +573,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     _enc_stream = rtmp.enc
     _selector = selector
-    _current_active_camera = _normalize_camera(cfg.get("activeCamera", "cam2"), set(_selector_pads))
+    _current_active_camera = _normalize_camera(cfg.get("activeCamera", PTZ_CAMERA), set(_selector_pads))
     _switch_active_camera(_current_active_camera)
     _update_overlay(read_score_state())
     _last_config = read_worker_config()
@@ -626,8 +643,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _signal_handler)
 
     _set_status(worker_alive=True, stream_active=False, last_error="")
-    print(f"[worker] source cam0: {SOURCE_RTSP_CAM0_URL}")
-    print(f"[worker] source cam2: {SOURCE_RTSP_CAM2_URL}")
+    print(f"[worker] source fixed: {SOURCE_RTSP_FIXED_URL}")
+    print(f"[worker] source ptz:   {SOURCE_RTSP_PTZ_URL}")
     print(f"[worker] active source: {_current_active_camera}")
     print(f"[worker] sink:   {rtmp_url[:80]}")
     print("[worker] starting pipeline ...")

@@ -2,7 +2,8 @@
 """
 DeepStream Basketball Detection Pipeline
 ==========================================
-Two cameras with clean RTSP streams and optional AI RTSP streams via MediaMTX.
+Fixed and PTZ cameras with clean RTSP streams and optional AI RTSP streams via
+MediaMTX.
 Optional live-streaming to YouTube/Twitch/Kick is handled by a separate RTMP
 worker with scoreboard overlay.
 
@@ -22,14 +23,14 @@ KNOWN ISSUES / HISTORY:
     stream_status result and replay it when Go connects in _handle_go_connection.
 
 STREAM DESIGN:
-  CAM0 + CAM2:
+  Fixed camera + PTZ camera:
     - clean branch: 1080p high quality low latency → WebRTC tablet viewing
     - AI branch:    720p with bounding boxes when enabled → debug only
     - stream branch: 1080p internal RTSP feed for the external RTMP worker
 
 SERVICES (for Go backend):
   Unix socket  /tmp/smartcam.sock  — bidirectional newline-delimited JSON
-    Python -> Go: {"type":"state", "streaming":bool, "stream_active_camera":"cam2",
+    Python -> Go: {"type":"state", "streaming":bool, "stream_active_camera":"ptz",
                    "webrtc":{...}, "internal_streams":{...}}
                   {"type":"stream_status", "active":bool, "error":"..."}
                   {"type":"ack", "action":"...", "ok":bool}
@@ -37,13 +38,13 @@ SERVICES (for Go backend):
     Go -> Python: {"type":"cmd", "action":"start_stream", "rtmp_url":"rtmp://..."}
                   {"type":"cmd", "action":"stop_stream"}
                   {"type":"cmd", "action":"set_config", "bitrateKbps":N}
-                  {"type":"cmd", "action":"switch_cam", "camId":"cam0"|"cam2"}
+                  {"type":"cmd", "action":"switch_cam", "camId":"fixed"|"ptz"}
                   {"type":"cmd", "action":"set_osd", "visible":bool}
                   {"type":"cmd", "action":"set_score", ...score fields...}
                   {"type":"ping"}
 
   Unix socket  /tmp/pycam.sock  — outbound only, newline-delimited JSON
-    Python -> camera control: {"camera":"CAM0","frame":N,"timestamp":T,"detections":[...]}
+    Python -> camera control: {"camera":"fixed","frame":N,"timestamp":T,"detections":[...]}
 
 HTTP API (internal / debug only):
   GET  /status
@@ -73,7 +74,13 @@ from gi.repository import GLib, Gst
 
 import pyds
 
-from camera_config import CAM0_DEVICE, CAM2_DEVICE, CAMERA_DEVICE_ALIASES
+from camera_config import (
+    CAMERA_DEVICE_ALIASES,
+    FIXED_CAMERA,
+    FIXED_CAMERA_DEVICE,
+    PTZ_CAMERA,
+    PTZ_CAMERA_DEVICE,
+)
 from exit_codes import ProcessExitCode
 from runtime_paths import (
     SCOREBOARD_PNG,
@@ -124,12 +131,12 @@ PROBE_EVERY_N_FRAMES = 2
 # ---------------------------------------------------------------------------
 # Camera / AI feature flags
 # ---------------------------------------------------------------------------
-ENABLE_CAM0 = True
-ENABLE_CAM2 = True
+ENABLE_FIXED_CAMERA = True
+ENABLE_PTZ_CAMERA = True
 
 ENABLE_AI_GLOBAL = True
-ENABLE_CAM0_AI = True
-ENABLE_CAM2_AI = False
+ENABLE_FIXED_CAMERA_AI = True
+ENABLE_PTZ_CAMERA_AI = False
 
 # Terminal FPS metrics. Disable the global flag to silence all main-pipeline
 # FPS logs, or disable the AI flag to keep other future FPS metrics available.
@@ -137,24 +144,49 @@ ENABLE_TERMINAL_FPS_METRICS = True
 ENABLE_AI_FPS_METRICS = True
 TERMINAL_FPS_INTERVAL_SEC = 5
 
+PIPELINE_CAMERA_LABEL_BY_STREAM_CAMERA = {
+    FIXED_CAMERA: "CAM0",
+    PTZ_CAMERA: "CAM2",
+}
+STREAM_CAMERA_BY_PIPELINE_LABEL = {
+    "CAM0": FIXED_CAMERA,
+    "CAM2": PTZ_CAMERA,
+}
+
+
+def _pipeline_camera_label(value) -> str:
+    text = str(value or "").strip()
+    stream_camera = CAMERA_DEVICE_ALIASES.get(text.lower())
+    if stream_camera in PIPELINE_CAMERA_LABEL_BY_STREAM_CAMERA:
+        return PIPELINE_CAMERA_LABEL_BY_STREAM_CAMERA[stream_camera]
+    cam = text.upper()
+    if cam in STREAM_CAMERA_BY_PIPELINE_LABEL:
+        return cam
+    return ""
+
+
+def _stream_camera_name(value) -> str:
+    label = _pipeline_camera_label(value)
+    return STREAM_CAMERA_BY_PIPELINE_LABEL.get(label, str(value or "").strip().lower())
+
 
 def _cam_enabled(cam_label: str) -> bool:
-    cam = str(cam_label).strip().upper()
+    cam = _pipeline_camera_label(cam_label)
     if cam == "CAM0":
-        return ENABLE_CAM0
+        return ENABLE_FIXED_CAMERA
     if cam == "CAM2":
-        return ENABLE_CAM2
+        return ENABLE_PTZ_CAMERA
     return False
 
 
 def _ai_enabled(cam_label: str) -> bool:
     if not ENABLE_AI_GLOBAL:
         return False
-    cam = str(cam_label).strip().upper()
+    cam = _pipeline_camera_label(cam_label)
     if cam == "CAM0":
-        return ENABLE_CAM0 and ENABLE_CAM0_AI
+        return ENABLE_FIXED_CAMERA and ENABLE_FIXED_CAMERA_AI
     if cam == "CAM2":
-        return ENABLE_CAM2 and ENABLE_CAM2_AI
+        return ENABLE_PTZ_CAMERA and ENABLE_PTZ_CAMERA_AI
     return False
 
 
@@ -173,7 +205,7 @@ AI_PRESET = "ultrafast"
 AI_TUNE = "zerolatency"
 
 # Local AI recording settings (debug / training capture)
-ENABLE_CAM2_AI_RECORDING = False
+ENABLE_PTZ_CAMERA_AI_RECORDING = False
 RECORDINGS_DIR = os.path.join(SCRIPT_DIR, "recordings")
 RECORD_SEGMENT_SECONDS = 300
 RECORD_MUXER_FACTORY = "matroskamux"
@@ -252,7 +284,7 @@ def _fps_report() -> bool:
             _fps_counters[cam] = 0
             if not _ai_fps_metric_enabled(cam) or count <= 0:
                 continue
-            print(f"[fps] {cam} AI: {count / TERMINAL_FPS_INTERVAL_SEC:.1f} fps")
+            print(f"[fps] {_stream_camera_name(cam)} AI: {count / TERMINAL_FPS_INTERVAL_SEC:.1f} fps")
     return True
 
 
@@ -431,7 +463,7 @@ def start_pycam_server() -> None:
 
 def send_to_pycam(cam_label: str, frame_num: int, detections: list) -> None:
     _pycam_q.put({
-        "camera": cam_label,
+        "camera": _stream_camera_name(cam_label),
         "frame": frame_num,
         "timestamp": time.time(),
         "detections": detections,
@@ -564,7 +596,10 @@ def _dispatch_cmd(msg: dict) -> None:
         raw_cam = msg.get("camId", msg.get("camera", msg.get("cam")))
         normalized = _normalize_stream_camera(raw_cam)
         if normalized is None:
-            err = f"camId must be one of 0,2,cam0,cam2,camera0,camera2; got {raw_cam!r}"
+            err = (
+                "camId must be fixed or ptz "
+                f"(legacy aliases 0,2,cam0,cam2,camera0,camera2 also work); got {raw_cam!r}"
+            )
             print(f"[cmd] switch_cam: {err}")
             _ack("switch_cam", False, err)
             return
@@ -614,33 +649,33 @@ def _push_state() -> None:
     webrtc = {}
     internal_streams = {}
 
-    if ENABLE_CAM0:
-        webrtc["cam0_clean"] = f"http://{JETSON_HOST}:8889/camera0_clean"
+    if ENABLE_FIXED_CAMERA:
+        webrtc["fixed_clean"] = f"http://{JETSON_HOST}:8889/camera0_clean"
         if _ai_enabled("CAM0"):
-            webrtc["cam0_ai"] = f"http://{JETSON_HOST}:8889/camera0_ai"
-        internal_streams["cam0_stream"] = f"rtsp://{JETSON_HOST}:8554/camera0_stream"
+            webrtc["fixed_ai"] = f"http://{JETSON_HOST}:8889/camera0_ai"
+        internal_streams["fixed_stream"] = f"rtsp://{JETSON_HOST}:8554/camera0_stream"
 
-    if ENABLE_CAM2:
-        webrtc["cam2_clean"] = f"http://{JETSON_HOST}:8889/camera2_clean"
+    if ENABLE_PTZ_CAMERA:
+        webrtc["ptz_clean"] = f"http://{JETSON_HOST}:8889/camera2_clean"
         if _ai_enabled("CAM2"):
-            webrtc["cam2_ai"] = f"http://{JETSON_HOST}:8889/camera2_ai"
-        internal_streams["cam2_stream"] = f"rtsp://{JETSON_HOST}:8554/camera2_stream"
+            webrtc["ptz_ai"] = f"http://{JETSON_HOST}:8889/camera2_ai"
+        internal_streams["ptz_stream"] = f"rtsp://{JETSON_HOST}:8554/camera2_stream"
 
     _out_q.put({
         "type": "state",
         "streaming": bool(url) and worker_running,
         "stream_configured": bool(url),
         "stream_worker_running": worker_running,
-        "stream_active_camera": worker_cfg.get("activeCamera", "cam2"),
+        "stream_active_camera": worker_cfg.get("activeCamera", PTZ_CAMERA),
         "model": MODEL_NAME,
         "available_models": AVAILABLE_MODELS,
         "enabled_cameras": {
-            "cam0": ENABLE_CAM0,
-            "cam2": ENABLE_CAM2,
+            FIXED_CAMERA: ENABLE_FIXED_CAMERA,
+            PTZ_CAMERA: ENABLE_PTZ_CAMERA,
         },
         "enabled_ai": {
-            "cam0": _ai_enabled("CAM0"),
-            "cam2": _ai_enabled("CAM2"),
+            FIXED_CAMERA: _ai_enabled("CAM0"),
+            PTZ_CAMERA: _ai_enabled("CAM2"),
         },
         "webrtc": webrtc,
         "internal_streams": internal_streams,
@@ -692,23 +727,23 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "streaming": bool(url) and _is_stream_worker_running(),
                 "stream_configured": bool(url),
                 "stream_worker_running": _is_stream_worker_running(),
-                "stream_active_camera": _read_stream_worker_config().get("activeCamera", "cam2"),
+                "stream_active_camera": _read_stream_worker_config().get("activeCamera", PTZ_CAMERA),
                 "rtmp_url": url or "",
                 "score_overlay": score_visible,
                 "unix_sock": UNIX_SOCK,
                 "pycam_sock": PYCAM_SOCK,
                 "encoders": list(_encoders.keys()),
                 "cameras": {
-                    "cam0": {
-                        "device": CAM0_DEVICE,
+                    FIXED_CAMERA: {
+                        "device": FIXED_CAMERA_DEVICE,
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
                         "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
-                    "cam2": {
-                        "device": CAM2_DEVICE,
+                    PTZ_CAMERA: {
+                        "device": PTZ_CAMERA_DEVICE,
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera2_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
@@ -848,12 +883,12 @@ def _link_src_to_request_pad(src: Gst.Element, sink: Gst.Element, pad_name: str,
 
 
 def _recording_enabled(cam_label: str) -> bool:
-    cam = str(cam_label).strip().upper()
-    return cam == "CAM2" and ENABLE_CAM2_AI_RECORDING and _ai_enabled(cam)
+    cam = _pipeline_camera_label(cam_label)
+    return cam == "CAM2" and ENABLE_PTZ_CAMERA_AI_RECORDING and _ai_enabled(cam)
 
 
 def _recording_location_pattern(cam_label: str) -> str:
-    cam = str(cam_label).strip().lower()
+    cam = _stream_camera_name(cam_label)
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -917,14 +952,19 @@ def _persist_score_state() -> None:
 
 
 def _read_stream_worker_config() -> dict:
+    default = {"bitrateKbps": RTMP_BITRATE, "activeCamera": PTZ_CAMERA}
     try:
         with open(STREAM_WORKER_CONFIG) as f:
             data = json.load(f)
             if isinstance(data, dict):
-                return data
+                cfg = default.copy()
+                cfg.update(data)
+                normalized = _normalize_stream_camera(cfg.get("activeCamera"))
+                cfg["activeCamera"] = normalized or PTZ_CAMERA
+                return cfg
     except (FileNotFoundError, json.JSONDecodeError):
         pass
-    return {"bitrateKbps": RTMP_BITRATE, "activeCamera": "cam2"}
+    return default
 
 
 def _normalize_stream_camera(value) -> str | None:
@@ -942,7 +982,7 @@ def _persist_stream_worker_config(*, bitrate_kbps: int | None = None, active_cam
         normalized = _normalize_stream_camera(active_camera)
         if normalized is not None:
             cfg["activeCamera"] = normalized
-    cfg.setdefault("activeCamera", "cam2")
+    cfg.setdefault("activeCamera", PTZ_CAMERA)
     _atomic_write_json(STREAM_WORKER_CONFIG, cfg)
     return cfg
 
@@ -1563,13 +1603,13 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
 
     if q_rec is not None and rec is not None:
         _tee_branch(parse_tee, q_rec)
-        _link_src_to_request_pad(q_rec, rec, "video", f"{cam_label} recording")
+        _link_src_to_request_pad(q_rec, rec, "video", f"{_stream_camera_name(cam_label)} recording")
         print(
-            f"{cam_label} AI recording enabled -> {RECORDINGS_DIR} "
+            f"{_stream_camera_name(cam_label)} AI recording enabled -> {RECORDINGS_DIR} "
             f"({RECORD_SEGMENT_SECONDS}s segments, .{RECORD_FILE_EXTENSION})"
         )
     else:
-        print(f"{cam_label} AI recording disabled")
+        print(f"{_stream_camera_name(cam_label)} AI recording disabled")
 
     return pgie, enc
 
@@ -1661,53 +1701,53 @@ def build_pipeline() -> tuple:
     pgie0 = None
     pgie2 = None
 
-    if ENABLE_CAM0:
-        print("Building CAM0 source ...")
-        tee0 = _build_camera_source(pipeline, CAM0_DEVICE, "0")
+    if ENABLE_FIXED_CAMERA:
+        print("Building fixed camera source ...")
+        tee0 = _build_camera_source(pipeline, FIXED_CAMERA_DEVICE, "0")
 
-        print("Building CAM0 clean RTSP branch (1080p high quality low latency) ...")
+        print("Building fixed camera clean RTSP branch (1080p high quality low latency) ...")
         enc0_clean = _build_clean_branch(pipeline, tee0, "0", "camera0_clean")
         _encoders["enc0_clean"] = enc0_clean
 
         if _ai_enabled("CAM0"):
-            print("Building CAM0 AI RTSP branch (720p debug) ...")
+            print("Building fixed camera AI RTSP branch (720p debug) ...")
             pgie0, enc0_ai = _build_ai_branch(
                 pipeline, tee0, "0", "camera0_ai",
                 "config_infer_primary_yoloV8_cam0.txt", "CAM0")
             _encoders["enc0_ai"] = enc0_ai
         else:
-            print("CAM0 AI disabled — skipping AI RTSP branch")
+            print("Fixed camera AI disabled — skipping AI RTSP branch")
 
-        print("Building CAM0 internal RTSP branch for stream worker ...")
+        print("Building fixed camera internal RTSP branch for stream worker ...")
         enc0_streamsrc = _build_internal_stream_branch(pipeline, tee0, "0", "camera0_stream")
         _encoders["enc0_streamsrc"] = enc0_streamsrc
     else:
-        print("CAM0 disabled — skipping source and all branches")
+        print("Fixed camera disabled — skipping source and all branches")
 
-    if ENABLE_CAM2:
-        print("Building CAM2 source ...")
-        tee2 = _build_camera_source(pipeline, CAM2_DEVICE, "2")
+    if ENABLE_PTZ_CAMERA:
+        print("Building PTZ camera source ...")
+        tee2 = _build_camera_source(pipeline, PTZ_CAMERA_DEVICE, "2")
 
-        print("Building CAM2 clean RTSP branch (1080p high quality low latency) ...")
+        print("Building PTZ camera clean RTSP branch (1080p high quality low latency) ...")
         enc2_clean = _build_clean_branch(pipeline, tee2, "2", "camera2_clean")
         _encoders["enc2_clean"] = enc2_clean
 
         if _ai_enabled("CAM2"):
-            print("Building CAM2 AI RTSP branch (720p debug) ...")
+            print("Building PTZ camera AI RTSP branch (720p debug) ...")
             pgie2, enc2_ai = _build_ai_branch(
                 pipeline, tee2, "2", "camera2_ai",
                 "config_infer_primary_yoloV8_cam2.txt", "CAM2")
             _encoders["enc2_ai"] = enc2_ai
         else:
-            print("CAM2 AI disabled — skipping AI RTSP branch")
+            print("PTZ camera AI disabled — skipping AI RTSP branch")
 
-        print("Building CAM2 internal RTSP branch for stream worker ...")
+        print("Building PTZ camera internal RTSP branch for stream worker ...")
         enc2_streamsrc = _build_internal_stream_branch(pipeline, tee2, "2", "camera2_stream")
         _encoders["enc2_streamsrc"] = enc2_streamsrc
     else:
-        print("CAM2 disabled — skipping source and all branches")
+        print("PTZ camera disabled — skipping source and all branches")
 
-    if not ENABLE_CAM0 and not ENABLE_CAM2:
+    if not ENABLE_FIXED_CAMERA and not ENABLE_PTZ_CAMERA:
         sys.stderr.write("ERROR: All cameras are disabled\n")
         sys.exit(1)
 
@@ -1746,7 +1786,7 @@ def main():
 
     for pgie, cam_label in [(pgie0, "CAM0"), (pgie2, "CAM2")]:
         if pgie is None:
-            print(f"Probe skipped -> {cam_label} (camera or AI disabled)")
+            print(f"Probe skipped -> {_stream_camera_name(cam_label)} (camera or AI disabled)")
             continue
 
         srcpad = pgie.get_static_pad("src")
@@ -1755,7 +1795,7 @@ def main():
             sys.exit(1)
 
         srcpad.add_probe(Gst.PadProbeType.BUFFER, pgie_src_pad_buffer_probe, cam_label)
-        print(f"Probe attached -> {pgie.get_name()} ({cam_label})")
+        print(f"Probe attached -> {pgie.get_name()} ({_stream_camera_name(cam_label)})")
 
     _startup_stream_requested = bool(read_stream_url())
 

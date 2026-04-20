@@ -25,10 +25,11 @@ restart exit codes.
 
 - Jetson with DeepStream/GStreamer/Python bindings installed.
 - Camera devices configured in `camera_config.py`. The current defaults are
-  `/dev/video0` for CAM0 and `/dev/video2` for CAM2; switch them to
-  `/dev/fixed_camera` and `/dev/ptz_camera` there once those stable device links
-  are working. For temporary tests, override them with `SMARTCAM_CAM0_DEVICE`
-  and `SMARTCAM_CAM2_DEVICE`.
+  `/dev/video0` for the fixed camera and `/dev/video2` for the PTZ camera;
+  switch them to `/dev/fixed_camera` and `/dev/ptz_camera` there once those
+  stable device links are working. For temporary tests, override them with
+  `SMARTCAM_FIXED_CAMERA_DEVICE` and `SMARTCAM_PTZ_CAMERA_DEVICE`. Legacy
+  `SMARTCAM_CAM0_DEVICE` and `SMARTCAM_CAM2_DEVICE` overrides are still accepted.
 - MediaMTX accepting local RTSP publishing on port `8554`; WebRTC URLs are
   reported on port `8889`.
 - DeepStream-Yolo model/config files in `/home/smartcam/DeepStream-Yolo`.
@@ -40,18 +41,20 @@ restart exit codes.
 The main process publishes:
 
 - Clean streams:
-    - `http://<jetson-ip>:8889/camera0_clean`
-    - `http://<jetson-ip>:8889/camera2_clean`
-    - `rtsp://<jetson-ip>:8554/camera0_clean`
-    - `rtsp://<jetson-ip>:8554/camera2_clean`
+    - Fixed camera: `http://<jetson-ip>:8889/camera0_clean`
+    - PTZ camera: `http://<jetson-ip>:8889/camera2_clean`
+    - Fixed camera: `rtsp://<jetson-ip>:8554/camera0_clean`
+    - PTZ camera: `rtsp://<jetson-ip>:8554/camera2_clean`
 - AI/debug streams:
-    - `http://<jetson-ip>:8889/camera0_ai`
-    - `http://<jetson-ip>:8889/camera2_ai` when `ENABLE_CAM2_AI` is enabled.
-    - `rtsp://<jetson-ip>:8554/camera0_ai`
-    - `rtsp://<jetson-ip>:8554/camera2_ai` when `ENABLE_CAM2_AI` is enabled.
+    - Fixed camera: `http://<jetson-ip>:8889/camera0_ai`
+    - PTZ camera: `http://<jetson-ip>:8889/camera2_ai` when
+      `ENABLE_PTZ_CAMERA_AI` is enabled.
+    - Fixed camera: `rtsp://<jetson-ip>:8554/camera0_ai`
+    - PTZ camera: `rtsp://<jetson-ip>:8554/camera2_ai` when
+      `ENABLE_PTZ_CAMERA_AI` is enabled.
 - Internal RTSP camera streams for the RTMP worker:
-    - `rtsp://<jetson-ip>:8554/camera0_stream`
-    - `rtsp://<jetson-ip>:8554/camera2_stream`
+    - Fixed camera: `rtsp://<jetson-ip>:8554/camera0_stream`
+    - PTZ camera: `rtsp://<jetson-ip>:8554/camera2_stream`
 - Local HTTP debug API:
     - `GET http://127.0.0.1:9101/status`
     - `POST http://127.0.0.1:9101/score`
@@ -72,9 +75,9 @@ curl -X POST http://127.0.0.1:9101/score \
 
 The main pipeline creates internal `camera0_stream` and `camera2_stream` feeds.
 RTMP forwarding is handled by a separate worker so RTMP failures do not take down
-the camera/AI pipeline. The worker defaults to CAM2 and can switch between
-available camera feeds through `stream_worker_config.json` or the Go bridge
-`switch_cam` command.
+the camera/AI pipeline. The worker defaults to the PTZ camera and can switch
+between available camera feeds through `stream_worker_config.json` or the Go
+bridge `switch_cam` command.
 
 Normal flow:
 
@@ -110,8 +113,8 @@ stop_stream
 To switch the RTMP source, send one of:
 
 ```text
-switch_cam cam0
-switch_cam cam2
+switch_cam fixed
+switch_cam ptz
 ```
 
 For manual debugging only, replacing `stream.conf` with `# disabled` prevents
@@ -156,7 +159,7 @@ These files are created or updated while the system runs:
 - `stream.conf`: RTMP URL, or `# disabled`.
 - `score_state.json`: persisted score and overlay visibility.
 - `stream_worker_config.json`: RTMP worker settings such as `bitrateKbps` and
-  `activeCamera`.
+  `activeCamera` (`fixed` or `ptz`).
 - `stream_worker_status.json`: worker health and RTMP status.
 - `stream_worker.pid`: RTMP worker wrapper PID metadata.
 
