@@ -1195,9 +1195,8 @@ def _worker_pid_info_is_current(info: dict | None) -> bool:
         owner_pid = _pid_metadata_int(info, "owner_pid")
     except ValueError:
         return False
-    if owner_pid is not None:
-        if owner_pid not in (0, os.getpid()):
-            return False
+    if owner_pid is not None and owner_pid not in (0, os.getpid()):
+        return False
 
     try:
         owner_start_ticks = _pid_metadata_int(info, "owner_start_ticks")
