@@ -29,10 +29,11 @@ STREAM DESIGN:
 
 SERVICES (for Go backend):
   Unix socket  /tmp/smartcam.sock  — bidirectional newline-delimited JSON
-    Python -> Go: {"type":"detection", "camera":"CAM0", "frame":N, "timestamp":T, "detections":[...]}
-                  {"type":"state", "streaming":bool, "stream_active_camera":"cam2",
+    Python -> Go: {"type":"state", "streaming":bool, "stream_active_camera":"cam2",
                    "webrtc":{...}, "internal_streams":{...}}
                   {"type":"stream_status", "active":bool, "error":"..."}
+                  {"type":"ack", "action":"...", "ok":bool}
+                  {"type":"pong"}
     Go -> Python: {"type":"cmd", "action":"start_stream", "rtmp_url":"rtmp://..."}
                   {"type":"cmd", "action":"stop_stream"}
                   {"type":"cmd", "action":"set_config", "bitrateKbps":N}
@@ -628,11 +629,6 @@ def _push_state() -> None:
         "webrtc": webrtc,
         "internal_streams": internal_streams,
     })
-
-
-def send_detection(data_dict: dict) -> None:
-    data_dict["type"] = "detection"
-    _out_q.put(data_dict)
 
 
 def start_unix_server() -> None:
