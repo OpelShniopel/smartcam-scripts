@@ -14,7 +14,7 @@ KNOWN ISSUES / HISTORY:
   - nvdsosd process-mode=1 requires NVMM RGBA input — always insert
     nvvideoconvert before nvosd to convert NV12->RGBA.
   - cairooverlay was too slow (CPU BGRA conversion every frame). Replaced with
-    gdkpixbufoverlay (static PNG) + textoverlay x5 (dynamic text) on RTMP branch.
+    gdkpixbufoverlay (static PNG) + textoverlay x8 (dynamic text) on RTMP branch.
   - stream_status race: Go bridge may not be connected when stream_status fires
     (Python restarts faster than Go's 2s reconnect delay). Fix: cache the
     stream_status result and replay it when Go connects in _handle_go_connection.
@@ -85,9 +85,11 @@ from runtime_paths import (
 from rtmp_elements import (
     configure_rtmp_branch,
     make_rtmp_elements,
+    update_milestone_overlays,
+    update_quarter_overlay,
     update_score_clock_overlays,
 )
-from score_utils import truncate_team_name
+from score_utils import default_score_state, truncate_team_name
 
 
 # ---------------------------------------------------------------------------
@@ -268,19 +270,7 @@ def _fps_report() -> bool:
 # ---------------------------------------------------------------------------
 # Score state
 # ---------------------------------------------------------------------------
-score_state = {
-    "home_name": "HOME",
-    "away_name": "AWAY",
-    "home_points": 0,
-    "away_points": 0,
-    "home_fouls": 0,
-    "away_fouls": 0,
-    "home_timeouts": 3,
-    "away_timeouts": 3,
-    "quarter": 1,
-    "clock": "10:00",
-    "visible": False,
-}
+score_state = default_score_state()
 score_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
@@ -306,28 +296,47 @@ def _update_osd_texts(state: dict) -> None:
     away = els.get("osd_away")
     score = els.get("osd_score")
     clock = els.get("osd_clock")
+    quarter = els.get("osd_quarter")
     fouls = els.get("osd_fouls")
     bg = els.get("osd_bg")
+    milestone_player = els.get("osd_milestone_player")
+    milestone_text = els.get("osd_milestone_text")
     visible = state.get("visible", False)
 
+    update_quarter_overlay(quarter, visible, state)
     if home:
         home.set_property("silent", not visible)
         if visible:
-            home.set_property("text", state["home_name"])
+            home.set_property(
+                "text",
+                truncate_team_name(
+                    "home_name",
+                    state.get("home_name", "HOME"),
+                    log_prefix="[score]",
+                ),
+            )
     if away:
         away.set_property("silent", not visible)
         if visible:
-            away.set_property("text", state["away_name"])
+            away.set_property(
+                "text",
+                truncate_team_name(
+                    "away_name",
+                    state.get("away_name", "AWAY"),
+                    log_prefix="[score]",
+                ),
+            )
     update_score_clock_overlays(score, clock, visible, state)
     if fouls:
         fouls.set_property("silent", not visible)
         if visible:
             fouls.set_property("text",
-                               f"F:{state['home_fouls']} T:{state['home_timeouts']}"
+                               f"F:{state.get('home_fouls', 0)} T:{state.get('home_timeouts', 3)}"
                                f"          "
-                               f"F:{state['away_fouls']} T:{state['away_timeouts']}")
+                               f"F:{state.get('away_fouls', 0)} T:{state.get('away_timeouts', 3)}")
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
+    update_milestone_overlays(milestone_player, milestone_text, state)
 
 
 def _apply_score_patch(data: dict) -> None:
@@ -336,7 +345,9 @@ def _apply_score_patch(data: dict) -> None:
 
     allowed_str = {"home_name", "away_name", "clock"}
     allowed_int = {"home_points", "away_points", "home_fouls",
-                   "away_fouls", "home_timeouts", "away_timeouts", "quarter"}
+                   "away_fouls", "home_timeouts", "away_timeouts", "quarter",
+                   "game_id"}
+    allowed_number = {"updated_at"}
     allowed_bool = {"visible"}
     with score_lock:
         for k in allowed_str:
@@ -348,9 +359,21 @@ def _apply_score_patch(data: dict) -> None:
         for k in allowed_int:
             if k in data and isinstance(data[k], int) and not isinstance(data[k], bool):
                 score_state[k] = data[k]
+        for k in allowed_number:
+            if (
+                    k in data
+                    and isinstance(data[k], (int, float))
+                    and not isinstance(data[k], bool)
+            ):
+                score_state[k] = data[k]
         for k in allowed_bool:
             if k in data and isinstance(data[k], bool):
                 score_state[k] = data[k]
+        if (
+                "milestone" in data
+                and (data["milestone"] is None or isinstance(data["milestone"], dict))
+        ):
+            score_state["milestone"] = data["milestone"]
         state = score_state.copy()
     _update_osd_texts(state)
     _persist_score_state()
@@ -1635,7 +1658,7 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
     with _osd_lock:
         _osd_elements.update(rtmp.osd_map())
 
-    print("Scoreboard overlay: gdkpixbufoverlay (bg PNG) + textoverlay x5 (text)")
+    print("Scoreboard overlay: gdkpixbufoverlay (bg PNG) + textoverlay x8 (text)")
     return rtmp.enc, rtmp.rtmpsink
 
 

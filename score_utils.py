@@ -1,5 +1,26 @@
+DEFAULT_SCORE_STATE = {
+    "home_name": "HOME",
+    "away_name": "AWAY",
+    "home_points": 0,
+    "away_points": 0,
+    "home_fouls": 0,
+    "away_fouls": 0,
+    "home_timeouts": 3,
+    "away_timeouts": 3,
+    "quarter": 1,
+    "clock": "10:00",
+    "visible": False,
+    "game_id": 0,
+    "updated_at": 0,
+    "milestone": None,
+}
+
 TEAM_NAME_MAX_LEN = 8
 _warned_team_name_truncations: set[tuple[str, str, str]] = set()
+
+
+def default_score_state() -> dict:
+    return DEFAULT_SCORE_STATE.copy()
 
 
 def truncate_team_name(field: str, value, *, log_prefix: str) -> str:

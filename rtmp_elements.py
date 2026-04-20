@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 from runtime_paths import SCOREBOARD_PNG
 
@@ -21,11 +23,14 @@ SCOREBOARD_OFFSET_Y = 931
 @dataclass
 class RtmpElements:
     osd_bg: Any
+    osd_quarter: Any
     osd_home: Any
     osd_away: Any
     osd_score: Any
     osd_clock: Any
     osd_fouls: Any
+    osd_milestone_player: Any
+    osd_milestone_text: Any
     enc: Any
     parse: Any
     flvmux: Any
@@ -36,21 +41,27 @@ class RtmpElements:
     def osd_map(self) -> dict[str, Any]:
         return {
             "osd_bg": self.osd_bg,
+            "osd_quarter": self.osd_quarter,
             "osd_home": self.osd_home,
             "osd_away": self.osd_away,
             "osd_score": self.osd_score,
             "osd_clock": self.osd_clock,
             "osd_fouls": self.osd_fouls,
+            "osd_milestone_player": self.osd_milestone_player,
+            "osd_milestone_text": self.osd_milestone_text,
         }
 
     def base_elements(self) -> tuple[Any, ...]:
         return (
             self.osd_bg,
+            self.osd_quarter,
             self.osd_home,
             self.osd_away,
             self.osd_score,
             self.osd_clock,
             self.osd_fouls,
+            self.osd_milestone_player,
+            self.osd_milestone_text,
             self.enc,
             self.parse,
             self.flvmux,
@@ -62,11 +73,14 @@ class RtmpElements:
     def overlay_chain(self) -> tuple[Any, ...]:
         return (
             self.osd_bg,
+            self.osd_quarter,
             self.osd_home,
             self.osd_away,
             self.osd_score,
             self.osd_clock,
             self.osd_fouls,
+            self.osd_milestone_player,
+            self.osd_milestone_text,
             self.enc,
             self.parse,
         )
@@ -75,11 +89,17 @@ class RtmpElements:
 def make_rtmp_elements(make_element: Callable[[str, str], Any]) -> RtmpElements:
     return RtmpElements(
         osd_bg=make_element("gdkpixbufoverlay", "strm_osd_bg"),
+        osd_quarter=make_element("textoverlay", "strm_osd_quarter"),
         osd_home=make_element("textoverlay", "strm_osd_home"),
         osd_away=make_element("textoverlay", "strm_osd_away"),
         osd_score=make_element("textoverlay", "strm_osd_score"),
         osd_clock=make_element("textoverlay", "strm_osd_clock"),
         osd_fouls=make_element("textoverlay", "strm_osd_fouls"),
+        osd_milestone_player=make_element(
+            "textoverlay",
+            "strm_osd_milestone_player",
+        ),
+        osd_milestone_text=make_element("textoverlay", "strm_osd_milestone_text"),
         enc=make_element("x264enc", "strm_enc"),
         parse=make_element("h264parse", "strm_parse"),
         flvmux=make_element("flvmux", "strm_flvmux"),
@@ -129,42 +149,66 @@ def setup_text_overlay(
 
 def configure_scoreboard_texts(elements: RtmpElements) -> None:
     setup_text_overlay(
+        elements.osd_quarter,
+        "Q1",
+        xpos=0.397,
+        ypos=0.865,
+        font="Sans Bold 18",
+        color=0xFFFFFFFF,
+    )
+    setup_text_overlay(
         elements.osd_home,
         "HOME",
-        xpos=0.022,
-        ypos=0.040,
-        font="Sans Bold 22",
+        xpos=0.420,
+        ypos=0.876,
+        font="Sans Bold 16",
     )
     setup_text_overlay(
         elements.osd_away,
         "AWAY",
-        xpos=0.230,
-        ypos=0.040,
-        font="Sans Bold 22",
+        xpos=0.420,
+        ypos=0.920,
+        font="Sans Bold 16",
     )
     setup_text_overlay(
         elements.osd_score,
         "0 - 0",
-        xpos=0.120,
-        ypos=0.040,
+        xpos=0.560,
+        ypos=0.876,
         font="Sans Bold 22",
         color=0xFFD916FF,
     )
     setup_text_overlay(
         elements.osd_clock,
-        "Q1 10:00",
-        xpos=0.330,
-        ypos=0.040,
-        font="Sans Bold 22",
+        "10:00",
+        xpos=0.565,
+        ypos=0.865,
+        font="Sans Bold 18",
         color=0xB2E5FFFF,
     )
     setup_text_overlay(
         elements.osd_fouls,
         "",
-        xpos=0.022,
-        ypos=0.068,
-        font="Sans 13",
+        xpos=0.420,
+        ypos=0.950,
+        font="Sans 12",
         color=0xA6A6A6FF,
+    )
+    setup_text_overlay(
+        elements.osd_milestone_player,
+        "",
+        xpos=0.350,
+        ypos=0.820,
+        font="Sans Bold 24",
+        color=0xFFD916FF,
+    )
+    setup_text_overlay(
+        elements.osd_milestone_text,
+        "",
+        xpos=0.350,
+        ypos=0.840,
+        font="Sans Bold 18",
+        color=0xFFFFFFFF,
     )
 
 
@@ -216,10 +260,60 @@ def update_score_clock_overlays(
     set_overlay_text(
         score_element,
         visible,
-        f"{state['home_points']} - {state['away_points']}",
+        f"{state.get('home_points', 0)} - {state.get('away_points', 0)}",
     )
     set_overlay_text(
         clock_element,
         visible,
-        f"Q{state['quarter']}  {state['clock']}",
+        str(state.get("clock", "10:00")),
+    )
+
+
+def update_quarter_overlay(
+        quarter_element: Any | None,
+        visible: bool,
+        state: Mapping[str, Any],
+) -> None:
+    set_overlay_text(
+        quarter_element,
+        visible,
+        f"Q{state.get('quarter', 1)}",
+    )
+
+
+def _milestone_show_until(milestone: Mapping[str, Any]) -> float:
+    show_until = milestone.get("show_until", 0)
+    if isinstance(show_until, bool):
+        return 0
+    try:
+        return float(show_until)
+    except (TypeError, ValueError):
+        return 0
+
+
+def update_milestone_overlays(
+        player_element: Any | None,
+        text_element: Any | None,
+        state: Mapping[str, Any],
+) -> None:
+    milestone = state.get("milestone")
+    show_milestone = (
+        isinstance(milestone, Mapping)
+        and _milestone_show_until(milestone) > int(time.time() * 1000)
+    )
+
+    if not show_milestone:
+        set_overlay_text(player_element, False, "")
+        set_overlay_text(text_element, False, "")
+        return
+
+    set_overlay_text(
+        player_element,
+        True,
+        str(milestone.get("player_name", "")),
+    )
+    set_overlay_text(
+        text_element,
+        True,
+        f"{milestone.get('milestone_name', '')}: {milestone.get('value_achieved', 0)}",
     )

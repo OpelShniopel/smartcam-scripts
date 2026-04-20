@@ -118,8 +118,9 @@ For OSD/scoreboard graphics work, start with `stream_worker.py`:
 - `SCOREBOARD_W`, `SCOREBOARD_H`: rendered scoreboard background size.
 - `SCOREBOARD_OFFSET_X`, `SCOREBOARD_OFFSET_Y`: background placement in the
   1080p stream.
-- `_setup_text(...)` calls inside `build_pipeline()`: text positions, fonts, and
-  colors for team names, score, clock, and fouls/timeouts.
+- `configure_scoreboard_texts(...)` in `rtmp_elements.py`: text positions,
+  fonts, and colors for quarter, team names, score, clock, fouls/timeouts, and
+  milestone banners.
 - `_update_overlay(...)`: maps `score_state.json` fields to overlay text and
   visibility.
 

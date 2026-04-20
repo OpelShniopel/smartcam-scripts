@@ -33,9 +33,11 @@ from runtime_paths import (
 from rtmp_elements import (
     configure_rtmp_branch,
     make_rtmp_elements,
+    update_milestone_overlays,
+    update_quarter_overlay,
     update_score_clock_overlays,
 )
-from score_utils import truncate_team_name
+from score_utils import DEFAULT_SCORE_STATE, default_score_state, truncate_team_name
 
 RTMP_BITRATE_DEFAULT = 6800
 
@@ -113,21 +115,6 @@ def _atomic_write_json(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
-DEFAULT_SCORE_STATE = {
-    "home_name": "HOME",
-    "away_name": "AWAY",
-    "home_points": 0,
-    "away_points": 0,
-    "home_fouls": 0,
-    "away_fouls": 0,
-    "home_timeouts": 3,
-    "away_timeouts": 3,
-    "quarter": 1,
-    "clock": "10:00",
-    "visible": False,
-}
-
-
 def _read_json(path: str, default: dict) -> dict:
     try:
         with open(path) as f:
@@ -146,7 +133,7 @@ def read_stream_url() -> str | None:
 
 
 def read_score_state() -> dict:
-    state = DEFAULT_SCORE_STATE.copy()
+    state = default_score_state()
     state.update(_read_json(SCORE_STATE_FILE, DEFAULT_SCORE_STATE))
     return state
 
@@ -235,26 +222,38 @@ def _update_overlay(state: dict) -> None:
         return
 
     visible = state.get("visible", False)
+    quarter = els.get("osd_quarter")
     home = els.get("osd_home")
     away = els.get("osd_away")
     score = els.get("osd_score")
     clock = els.get("osd_clock")
     fouls = els.get("osd_fouls")
     bg = els.get("osd_bg")
+    milestone_player = els.get("osd_milestone_player")
+    milestone_text = els.get("osd_milestone_text")
 
+    update_quarter_overlay(quarter, visible, state)
     if home:
         home.set_property("silent", not visible)
         if visible:
             home.set_property(
                 "text",
-                truncate_team_name("home_name", state["home_name"], log_prefix="[worker]"),
+                truncate_team_name(
+                    "home_name",
+                    state.get("home_name", "HOME"),
+                    log_prefix="[worker]",
+                ),
             )
     if away:
         away.set_property("silent", not visible)
         if visible:
             away.set_property(
                 "text",
-                truncate_team_name("away_name", state["away_name"], log_prefix="[worker]"),
+                truncate_team_name(
+                    "away_name",
+                    state.get("away_name", "AWAY"),
+                    log_prefix="[worker]",
+                ),
             )
     update_score_clock_overlays(score, clock, visible, state)
     if fouls:
@@ -262,12 +261,13 @@ def _update_overlay(state: dict) -> None:
         if visible:
             fouls.set_property(
                 "text",
-                f"F:{state['home_fouls']} T:{state['home_timeouts']}"
+                f"F:{state.get('home_fouls', 0)} T:{state.get('home_timeouts', 3)}"
                 f"          "
-                f"F:{state['away_fouls']} T:{state['away_timeouts']}",
+                f"F:{state.get('away_fouls', 0)} T:{state.get('away_timeouts', 3)}",
             )
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
+    update_milestone_overlays(milestone_player, milestone_text, state)
 
 
 def _poll_score_state() -> bool:
