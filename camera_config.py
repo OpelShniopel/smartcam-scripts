@@ -7,12 +7,12 @@ import os
 FIXED_CAMERA_DEVICE = (
     os.environ.get("SMARTCAM_FIXED_CAMERA_DEVICE")
     or os.environ.get("SMARTCAM_CAM0_DEVICE")
-    or "/dev/video0"
+    or "/dev/fixed_camera"
 )
 PTZ_CAMERA_DEVICE = (
     os.environ.get("SMARTCAM_PTZ_CAMERA_DEVICE")
     or os.environ.get("SMARTCAM_CAM2_DEVICE")
-    or "/dev/video2"
+    or "/dev/ptz_camera"
 )
 
 # Backward-compatible names for older imports.
