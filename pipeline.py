@@ -272,9 +272,9 @@ _fps_lock = threading.Lock()
 
 def _ai_fps_metric_enabled(cam_label: str) -> bool:
     return (
-        ENABLE_TERMINAL_FPS_METRICS
-        and ENABLE_AI_FPS_METRICS
-        and _ai_enabled(cam_label)
+            ENABLE_TERMINAL_FPS_METRICS
+            and ENABLE_AI_FPS_METRICS
+            and _ai_enabled(cam_label)
     )
 
 

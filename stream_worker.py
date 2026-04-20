@@ -101,14 +101,14 @@ def _get_local_ip() -> str:
 
 LOCAL_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
 SOURCE_RTSP_FIXED_URL = (
-    os.environ.get("STREAM_SOURCE_FIXED_RTSP")
-    or os.environ.get("STREAM_SOURCE_CAM0_RTSP")
-    or "rtsp://127.0.0.1:8554/camera0_stream"
+        os.environ.get("STREAM_SOURCE_FIXED_RTSP")
+        or os.environ.get("STREAM_SOURCE_CAM0_RTSP")
+        or "rtsp://127.0.0.1:8554/camera0_stream"
 )
 SOURCE_RTSP_PTZ_URL = (
-    os.environ.get("STREAM_SOURCE_PTZ_RTSP")
-    or os.environ.get("STREAM_SOURCE_CAM2_RTSP")
-    or "rtsp://127.0.0.1:8554/camera2_stream"
+        os.environ.get("STREAM_SOURCE_PTZ_RTSP")
+        or os.environ.get("STREAM_SOURCE_CAM2_RTSP")
+        or "rtsp://127.0.0.1:8554/camera2_stream"
 )
 AVAILABLE_CAMERAS = {
     camera: os.path.exists(device)
@@ -514,11 +514,11 @@ def _make_watchdog() -> Gst.Element | None:
 
 
 def _add_output_elements(
-    pipeline: Gst.Pipeline,
-    selector: Gst.Element,
-    q: Gst.Element,
-    rtmp: RtmpElements,
-    watchdog: Gst.Element | None,
+        pipeline: Gst.Pipeline,
+        selector: Gst.Element,
+        q: Gst.Element,
+        rtmp: RtmpElements,
+        watchdog: Gst.Element | None,
 ) -> None:
     elements = [selector, q, *rtmp.base_elements()]
     if watchdog is not None:
@@ -548,9 +548,9 @@ def _link_audio_encoder_to_mux(rtmp: RtmpElements) -> None:
 
 
 def _add_buffer_probe_if_present(
-    element: Gst.Element,
-    pad_name: str,
-    callback: Callable[[Any, Any, Any], Gst.PadProbeReturn],
+        element: Gst.Element,
+        pad_name: str,
+        callback: Callable[[Any, Any, Any], Gst.PadProbeReturn],
 ) -> None:
     pad = element.get_static_pad(pad_name)
     if pad is not None:

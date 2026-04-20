@@ -58,10 +58,10 @@ def _signal_child(child_proc: subprocess.Popen, sig: int) -> None:
 
 
 def _stop_child_with_timeout(
-    proc: subprocess.Popen,
-    sig: int,
-    timeout_sec: float = 5.0,
-    timeout_message: str | None = None,
+        proc: subprocess.Popen,
+        sig: int,
+        timeout_sec: float = 5.0,
+        timeout_message: str | None = None,
 ) -> None:
     _signal_child(proc, sig)
     try:

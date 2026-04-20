@@ -5,14 +5,14 @@ import os
 # Current working defaults. Change these to /dev/fixed_camera and /dev/ptz_camera
 # when those stable device links are fixed on the Jetson.
 FIXED_CAMERA_DEVICE = (
-    os.environ.get("SMARTCAM_FIXED_CAMERA_DEVICE")
-    or os.environ.get("SMARTCAM_CAM0_DEVICE")
-    or "/dev/fixed_camera"
+        os.environ.get("SMARTCAM_FIXED_CAMERA_DEVICE")
+        or os.environ.get("SMARTCAM_CAM0_DEVICE")
+        or "/dev/fixed_camera"
 )
 PTZ_CAMERA_DEVICE = (
-    os.environ.get("SMARTCAM_PTZ_CAMERA_DEVICE")
-    or os.environ.get("SMARTCAM_CAM2_DEVICE")
-    or "/dev/ptz_camera"
+        os.environ.get("SMARTCAM_PTZ_CAMERA_DEVICE")
+        or os.environ.get("SMARTCAM_CAM2_DEVICE")
+        or "/dev/ptz_camera"
 )
 
 # Backward-compatible names for older imports.
