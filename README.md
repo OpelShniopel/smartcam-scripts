@@ -159,7 +159,8 @@ These files are created or updated while the system runs:
 - `stream.conf`: RTMP URL, or `# disabled`.
 - `score_state.json`: persisted score and overlay visibility.
 - `stream_worker_config.json`: RTMP worker settings such as `bitrateKbps` and
-  `activeCamera` (`fixed` or `ptz`).
+  `activeCamera` (`fixed` or `ptz`; legacy `cam0` and `cam2` aliases are still
+  accepted).
 - `stream_worker_status.json`: worker health and RTMP status.
 - `stream_worker.pid`: RTMP worker wrapper PID metadata.
 

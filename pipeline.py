@@ -650,16 +650,28 @@ def _push_state() -> None:
     internal_streams = {}
 
     if ENABLE_FIXED_CAMERA:
-        webrtc["fixed_clean"] = f"http://{JETSON_HOST}:8889/camera0_clean"
+        fixed_clean_url = f"http://{JETSON_HOST}:8889/camera0_clean"
+        fixed_stream_url = f"rtsp://{JETSON_HOST}:8554/camera0_stream"
+        webrtc["fixed_clean"] = fixed_clean_url
+        webrtc["cam0_clean"] = fixed_clean_url
         if _ai_enabled("CAM0"):
-            webrtc["fixed_ai"] = f"http://{JETSON_HOST}:8889/camera0_ai"
-        internal_streams["fixed_stream"] = f"rtsp://{JETSON_HOST}:8554/camera0_stream"
+            fixed_ai_url = f"http://{JETSON_HOST}:8889/camera0_ai"
+            webrtc["fixed_ai"] = fixed_ai_url
+            webrtc["cam0_ai"] = fixed_ai_url
+        internal_streams["fixed_stream"] = fixed_stream_url
+        internal_streams["cam0_stream"] = fixed_stream_url
 
     if ENABLE_PTZ_CAMERA:
-        webrtc["ptz_clean"] = f"http://{JETSON_HOST}:8889/camera2_clean"
+        ptz_clean_url = f"http://{JETSON_HOST}:8889/camera2_clean"
+        ptz_stream_url = f"rtsp://{JETSON_HOST}:8554/camera2_stream"
+        webrtc["ptz_clean"] = ptz_clean_url
+        webrtc["cam2_clean"] = ptz_clean_url
         if _ai_enabled("CAM2"):
-            webrtc["ptz_ai"] = f"http://{JETSON_HOST}:8889/camera2_ai"
-        internal_streams["ptz_stream"] = f"rtsp://{JETSON_HOST}:8554/camera2_stream"
+            ptz_ai_url = f"http://{JETSON_HOST}:8889/camera2_ai"
+            webrtc["ptz_ai"] = ptz_ai_url
+            webrtc["cam2_ai"] = ptz_ai_url
+        internal_streams["ptz_stream"] = ptz_stream_url
+        internal_streams["cam2_stream"] = ptz_stream_url
 
     _out_q.put({
         "type": "state",
@@ -672,10 +684,14 @@ def _push_state() -> None:
         "enabled_cameras": {
             FIXED_CAMERA: ENABLE_FIXED_CAMERA,
             PTZ_CAMERA: ENABLE_PTZ_CAMERA,
+            "cam0": ENABLE_FIXED_CAMERA,
+            "cam2": ENABLE_PTZ_CAMERA,
         },
         "enabled_ai": {
             FIXED_CAMERA: _ai_enabled("CAM0"),
             PTZ_CAMERA: _ai_enabled("CAM2"),
+            "cam0": _ai_enabled("CAM0"),
+            "cam2": _ai_enabled("CAM2"),
         },
         "webrtc": webrtc,
         "internal_streams": internal_streams,
@@ -742,7 +758,23 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
+                    "cam0": {
+                        "device": FIXED_CAMERA_DEVICE,
+                        "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
+                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
+                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
+                        "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
+                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
+                    },
                     PTZ_CAMERA: {
+                        "device": PTZ_CAMERA_DEVICE,
+                        "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera2_clean",
+                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
+                        "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
+                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
+                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera2_stream",
+                    },
+                    "cam2": {
                         "device": PTZ_CAMERA_DEVICE,
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera2_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
