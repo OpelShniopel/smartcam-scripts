@@ -134,8 +134,8 @@ RTMP streaming on the next worker/pipeline start.
   formatted or displayed.
 - `pipeline.py`: `_update_osd_texts()` mirrors the fouls/timeouts formatting
   from `stream_worker.py` — keep both in sync when changing display format.
-- `score_utils.py`: `TEAM_NAME_MAX_LEN` controls how team names are truncated
-  before display. Increase this if team names are being cut off.
+- `score_utils.py`: `truncate_team_name()` extracts the first word of the team
+  name before display. Edit here to change how team names are shortened.
 
 For terminal FPS logs:
 
