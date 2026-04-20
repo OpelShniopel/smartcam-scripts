@@ -15,6 +15,8 @@ import signal
 import socket as _socket
 import threading
 import time
+from collections.abc import Callable
+from typing import Any
 
 import gi
 
@@ -36,6 +38,7 @@ from runtime_paths import (
     STREAM_WORKER_STATUS,
 )
 from rtmp_elements import (
+    RtmpElements,
     configure_rtmp_branch,
     make_rtmp_elements,
     update_milestone_overlays,
@@ -514,7 +517,7 @@ def _add_output_elements(
     pipeline: Gst.Pipeline,
     selector: Gst.Element,
     q: Gst.Element,
-    rtmp,
+    rtmp: RtmpElements,
     watchdog: Gst.Element | None,
 ) -> None:
     elements = [selector, q, *rtmp.base_elements()]
@@ -525,7 +528,7 @@ def _add_output_elements(
         pipeline.add(el)
 
 
-def _link_parse_to_mux(rtmp, watchdog: Gst.Element | None) -> None:
+def _link_parse_to_mux(rtmp: RtmpElements, watchdog: Gst.Element | None) -> None:
     if watchdog is None:
         _link(rtmp.parse, rtmp.flvmux)
         return
@@ -534,7 +537,7 @@ def _link_parse_to_mux(rtmp, watchdog: Gst.Element | None) -> None:
     _link(watchdog, rtmp.flvmux)
 
 
-def _link_audio_encoder_to_mux(rtmp) -> None:
+def _link_audio_encoder_to_mux(rtmp: RtmpElements) -> None:
     _link_filtered(rtmp.audiosrc, rtmp.aacenc, "audio/x-raw,rate=44100,channels=2")
     aacenc_src = _get_static_pad(rtmp.aacenc, "src")
     flvmux_audio = rtmp.flvmux.request_pad_simple("audio")
@@ -544,7 +547,11 @@ def _link_audio_encoder_to_mux(rtmp) -> None:
         raise RuntimeError("Failed to link audio encoder to flvmux audio pad")
 
 
-def _add_buffer_probe_if_present(element: Gst.Element, pad_name: str, callback) -> None:
+def _add_buffer_probe_if_present(
+    element: Gst.Element,
+    pad_name: str,
+    callback: Callable[[Any, Any, Any], Gst.PadProbeReturn],
+) -> None:
     pad = element.get_static_pad(pad_name)
     if pad is not None:
         pad.add_probe(Gst.PadProbeType.BUFFER, callback, None)
