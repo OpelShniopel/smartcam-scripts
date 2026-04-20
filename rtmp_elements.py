@@ -298,8 +298,8 @@ def update_milestone_overlays(
 ) -> None:
     milestone = state.get("milestone")
     show_milestone = (
-        isinstance(milestone, Mapping)
-        and _milestone_show_until(milestone) > int(time.time() * 1000)
+            isinstance(milestone, Mapping)
+            and _milestone_show_until(milestone) > int(time.time() * 1000)
     )
 
     if not show_milestone:
