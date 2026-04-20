@@ -8,7 +8,7 @@ from pan_control_esp_stationary import PanController
 from zoom_control_v2 import ZoomController
 
 # --- CONFIGURATION ---
-UNIX_SOCK  = "/tmp/pycam.sock"
+UNIX_SOCK  = "/tmp/ptz-control.sock"
 TARGET_CAM = "CAM0"
 
 # --- ENABLE / DISABLE CONTROLLERS ---
