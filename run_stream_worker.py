@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
 from exit_codes import ProcessExitCode
@@ -163,92 +164,135 @@ def _stop_child(proc: subprocess.Popen, timeout_sec: float = 5.0) -> None:
         proc.wait()
 
 
-def main() -> None:
-    shutdown = False
-    crash_count = 0
-    stream_error_count = 0
+@dataclass
+class _SupervisorState:
+    shutdown: bool = False
+    crash_count: int = 0
+    stream_error_count: int = 0
     child: subprocess.Popen | None = None
 
-    _write_pid()
 
+@dataclass
+class _WorkerRunResult:
+    ret: int | None
+    run_duration: float
+
+
+def _request_shutdown(state: _SupervisorState) -> None:
+    state.shutdown = True
+    if state.child is not None:
+        try:
+            state.child.send_signal(signal.SIGTERM)
+        except OSError:
+            pass
+
+
+def _install_signal_handlers(state: _SupervisorState) -> None:
     def _handler(_sig, _frame):
-        nonlocal shutdown, child
-        shutdown = True
-        if child is not None:
-            try:
-                child.send_signal(signal.SIGTERM)
-            except OSError:
-                pass
+        _request_shutdown(state)
 
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
 
+
+def _ensure_can_launch_worker(state: _SupervisorState) -> None:
+    if not _owner_alive():
+        state.shutdown = True
+        return
+    if state.crash_count >= MAX_CRASHES:
+        print(f"[{_ts()}] worker crashed {state.crash_count} times — giving up")
+        raise SystemExit(1)
+
+
+def _wait_for_worker_exit(worker_proc: subprocess.Popen, state: _SupervisorState) -> int | None:
+    while worker_proc.poll() is None:
+        if not _owner_alive():
+            state.shutdown = True
+            _stop_child(worker_proc)
+            break
+        time.sleep(0.2)
+    return worker_proc.poll()
+
+
+def _run_worker_once(state: _SupervisorState) -> _WorkerRunResult:
+    print(f"[{_ts()}] launching RTMP worker (crash count: {state.crash_count})")
+    start = time.monotonic()
+    worker_proc = subprocess.Popen([sys.executable, WORKER_SCRIPT], cwd=SCRIPT_DIR)
+    state.child = worker_proc
+
+    ret: int | None = None
     try:
-        while not shutdown:
-            if not _owner_alive():
+        ret = _wait_for_worker_exit(worker_proc, state)
+    except KeyboardInterrupt:
+        _stop_child(worker_proc)
+        state.shutdown = True
+    finally:
+        state.child = None
+
+    return _WorkerRunResult(ret=ret, run_duration=time.monotonic() - start)
+
+
+def _handle_worker_exit(ret: int, run_duration: float, state: _SupervisorState) -> int | None:
+    if ret == 0:
+        print(f"[{_ts()}] worker exited cleanly after {run_duration:.0f}s")
+        return None
+
+    if not _owner_alive():
+        state.shutdown = True
+        return None
+
+    if ret == ProcessExitCode.STREAM_ERROR:
+        state.stream_error_count += 1
+        delay = _sleep_for_attempt(state.stream_error_count)
+        print(
+            f"[{_ts()}] RTMP/connectivity error after {run_duration:.0f}s "
+            f"— retrying worker in {delay}s"
+        )
+        return delay
+
+    state.stream_error_count = 0
+    if run_duration >= CRASH_RESET_SEC:
+        state.crash_count = 1
+    else:
+        state.crash_count += 1
+    delay = _sleep_for_attempt(state.crash_count)
+    print(
+        f"[{_ts()}] worker exit code {ret} after {run_duration:.0f}s "
+        f"— retrying in {delay}s"
+    )
+    return delay
+
+
+def _sleep_until_retry(delay: int, state: _SupervisorState) -> None:
+    end = time.monotonic() + delay
+    while time.monotonic() < end and not state.shutdown:
+        if not _owner_alive():
+            state.shutdown = True
+            return
+        time.sleep(0.2)
+
+
+def main() -> None:
+    state = _SupervisorState()
+    _write_pid()
+    _install_signal_handlers(state)
+
+    try:
+        while not state.shutdown:
+            _ensure_can_launch_worker(state)
+            if state.shutdown:
                 break
-            if crash_count >= MAX_CRASHES:
-                print(f"[{_ts()}] worker crashed {crash_count} times — giving up")
-                raise SystemExit(1)
 
-            print(f"[{_ts()}] launching RTMP worker (crash count: {crash_count})")
-            start = time.monotonic()
-            worker_proc = subprocess.Popen([sys.executable, WORKER_SCRIPT], cwd=SCRIPT_DIR)
-            child = worker_proc
-
-            ret: int | None = None
-            try:
-                while worker_proc.poll() is None:
-                    if not _owner_alive():
-                        shutdown = True
-                        _stop_child(worker_proc)
-                        break
-                    time.sleep(0.2)
-                ret = worker_proc.poll()
-            except KeyboardInterrupt:
-                _stop_child(worker_proc)
-                break
-            finally:
-                child = None
-
-            run_duration = time.monotonic() - start
-            if shutdown:
+            result = _run_worker_once(state)
+            if state.shutdown:
                 break
 
-            if ret is None:
-                ret = 1
-
-            if ret == 0:
-                print(f"[{_ts()}] worker exited cleanly after {run_duration:.0f}s")
+            ret = result.ret if result.ret is not None else 1
+            delay = _handle_worker_exit(ret, result.run_duration, state)
+            if delay is None:
                 break
 
-            if not _owner_alive():
-                break
-
-            if ret == ProcessExitCode.STREAM_ERROR:
-                stream_error_count += 1
-                delay = _sleep_for_attempt(stream_error_count)
-                print(
-                    f"[{_ts()}] RTMP/connectivity error after {run_duration:.0f}s "
-                    f"— retrying worker in {delay}s"
-                )
-            else:
-                stream_error_count = 0
-                if run_duration >= CRASH_RESET_SEC:
-                    crash_count = 1
-                else:
-                    crash_count += 1
-                delay = _sleep_for_attempt(crash_count)
-                print(
-                    f"[{_ts()}] worker exit code {ret} after {run_duration:.0f}s "
-                    f"— retrying in {delay}s"
-                )
-            end = time.monotonic() + delay
-            while time.monotonic() < end and not shutdown:
-                if not _owner_alive():
-                    shutdown = True
-                    break
-                time.sleep(0.2)
+            _sleep_until_retry(delay, state)
     finally:
         _cleanup_pid()
 
