@@ -832,6 +832,9 @@ class ControlHandler(BaseHTTPRequestHandler):
         return self.rfile.read(length).decode() if length else ""
 
     def log_message(self, format_string, *args):
+        # Silence BaseHTTPRequestHandler's default access log; the pipeline
+        # uses its own structured/explicit logging and these per-request lines
+        # add noise without useful signal.
         pass
 
 
