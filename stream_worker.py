@@ -115,24 +115,6 @@ def _atomic_write_json(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
-DEFAULT_SCORE_STATE = {
-    "home_name": "HOME",
-    "away_name": "AWAY",
-    "home_points": 0,
-    "away_points": 0,
-    "home_fouls": 0,
-    "away_fouls": 0,
-    "home_timeouts": 3,
-    "away_timeouts": 3,
-    "quarter": 1,
-    "clock": "10:00",
-    "visible": False,
-    "game_id": 0,
-    "updated_at": 0,
-    "milestone": None,
-}
-
-
 def _read_json(path: str, default: dict) -> dict:
     try:
         with open(path) as f:
@@ -250,26 +232,30 @@ def _update_overlay(state: dict) -> None:
     milestone_player = els.get("osd_milestone_player")
     milestone_text = els.get("osd_milestone_text")
 
-    if quarter:
-        quarter.set_property("silent", not visible)
-        if visible:
-            quarter.set_property("text", f"Q{state.get('quarter', 1)}")
+    update_quarter_overlay(quarter, visible, state)
     if home:
         home.set_property("silent", not visible)
         if visible:
-            home.set_property("text", state.get("home_name", "HOME")[:8])
+            home.set_property(
+                "text",
+                truncate_team_name(
+                    "home_name",
+                    state.get("home_name", "HOME"),
+                    log_prefix="[worker]",
+                ),
+            )
     if away:
         away.set_property("silent", not visible)
         if visible:
-            away.set_property("text", state.get("away_name", "AWAY")[:8])
-    if score:
-        score.set_property("silent", not visible)
-        if visible:
-            score.set_property("text", f"{state.get('home_points', 0)} - {state.get('away_points', 0)}")
-    if clock:
-        clock.set_property("silent", not visible)
-        if visible:
-            clock.set_property("text", state.get("clock", "10:00"))
+            away.set_property(
+                "text",
+                truncate_team_name(
+                    "away_name",
+                    state.get("away_name", "AWAY"),
+                    log_prefix="[worker]",
+                ),
+            )
+    update_score_clock_overlays(score, clock, visible, state)
     if fouls:
         fouls.set_property("silent", not visible)
         if visible:
@@ -282,23 +268,6 @@ def _update_overlay(state: dict) -> None:
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
     update_milestone_overlays(milestone_player, milestone_text, state)
-
-    milestone = state.get("milestone")
-    now_ms = int(time.time() * 1000)
-    show_milestone = milestone is not None and milestone.get("show_until", 0) > now_ms
-    m_player = els.get("osd_milestone_player")
-    m_text = els.get("osd_milestone_text")
-    if m_player:
-        m_player.set_property("silent", not show_milestone)
-        if show_milestone:
-            m_player.set_property("text", milestone.get("player_name", ""))
-    if m_text:
-        m_text.set_property("silent", not show_milestone)
-        if show_milestone:
-            m_text.set_property(
-                "text",
-                f"{milestone.get('milestone_name', '')}: {milestone.get('value_achieved', 0)}",
-            )
 
 
 def _poll_score_state() -> bool:
@@ -497,89 +466,20 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
 
     selector = _make("input-selector", "strm_selector")
     q = _make("queue", "strm_queue")
-    osd_bg = _make("gdkpixbufoverlay", "strm_osd_bg")
-    osd_home = _make("textoverlay", "strm_osd_home")
-    osd_away = _make("textoverlay", "strm_osd_away")
-    osd_score = _make("textoverlay", "strm_osd_score")
-    osd_clock = _make("textoverlay", "strm_osd_clock")
-    osd_quarter = _make("textoverlay", "strm_osd_quarter")
-    osd_fouls = _make("textoverlay", "strm_osd_fouls")
-    osd_milestone_player = _make("textoverlay", "strm_osd_milestone_player")
-    osd_milestone_text = _make("textoverlay", "strm_osd_milestone_text")
-    enc = _make("x264enc", "strm_enc")
-    parse_out = _make("h264parse", "strm_parse")
-    flvmux = _make("flvmux", "strm_flvmux")
+    rtmp = make_rtmp_elements(_make)
     watchdog = Gst.ElementFactory.make("watchdog", "strm_watchdog")
-    rtmpsink = _make("rtmpsink", "strm_rtmpsink")
-    audiosrc = _make("audiotestsrc", "strm_audiosrc")
-    aacenc = _make("voaacenc", "strm_aacenc")
-
-    src0.set_property("location", SOURCE_RTSP_CAM0_URL)
-    src0.set_property("protocols", 4)
-    src0.set_property("latency", 100)
-    src2.set_property("location", SOURCE_RTSP_CAM2_URL)
-    src2.set_property("protocols", 4)
-    src2.set_property("latency", 100)
-
-    for conv in (conv0, conv2):
-        conv.set_property("gpu-id", 0)
-        conv.set_property("copy-hw", 2)
-    caps0.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
-    caps2.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
-
-    for q_in in (q0, q2):
-        q_in.set_property("max-size-buffers", 2)
-        q_in.set_property("max-size-bytes", 0)
-        q_in.set_property("max-size-time", 0)
-        q_in.set_property("leaky", 2)
-
-    q.set_property("max-size-buffers", 2)
-    q.set_property("max-size-bytes", 0)
-    q.set_property("max-size-time", 0)
-    q.set_property("leaky", 2)
-
-    osd_bg.set_property("location", SCOREBOARD_PNG)
-    osd_bg.set_property("offset-x", SCOREBOARD_OFFSET_X)
-    osd_bg.set_property("offset-y", SCOREBOARD_OFFSET_Y)
-    osd_bg.set_property("overlay-width", SCOREBOARD_W)
-    osd_bg.set_property("overlay-height", SCOREBOARD_H)
-    osd_bg.set_property("alpha", 0.0)
-
-    _setup_text(osd_quarter, "Q1", xpos=0.397, ypos=0.865, font="Sans Bold 18", color=0xFFFFFFFF)
-    _setup_text(osd_home, "HOME", xpos=0.420, ypos=0.876, font="Sans Bold 16")
-    _setup_text(osd_away, "AWAY", xpos=0.420, ypos=0.920, font="Sans Bold 16")
-    _setup_text(osd_score, "0 - 0", xpos=0.560, ypos=0.876, font="Sans Bold 22", color=0xFFD916FF)
-    _setup_text(osd_clock, "10:00", xpos=0.565, ypos=0.865, font="Sans Bold 18", color=0xB2E5FFFF)
-    _setup_text(osd_fouls, "", xpos=0.420, ypos=0.950, font="Sans 12", color=0xA6A6A6FF)
-    _setup_text(osd_milestone_player, "", xpos=0.35, ypos=0.82, font="Sans Bold 24", color=0xFFD916FF)
-    _setup_text(osd_milestone_text, "", xpos=0.35, ypos=0.84, font="Sans Bold 18", color=0xFFFFFFFF)
-
-    enc.set_property("pass", "cbr")
-    enc.set_property("bitrate", int(cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)))
-    enc.set_property("vbv-buf-capacity", 200)
-    enc.set_property("tune", RTMP_TUNE)
-    enc.set_property("speed-preset", RTMP_PRESET)
-    enc.set_property("key-int-max", RTMP_KEYINT)
-    enc.set_property("threads", RTMP_THREADS)
-
-    flvmux.set_property("streamable", True)
+    configure_rtmp_branch(
+        rtmp,
+        q,
+        int(cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)),
+        rtmp_url,
+    )
     if watchdog is not None:
         watchdog.set_property("timeout", int(STALL_TIMEOUT_SEC * 1000))
     else:
         print("[worker] WARNING: watchdog plugin unavailable; using custom stall detector only")
-    rtmpsink.set_property("location", rtmp_url)
-    rtmpsink.set_property("async", False)
-    audiosrc.set_property("wave", 4)
-    aacenc.set_property("bitrate", 128000)
 
-    elements = [
-        src0, depay0, parse0, dec0, conv0, caps0, q0,
-        src2, depay2, parse2, dec2, conv2, caps2, q2,
-        selector, q,
-        osd_bg, osd_quarter, osd_home, osd_away, osd_score, osd_clock, osd_fouls,
-        osd_milestone_player, osd_milestone_text,
-        enc, parse_out, flvmux, rtmpsink, audiosrc, aacenc,
-    ]
+    elements = [selector, q, *rtmp.base_elements()]
     if watchdog is not None:
         elements.insert(-3, watchdog)
 
@@ -591,17 +491,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
         _link_branch_to_selector(branch, selector, camera)
 
     _link(selector, q)
-    _link(q, osd_bg)
-    _link(osd_bg, osd_quarter)
-    _link(osd_quarter, osd_home)
-    _link(osd_home, osd_away)
-    _link(osd_away, osd_score)
-    _link(osd_score, osd_clock)
-    _link(osd_clock, osd_fouls)
-    _link(osd_fouls, osd_milestone_player)
-    _link(osd_milestone_player, osd_milestone_text)
-    _link(osd_milestone_text, enc)
-    _link(enc, parse_out)
+    _link_many(q, *rtmp.overlay_chain())
     if watchdog is not None:
         _link(rtmp.parse, watchdog)
         _link(watchdog, rtmp.flvmux)
@@ -628,19 +518,9 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
         sink_pad.add_probe(Gst.PadProbeType.BUFFER, _rtmp_probe, None)
 
     _osd_elements.clear()
-    _osd_elements.update({
-        "osd_bg": osd_bg,
-        "osd_quarter": osd_quarter,
-        "osd_home": osd_home,
-        "osd_away": osd_away,
-        "osd_score": osd_score,
-        "osd_clock": osd_clock,
-        "osd_fouls": osd_fouls,
-        "osd_milestone_player": osd_milestone_player,
-        "osd_milestone_text": osd_milestone_text,
-    })
+    _osd_elements.update(rtmp.osd_map())
 
-    _enc_stream = enc
+    _enc_stream = rtmp.enc
     _selector = selector
     _current_active_camera = _normalize_camera(cfg.get("activeCamera", "cam2"), set(_selector_pads))
     _switch_active_camera(_current_active_camera)
