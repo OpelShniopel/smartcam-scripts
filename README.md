@@ -39,13 +39,18 @@ restart exit codes.
 
 The main process publishes:
 
-- Clean RTSP/WebRTC streams:
+- Clean streams:
+    - `http://<jetson-ip>:8889/camera0_clean`
+    - `http://<jetson-ip>:8889/camera2_clean`
     - `rtsp://<jetson-ip>:8554/camera0_clean`
     - `rtsp://<jetson-ip>:8554/camera2_clean`
-- AI/debug RTSP/WebRTC streams:
+- AI/debug streams:
+    - `http://<jetson-ip>:8889/camera0_ai`
+    - `http://<jetson-ip>:8889/camera2_ai` when `ENABLE_CAM2_AI` is enabled.
     - `rtsp://<jetson-ip>:8554/camera0_ai`
-    - `rtsp://<jetson-ip>:8554/camera2_ai`
-- Internal CAM2 stream for the RTMP worker:
+    - `rtsp://<jetson-ip>:8554/camera2_ai` when `ENABLE_CAM2_AI` is enabled.
+- Internal RTSP camera streams for the RTMP worker:
+    - `rtsp://<jetson-ip>:8554/camera0_stream`
     - `rtsp://<jetson-ip>:8554/camera2_stream`
 - Local HTTP debug API:
     - `GET http://127.0.0.1:9101/status`
@@ -65,9 +70,11 @@ curl -X POST http://127.0.0.1:9101/score \
 
 ## RTMP streaming
 
-The main pipeline creates the internal `camera2_stream` feed. RTMP forwarding is
-handled by a separate worker so RTMP failures do not take down the camera/AI
-pipeline.
+The main pipeline creates internal `camera0_stream` and `camera2_stream` feeds.
+RTMP forwarding is handled by a separate worker so RTMP failures do not take down
+the camera/AI pipeline. The worker defaults to CAM2 and can switch between
+available camera feeds through `stream_worker_config.json` or the Go bridge
+`switch_cam` command.
 
 Normal flow:
 
@@ -76,8 +83,8 @@ Normal flow:
    `start_stream rtmp://a.rtmp.youtube.com/live2/stream-key`
 3. `pipeline.py` writes `stream.conf` and starts `run_stream_worker.py`.
 4. `run_stream_worker.py` restarts `stream_worker.py` if the RTMP worker fails.
-5. `stream_worker.py` reads `rtsp://127.0.0.1:8554/camera2_stream`, applies the
-   scoreboard overlay, and publishes to RTMP.
+5. `stream_worker.py` reads the active internal RTSP feed, applies the scoreboard
+   overlay, and publishes to RTMP.
 
 The scoreboard OSD is hidden unless OSD is enabled from devtablet. To see the
 OSD graphics in the RTMP stream, send:
@@ -98,6 +105,13 @@ To stop RTMP streaming from devtablet, send:
 
 ```text
 stop_stream
+```
+
+To switch the RTMP source, send one of:
+
+```text
+switch_cam cam0
+switch_cam cam2
 ```
 
 For manual debugging only, replacing `stream.conf` with `# disabled` prevents
@@ -130,7 +144,8 @@ These files are created or updated while the system runs:
 
 - `stream.conf`: RTMP URL, or `# disabled`.
 - `score_state.json`: persisted score and overlay visibility.
-- `stream_worker_config.json`: RTMP worker settings such as `bitrateKbps`.
+- `stream_worker_config.json`: RTMP worker settings such as `bitrateKbps` and
+  `activeCamera`.
 - `stream_worker_status.json`: worker health and RTMP status.
 - `stream_worker.pid`: RTMP worker wrapper PID metadata.
 

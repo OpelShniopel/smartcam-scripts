@@ -2,8 +2,9 @@
 """
 DeepStream Basketball Detection Pipeline
 ==========================================
-Two cameras with clean RTSP + AI RTSP streams via MediaMTX.
-Optional live-streaming to YouTube/Twitch/Kick via RTMP with scoreboard overlay.
+Two cameras with clean RTSP streams and optional AI RTSP streams via MediaMTX.
+Optional live-streaming to YouTube/Twitch/Kick is handled by a separate RTMP
+worker with scoreboard overlay.
 
 KNOWN ISSUES / HISTORY:
   - JetPack 6.2 + DeepStream 7.1 bug: cudaErrorIllegalAddress (700) in
@@ -14,7 +15,8 @@ KNOWN ISSUES / HISTORY:
   - nvdsosd process-mode=1 requires NVMM RGBA input — always insert
     nvvideoconvert before nvosd to convert NV12->RGBA.
   - cairooverlay was too slow (CPU BGRA conversion every frame). Replaced with
-    gdkpixbufoverlay (static PNG) + textoverlay x8 (dynamic text) on RTMP branch.
+    gdkpixbufoverlay (static PNG) + textoverlay x8 (dynamic text) in the RTMP
+    worker branch.
   - stream_status race: Go bridge may not be connected when stream_status fires
     (Python restarts faster than Go's 2s reconnect delay). Fix: cache the
     stream_status result and replay it when Go connects in _handle_go_connection.
@@ -22,18 +24,19 @@ KNOWN ISSUES / HISTORY:
 STREAM DESIGN:
   CAM0 + CAM2:
     - clean branch: 1080p high quality low latency → WebRTC tablet viewing
-    - AI branch:    720p with bounding boxes → debug only
-  CAM2 only:
-    - RTMP branch:  1080p → YouTube/Twitch/Kick with gdkpixbufoverlay + textoverlay scoreboard
+    - AI branch:    720p with bounding boxes when enabled → debug only
+    - stream branch: 1080p internal RTSP feed for the external RTMP worker
 
 SERVICES (for Go backend):
   Unix socket  /tmp/smartcam.sock  — bidirectional newline-delimited JSON
     Python -> Go: {"type":"detection", "camera":"CAM0", "frame":N, "timestamp":T, "detections":[...]}
-                  {"type":"state", "streaming":bool, "webrtc":{"cam0":"...","cam2":"..."}}
+                  {"type":"state", "streaming":bool, "stream_active_camera":"cam2",
+                   "webrtc":{...}, "internal_streams":{...}}
                   {"type":"stream_status", "active":bool, "error":"..."}
     Go -> Python: {"type":"cmd", "action":"start_stream", "rtmp_url":"rtmp://..."}
                   {"type":"cmd", "action":"stop_stream"}
                   {"type":"cmd", "action":"set_config", "bitrateKbps":N}
+                  {"type":"cmd", "action":"switch_cam", "camId":"cam0"|"cam2"}
                   {"type":"cmd", "action":"set_osd", "visible":bool}
                   {"type":"cmd", "action":"set_score", ...score fields...}
                   {"type":"ping"}
@@ -148,10 +151,6 @@ def _ai_enabled(cam_label: str) -> bool:
     return False
 
 
-# Mutable flag set by bus_call when an RTMP error triggers a stream-error exit.
-# Using a list so the nested bus_call closure can mutate it.
-_stream_error_exit: list[bool] = [False]
-
 # Clean branch encoder settings — tuned for low latency local WebRTC viewing
 CLEAN_BITRATE = 8000
 CLEAN_KEYINT = 15
@@ -174,14 +173,11 @@ RECORD_MUXER_FACTORY = "matroskamux"
 RECORD_FILE_EXTENSION = "mkv"
 RECORD_QUEUE_BUFFERS = 120
 
-# RTMP stream encoder settings — YouTube 1080p
+# Default RTMP bitrate for worker config and the legacy embedded RTMP branch.
 RTMP_BITRATE = 6800
 
-# Encoder references populated by build_pipeline() — used by set_config cmd
+# Encoder references populated by build_pipeline() and reported by /status.
 _encoders: dict[str, Gst.Element] = {}
-
-# RTMP stream verification timeout (seconds)
-RTMP_VERIFY_TIMEOUT_SEC = 15
 
 # ---------------------------------------------------------------------------
 # RTMP stream status tracking
@@ -226,30 +222,6 @@ def _get_cached_stream_status() -> dict | None:
     """Return the cached stream_status message, or None if not yet determined."""
     with _rtmp_status_lock:
         return _rtmp_status_cached
-
-
-def _rtmp_sink_pad_probe(_pad, _info, _user_data):
-    """
-    Pad probe on rtmpsink's sink pad. Fires on the first buffer reaching
-    the RTMP sink — means GStreamer did the RTMP handshake and is sending data.
-    """
-    _send_stream_status(active=True)
-    return Gst.PadProbeReturn.REMOVE
-
-
-def _rtmp_verify_timeout() -> bool:
-    """
-    GLib timeout callback. If no stream_status sent yet after
-    RTMP_VERIFY_TIMEOUT_SEC, report failure.
-    """
-    with _rtmp_status_lock:
-        already_sent = _rtmp_status_sent
-    if not already_sent:
-        _send_stream_status(
-            active=False,
-            error="RTMP connection timed out — no data flowing after %ds" % RTMP_VERIFY_TIMEOUT_SEC,
-        )
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1591,7 +1563,7 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
 
 
 # ---------------------------------------------------------------------------
-# Internal CAM2 stream branch for external RTMP worker
+# Internal camera stream branch for external RTMP worker
 # ---------------------------------------------------------------------------
 def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Element:
     enc = _build_simple_rtsp_encode_branch(
@@ -1611,7 +1583,7 @@ def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) ->
 
 
 # ---------------------------------------------------------------------------
-# RTMP stream branch
+# Legacy embedded RTMP stream branch. The main runtime now uses stream_worker.py.
 # ---------------------------------------------------------------------------
 def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | None, Gst.Element | None]:
     """Returns (enc_stream, rtmpsink)."""
@@ -1737,7 +1709,6 @@ def main():
     global _rtmp_status_sent, _rtmp_status_cached
     _rtmp_status_sent = False
     _rtmp_status_cached = None
-    _stream_error_exit[0] = False
 
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         os.environ.setdefault("DISPLAY", ":0")

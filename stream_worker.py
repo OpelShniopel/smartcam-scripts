@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Phase 1 RTMP worker v2
--------------------
-Reads the internal CAM2 RTSP feed from the main pipeline and forwards it to
-RTMP with scoreboard overlay. This worker is intentionally isolated so RTMP
-failures do not tear down the local camera/AI service.
+RTMP worker
+-----------
+Reads the selected internal camera RTSP feed from the main pipeline and forwards
+it to RTMP with scoreboard overlay. This worker is intentionally isolated so
+RTMP failures do not tear down the local camera/AI service.
 """
 
 from __future__ import annotations

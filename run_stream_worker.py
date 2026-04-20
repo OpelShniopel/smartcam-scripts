@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Crash-proof wrapper for the phase 1 RTMP worker."""
+"""Crash-proof wrapper for the RTMP worker."""
 
 from __future__ import annotations
 

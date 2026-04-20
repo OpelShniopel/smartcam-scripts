@@ -8,10 +8,10 @@ don't kill the restart loop.
 Exit code convention from pipeline:
   0                           - clean shutdown, do NOT restart
   ProcessExitCode.RESTART     - intentional restart, relaunch immediately
-  ProcessExitCode.STREAM_ERROR - reserved stream error, restart without counting crash
+  ProcessExitCode.STREAM_ERROR - stream error path, restart without counting crash
   other                       - crash or error, relaunch after delay
 
-Usage:  python3 run_pipeline.py [--no-stream]
+Usage:  python3 run_pipeline.py
 """
 import os
 import signal
@@ -116,8 +116,9 @@ def main():
             continue
 
         if ret == ProcessExitCode.STREAM_ERROR:
-            print(f"\n[{_ts()}] *** Reserved stream error exit (ran {run_duration:.0f}s) — restarting ***")
-            # stream.conf already cleared by pipeline, reset crash count — not a crash
+            print(f"\n[{_ts()}] *** Stream error exit (ran {run_duration:.0f}s) — restarting ***")
+            # Reset crash count — stream connectivity errors are handled separately
+            # from main pipeline crashes.
             crash_count = 0
             continue
 
