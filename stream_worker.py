@@ -47,6 +47,12 @@ STATE_POLL_SEC = 1
 STALL_CHECK_SEC = 1
 STALL_TIMEOUT_SEC = 8
 
+# Terminal FPS metrics for the RTMP worker. Disable the global flag to silence
+# all worker FPS logs, or disable the RTMP flag to keep future metrics available.
+ENABLE_TERMINAL_FPS_METRICS = True
+ENABLE_RTMP_FPS_METRICS = True
+TERMINAL_FPS_INTERVAL_SEC = 5
+
 _loop: GLib.MainLoop | None = None
 _status_lock = threading.Lock()
 _status_payload: dict = {
@@ -61,6 +67,8 @@ _worker_state: dict = {
 }
 _activity_lock = threading.Lock()
 _last_buffer_monotonic: float = 0.0
+_fps_lock = threading.Lock()
+_rtmp_fps_frames = 0
 _stall_triggered = False
 _exit_code = 0
 _last_score_state: dict | None = None
@@ -316,9 +324,35 @@ def _get_last_buffer_activity() -> float:
         return _last_buffer_monotonic
 
 
+def _count_rtmp_fps_frame() -> None:
+    global _rtmp_fps_frames
+    if not (ENABLE_TERMINAL_FPS_METRICS and ENABLE_RTMP_FPS_METRICS):
+        return
+    with _fps_lock:
+        _rtmp_fps_frames += 1
+
+
 def _activity_probe(_pad, _info, _user_data):
     _mark_buffer_activity()
+    _count_rtmp_fps_frame()
     return Gst.PadProbeReturn.OK
+
+
+def _rtmp_fps_report() -> bool:
+    global _rtmp_fps_frames
+    if not (ENABLE_TERMINAL_FPS_METRICS and ENABLE_RTMP_FPS_METRICS):
+        return True
+
+    with _fps_lock:
+        frames = _rtmp_fps_frames
+        _rtmp_fps_frames = 0
+
+    if not _worker_state["stream_status_sent"] or frames <= 0:
+        return True
+
+    fps = frames / TERMINAL_FPS_INTERVAL_SEC
+    print(f"[fps] RTMP {_current_active_camera}: {fps:.1f} fps")
+    return True
 
 
 def _stall_check() -> bool:
@@ -581,6 +615,8 @@ def main() -> None:
     GLib.timeout_add_seconds(STALL_CHECK_SEC, _stall_check)
     GLib.timeout_add_seconds(STATE_POLL_SEC, _poll_score_state)
     GLib.timeout_add_seconds(CONFIG_POLL_SEC, _poll_worker_config)
+    if ENABLE_TERMINAL_FPS_METRICS and ENABLE_RTMP_FPS_METRICS:
+        GLib.timeout_add_seconds(TERMINAL_FPS_INTERVAL_SEC, _rtmp_fps_report)
 
     def _signal_handler(_sig, _frame):
         if _loop is not None:

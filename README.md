@@ -138,6 +138,17 @@ For OSD/scoreboard graphics work, start with `stream_worker.py`:
 - `_update_overlay(...)`: maps `score_state.json` fields to overlay text and
   visibility.
 
+For terminal FPS logs:
+
+- `ENABLE_TERMINAL_FPS_METRICS` in `pipeline.py`: enables or disables main
+  pipeline FPS logs.
+- `ENABLE_AI_FPS_METRICS` in `pipeline.py`: prints FPS only for enabled AI
+  branches that are receiving frames.
+- `ENABLE_TERMINAL_FPS_METRICS` in `stream_worker.py`: enables or disables RTMP
+  worker FPS logs.
+- `ENABLE_RTMP_FPS_METRICS` in `stream_worker.py`: prints outbound RTMP FPS for
+  the active stream camera.
+
 ## Runtime-generated files
 
 These files are created or updated while the system runs:

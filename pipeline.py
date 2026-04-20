@@ -131,6 +131,12 @@ ENABLE_AI_GLOBAL = True
 ENABLE_CAM0_AI = True
 ENABLE_CAM2_AI = False
 
+# Terminal FPS metrics. Disable the global flag to silence all main-pipeline
+# FPS logs, or disable the AI flag to keep other future FPS metrics available.
+ENABLE_TERMINAL_FPS_METRICS = True
+ENABLE_AI_FPS_METRICS = True
+TERMINAL_FPS_INTERVAL_SEC = 5
+
 
 def _cam_enabled(cam_label: str) -> bool:
     cam = str(cam_label).strip().upper()
@@ -232,11 +238,21 @@ _fps_counters: dict[str, int] = {"CAM0": 0, "CAM2": 0}
 _fps_lock = threading.Lock()
 
 
+def _ai_fps_metric_enabled(cam_label: str) -> bool:
+    return (
+        ENABLE_TERMINAL_FPS_METRICS
+        and ENABLE_AI_FPS_METRICS
+        and _ai_enabled(cam_label)
+    )
+
+
 def _fps_report() -> bool:
     with _fps_lock:
         for cam, count in _fps_counters.items():
-            print(f"[fps] {cam}: {count / 5:.1f} fps")
             _fps_counters[cam] = 0
+            if not _ai_fps_metric_enabled(cam) or count <= 0:
+                continue
+            print(f"[fps] {cam} AI: {count / TERMINAL_FPS_INTERVAL_SEC:.1f} fps")
     return True
 
 
@@ -1254,10 +1270,10 @@ def pgie_src_pad_buffer_probe(_pad, info, cam_label):
         except StopIteration:
             break
 
-        # Count real pipeline FPS even if we skip detection work
-        with _fps_lock:
-            if cam_label in _fps_counters:
-                _fps_counters[cam_label] += 1
+        if _ai_fps_metric_enabled(cam_label):
+            with _fps_lock:
+                if cam_label in _fps_counters:
+                    _fps_counters[cam_label] += 1
 
         # AI disabled for this camera -> do nothing else, but keep pipeline healthy
         if not _ai_enabled(cam_label):
@@ -1748,7 +1764,8 @@ def main():
     bus.add_signal_watch()
     bus.connect("message", bus_call, loop)
 
-    GLib.timeout_add_seconds(5, _fps_report)
+    if ENABLE_TERMINAL_FPS_METRICS and ENABLE_AI_FPS_METRICS:
+        GLib.timeout_add_seconds(TERMINAL_FPS_INTERVAL_SEC, _fps_report)
     GLib.timeout_add_seconds(1, _poll_stream_worker_status)
 
     print("Starting pipeline ...")
