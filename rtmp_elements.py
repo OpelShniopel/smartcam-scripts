@@ -168,7 +168,7 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         elements.osd_away,
         "AWAY",
         xpos=0.232,
-        ypos=0.928,
+        ypos=0.927,
         font="Sans Bold 17",
         color=0xFFFFFFFF,
     )
