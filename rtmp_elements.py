@@ -210,17 +210,17 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
     setup_text_overlay(
         elements.osd_milestone_player,
         "",
-        xpos=0.350,
-        ypos=0.820,
-        font="Sans Bold 24",
-        color=0xFFD916FF,
+        xpos=0.200,
+        ypos=0.755,
+        font="Sans Bold 14",
+        color=0xFF6B00FF,
     )
     setup_text_overlay(
         elements.osd_milestone_text,
         "",
-        xpos=0.350,
-        ypos=0.840,
-        font="Sans Bold 18",
+        xpos=0.200,
+        ypos=0.790,
+        font="Sans Bold 20",
         color=0xFFFFFFFF,
     )
 
@@ -346,10 +346,10 @@ def update_milestone_overlays(
     set_overlay_text(
         player_element,
         True,
-        str(milestone.get("player_name", "")),
+        str(milestone.get("milestone_name", "")).upper(),
     )
     set_overlay_text(
         text_element,
         True,
-        f"{milestone.get('milestone_name', '')}: {milestone.get('value_achieved', 0)}",
+        f"{milestone.get('player_name', '')} \u2014 {milestone.get('value_achieved', 0)} PTS",
     )
