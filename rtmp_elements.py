@@ -234,10 +234,10 @@ def foul_png_path(team: str, count: int) -> str | None:
 
 def configure_foul_bars(elements: RtmpElements) -> None:
     for bar in (elements.osd_home_fouls_bar, elements.osd_away_fouls_bar):
-        bar.set_property("offset-x", 20)
-        bar.set_property("offset-y", 965)
-        bar.set_property("overlay-width", 660)
-        bar.set_property("overlay-height", 100)
+        bar.set_property("offset-x", SCOREBOARD_OFFSET_X)
+        bar.set_property("offset-y", SCOREBOARD_OFFSET_Y)
+        bar.set_property("overlay-width", SCOREBOARD_W)
+        bar.set_property("overlay-height", SCOREBOARD_H)
         bar.set_property("alpha", 0.0)
 
 
