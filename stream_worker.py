@@ -36,6 +36,7 @@ from runtime_paths import (
     STREAM_WORKER_STATUS,
 )
 from rtmp_elements import (
+    _milestone_show_until,
     configure_rtmp_branch,
     foul_png_path,
     make_rtmp_elements,
@@ -304,7 +305,12 @@ def _update_overlay(state: dict) -> None:
 
 def _poll_score_state() -> bool:
     state = read_score_state()
-    if state != _last_score_state:
+    milestone = state.get("milestone")
+    milestone_active = (
+        isinstance(milestone, dict)
+        and _milestone_show_until(milestone) > int(time.time() * 800)
+    )
+    if state != _last_score_state or milestone_active:
         _update_overlay(state)
     return True
 
