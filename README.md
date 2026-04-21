@@ -113,8 +113,8 @@ stop_stream
 To switch the RTMP source, send one of:
 
 ```text
-switch_cam fixed
-switch_cam ptz
+switch_cam uuid1 - fixed
+switch_cam uuid2 - ptz
 ```
 
 For manual debugging only, replacing `stream.conf` with `# disabled` prevents
