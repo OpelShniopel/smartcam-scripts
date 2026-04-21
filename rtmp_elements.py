@@ -14,10 +14,10 @@ RTMP_THREADS = 2
 RTMP_PRESET = "ultrafast"
 RTMP_TUNE = "zerolatency"
 
-SCOREBOARD_W = 410
-SCOREBOARD_H = 129
-SCOREBOARD_OFFSET_X = 755
-SCOREBOARD_OFFSET_Y = 931
+SCOREBOARD_W = 500
+SCOREBOARD_H = 100
+SCOREBOARD_OFFSET_X = 100
+SCOREBOARD_OFFSET_Y = 920
 
 
 @dataclass
@@ -159,16 +159,18 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
     setup_text_overlay(
         elements.osd_home,
         "HOME",
-        xpos=0.420,
-        ypos=0.876,
-        font="Sans Bold 16",
+        xpos=0.060,
+        ypos=0.900,
+        font="Sans Bold 17",
+        color=0xFFFFFFFF,
     )
     setup_text_overlay(
         elements.osd_away,
         "AWAY",
-        xpos=0.420,
-        ypos=0.920,
-        font="Sans Bold 16",
+        xpos=0.060,
+        ypos=0.930,
+        font="Sans Bold 17",
+        color=0xFFFFFFFF,
     )
     setup_text_overlay(
         elements.osd_score,
