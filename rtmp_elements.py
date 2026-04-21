@@ -180,16 +180,16 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
     setup_text_overlay(
         elements.osd_home_score,
         "0",
-        xpos=0.310,
-        ypos=0.870,
+        xpos=0.355,
+        ypos=0.873,
         font="Sans Bold 28",
         color=0xFFFFFFFF,
     )
     setup_text_overlay(
         elements.osd_away_score,
         "0",
-        xpos=0.310,
-        ypos=0.927,
+        xpos=0.355,
+        ypos=0.933,
         font="Sans Bold 28",
         color=0xFFFFFFFF,
     )
