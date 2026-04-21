@@ -315,7 +315,8 @@ def _update_osd_texts(state: dict) -> None:
 
     home = els.get("osd_home")
     away = els.get("osd_away")
-    score = els.get("osd_score")
+    home_score = els.get("osd_home_score")
+    away_score = els.get("osd_away_score")
     clock = els.get("osd_clock")
     quarter = els.get("osd_quarter")
     fouls = els.get("osd_fouls")
@@ -347,7 +348,7 @@ def _update_osd_texts(state: dict) -> None:
                     log_prefix="[score]",
                 ),
             )
-    update_score_clock_overlays(score, clock, visible, state)
+    update_score_clock_overlays(home_score, away_score, clock, visible, state)
     if fouls:
         fouls.set_property("silent", not visible)
         if visible:

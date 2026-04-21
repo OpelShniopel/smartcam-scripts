@@ -249,7 +249,8 @@ def _update_overlay(state: dict) -> None:
     quarter = els.get("osd_quarter")
     home = els.get("osd_home")
     away = els.get("osd_away")
-    score = els.get("osd_score")
+    home_score = els.get("osd_home_score")
+    away_score = els.get("osd_away_score")
     clock = els.get("osd_clock")
     fouls = els.get("osd_fouls")
     bg = els.get("osd_bg")
@@ -279,7 +280,7 @@ def _update_overlay(state: dict) -> None:
                     log_prefix="[worker]",
                 ),
             )
-    update_score_clock_overlays(score, clock, visible, state)
+    update_score_clock_overlays(home_score, away_score, clock, visible, state)
     if fouls:
         fouls.set_property("silent", not visible)
         if visible:

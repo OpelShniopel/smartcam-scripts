@@ -26,7 +26,8 @@ class RtmpElements:
     osd_quarter: Any
     osd_home: Any
     osd_away: Any
-    osd_score: Any
+    osd_home_score: Any
+    osd_away_score: Any
     osd_clock: Any
     osd_fouls: Any
     osd_milestone_player: Any
@@ -44,7 +45,8 @@ class RtmpElements:
             "osd_quarter": self.osd_quarter,
             "osd_home": self.osd_home,
             "osd_away": self.osd_away,
-            "osd_score": self.osd_score,
+            "osd_home_score": self.osd_home_score,
+            "osd_away_score": self.osd_away_score,
             "osd_clock": self.osd_clock,
             "osd_fouls": self.osd_fouls,
             "osd_milestone_player": self.osd_milestone_player,
@@ -57,7 +59,8 @@ class RtmpElements:
             self.osd_quarter,
             self.osd_home,
             self.osd_away,
-            self.osd_score,
+            self.osd_home_score,
+            self.osd_away_score,
             self.osd_clock,
             self.osd_fouls,
             self.osd_milestone_player,
@@ -76,7 +79,8 @@ class RtmpElements:
             self.osd_quarter,
             self.osd_home,
             self.osd_away,
-            self.osd_score,
+            self.osd_home_score,
+            self.osd_away_score,
             self.osd_clock,
             self.osd_fouls,
             self.osd_milestone_player,
@@ -92,7 +96,8 @@ def make_rtmp_elements(make_element: Callable[[str, str], Any]) -> RtmpElements:
         osd_quarter=make_element("textoverlay", "strm_osd_quarter"),
         osd_home=make_element("textoverlay", "strm_osd_home"),
         osd_away=make_element("textoverlay", "strm_osd_away"),
-        osd_score=make_element("textoverlay", "strm_osd_score"),
+        osd_home_score=make_element("textoverlay", "strm_osd_home_score"),
+        osd_away_score=make_element("textoverlay", "strm_osd_away_score"),
         osd_clock=make_element("textoverlay", "strm_osd_clock"),
         osd_fouls=make_element("textoverlay", "strm_osd_fouls"),
         osd_milestone_player=make_element(
@@ -173,12 +178,20 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         color=0xFFFFFFFF,
     )
     setup_text_overlay(
-        elements.osd_score,
-        "0 - 0",
-        xpos=0.560,
-        ypos=0.876,
-        font="Sans Bold 22",
-        color=0xFFD916FF,
+        elements.osd_home_score,
+        "0",
+        xpos=0.310,
+        ypos=0.870,
+        font="Sans Bold 28",
+        color=0xFFFFFFFF,
+    )
+    setup_text_overlay(
+        elements.osd_away_score,
+        "0",
+        xpos=0.310,
+        ypos=0.927,
+        font="Sans Bold 28",
+        color=0xFFFFFFFF,
     )
     setup_text_overlay(
         elements.osd_clock,
@@ -254,15 +267,21 @@ def set_overlay_text(element: Any | None, visible: bool, text: str) -> None:
 
 
 def update_score_clock_overlays(
-        score_element: Any | None,
+        home_score_element: Any | None,
+        away_score_element: Any | None,
         clock_element: Any | None,
         visible: bool,
         state: Mapping[str, Any],
 ) -> None:
     set_overlay_text(
-        score_element,
+        home_score_element,
         visible,
-        f"{state.get('home_points', 0)} - {state.get('away_points', 0)}",
+        str(state.get("home_points", 0)),
+    )
+    set_overlay_text(
+        away_score_element,
+        visible,
+        str(state.get("away_points", 0)),
     )
     set_overlay_text(
         clock_element,
