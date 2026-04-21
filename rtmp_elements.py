@@ -183,10 +183,10 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
     setup_text_overlay(
         elements.osd_clock,
         "10:00",
-        xpos=0.565,
-        ypos=0.865,
-        font="Sans Bold 18",
-        color=0xB2E5FFFF,
+        xpos=0.130,
+        ypos=0.933,
+        font="Sans Bold 20",
+        color=0xFFFFFFFF,
     )
     setup_text_overlay(
         elements.osd_fouls,
