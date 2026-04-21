@@ -80,6 +80,10 @@ _stall_triggered = False
 _exit_code = 0
 _last_score_state: dict | None = None
 _milestone_display_until: int = 0
+_milestone_alpha: float = 0.0
+_milestone_fading_in: bool = False
+_milestone_fading_out: bool = False
+_milestone_fade_active: bool = False
 _last_config: dict | None = None
 _enc_stream: Gst.Element | None = None
 _selector: Gst.Element | None = None
@@ -241,6 +245,39 @@ def _get_static_pad(el: Gst.Element, pad_name: str) -> Gst.Pad:
     return pad
 
 
+def _milestone_fade_step() -> bool:
+    global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
+
+    els = dict(_osd_elements)
+    player_el = els.get("osd_milestone_player")
+    text_el = els.get("osd_milestone_text")
+
+    if _milestone_fading_in:
+        _milestone_alpha = min(1.0, _milestone_alpha + 0.1)
+        if _milestone_alpha >= 1.0:
+            _milestone_fading_in = False
+    elif _milestone_fading_out:
+        _milestone_alpha = max(0.0, _milestone_alpha - 0.05)
+        if _milestone_alpha <= 0.0:
+            _milestone_fading_out = False
+            _milestone_fade_active = False
+            if player_el:
+                player_el.set_property("silent", True)
+            if text_el:
+                text_el.set_property("silent", True)
+            return False
+
+    a = int(_milestone_alpha * 255)
+    fg = (a << 24) | 0x00FFFFFF
+    outline = (a << 24) | 0x00000000
+    for el in (player_el, text_el):
+        if el:
+            el.set_property("color", fg)
+            el.set_property("outline-color", outline)
+
+    return True
+
+
 def _update_overlay(state: dict) -> None:
     global _last_score_state
     _last_score_state = dict(state)
@@ -301,8 +338,34 @@ def _update_overlay(state: dict) -> None:
             away_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
+    global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
     milestone_active = int(time.time() * 1000) < _milestone_display_until
-    update_milestone_overlays(milestone_player, milestone_text, state, force_visible=milestone_active)
+
+    if milestone_active:
+        if not _milestone_fade_active:
+            # Timer not running — start fresh fade in
+            _milestone_fading_in = True
+            _milestone_fading_out = False
+            _milestone_fade_active = True
+            _milestone_alpha = 0.0
+            update_milestone_overlays(milestone_player, milestone_text, state, force_visible=True)
+            if milestone_player:
+                milestone_player.set_property("color", 0x00FFFFFF)
+                milestone_player.set_property("outline-color", 0x00000000)
+            if milestone_text:
+                milestone_text.set_property("color", 0x00FFFFFF)
+                milestone_text.set_property("outline-color", 0x00000000)
+            GLib.timeout_add(100, _milestone_fade_step)
+        elif _milestone_fading_out:
+            # New milestone arrived during fade-out — reverse to fade in
+            _milestone_fading_in = True
+            _milestone_fading_out = False
+            update_milestone_overlays(milestone_player, milestone_text, state, force_visible=True)
+    elif _milestone_fade_active and not _milestone_fading_out:
+        _milestone_fading_in = False
+        _milestone_fading_out = True
+    elif not _milestone_fade_active:
+        update_milestone_overlays(milestone_player, milestone_text, state)
 
 
 def _poll_score_state() -> bool:
