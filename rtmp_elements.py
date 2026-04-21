@@ -328,7 +328,7 @@ def _milestone_show_until(milestone: Mapping[str, Any]) -> float:
     if isinstance(show_until, bool):
         return 0
     try:
-        return float(show_until)
+        return float(show_until) + 5000
     except (TypeError, ValueError):
         return 0
 
@@ -337,9 +337,10 @@ def update_milestone_overlays(
         player_element: Any | None,
         text_element: Any | None,
         state: Mapping[str, Any],
+        force_visible: bool = False,
 ) -> None:
     milestone = state.get("milestone")
-    show_milestone = (
+    show_milestone = force_visible or (
             isinstance(milestone, Mapping)
             and _milestone_show_until(milestone) > int(time.time() * 1000)
     )

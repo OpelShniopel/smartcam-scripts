@@ -79,6 +79,7 @@ _rtmp_fps_frames = 0
 _stall_triggered = False
 _exit_code = 0
 _last_score_state: dict | None = None
+_milestone_display_until: int = 0
 _last_config: dict | None = None
 _enc_stream: Gst.Element | None = None
 _selector: Gst.Element | None = None
@@ -300,16 +301,25 @@ def _update_overlay(state: dict) -> None:
             away_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
-    update_milestone_overlays(milestone_player, milestone_text, state)
+    milestone_active = int(time.time() * 1000) < _milestone_display_until
+    update_milestone_overlays(milestone_player, milestone_text, state, force_visible=milestone_active)
 
 
 def _poll_score_state() -> bool:
+    global _milestone_display_until
     state = read_score_state()
     milestone = state.get("milestone")
-    milestone_active = (
-        isinstance(milestone, dict)
-        and _milestone_show_until(milestone) > int(time.time() * 800)
-    )
+    now_ms = int(time.time() * 1000)
+
+    if isinstance(milestone, dict):
+        show_until = _milestone_show_until(milestone)
+        if show_until > 0 and _milestone_display_until == 0:
+            _milestone_display_until = now_ms + 10000
+        milestone_active = now_ms < _milestone_display_until
+    else:
+        _milestone_display_until = 0
+        milestone_active = False
+
     if state != _last_score_state or milestone_active:
         _update_overlay(state)
     return True
