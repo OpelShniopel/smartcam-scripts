@@ -317,6 +317,12 @@ def update_quarter_overlay(
     )
 
 
+MILESTONE_DISPLAY_NAMES = {
+    "PERSONAL_BEST_POINTS": "CAREER HIGH",
+    "Milestone": "CAREER HIGH"
+}
+
+
 def _milestone_show_until(milestone: Mapping[str, Any]) -> float:
     show_until = milestone.get("show_until", 0)
     if isinstance(show_until, bool):
@@ -343,13 +349,11 @@ def update_milestone_overlays(
         set_overlay_text(text_element, False, "")
         return
 
-    set_overlay_text(
-        player_element,
-        True,
-        str(milestone.get("milestone_name", "")).upper(),
-    )
+    raw = str(milestone.get("milestone_name", ""))
+    display = MILESTONE_DISPLAY_NAMES.get(raw, raw.replace("_", " "))
+    set_overlay_text(player_element, True, display)
     set_overlay_text(
         text_element,
         True,
-        f"{milestone.get('player_name', '')} \u2014 {milestone.get('value_achieved', 0)} PTS",
+        f"{milestone.get('player_name', '')}  {milestone.get('value_achieved', 0)} PTS",
     )
