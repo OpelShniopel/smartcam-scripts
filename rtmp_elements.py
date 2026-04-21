@@ -151,9 +151,9 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
     setup_text_overlay(
         elements.osd_quarter,
         "Q1",
-        xpos=0.397,
-        ypos=0.865,
-        font="Sans Bold 18",
+        xpos=0.073,
+        ypos=0.933,
+        font="Sans Bold 20",
         color=0xFFFFFFFF,
     )
     setup_text_overlay(
