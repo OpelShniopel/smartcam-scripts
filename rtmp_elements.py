@@ -212,8 +212,8 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         "",
         xpos=0.200,
         ypos=0.755,
-        font="Sans Bold 14",
-        color=0xFF6B00FF,
+        font="Sans Bold 20",
+        color=0xFFFFFFFF,
     )
     setup_text_overlay(
         elements.osd_milestone_text,
