@@ -37,6 +37,7 @@ from runtime_paths import (
 )
 from rtmp_elements import (
     configure_rtmp_branch,
+    foul_png_path,
     make_rtmp_elements,
     update_milestone_overlays,
     update_quarter_overlay,
@@ -252,7 +253,8 @@ def _update_overlay(state: dict) -> None:
     home_score = els.get("osd_home_score")
     away_score = els.get("osd_away_score")
     clock = els.get("osd_clock")
-    fouls = els.get("osd_fouls")
+    home_fouls_bar = els.get("osd_home_fouls_bar")
+    away_fouls_bar = els.get("osd_away_fouls_bar")
     bg = els.get("osd_bg")
     milestone_player = els.get("osd_milestone_player")
     milestone_text = els.get("osd_milestone_text")
@@ -281,15 +283,20 @@ def _update_overlay(state: dict) -> None:
                 ),
             )
     update_score_clock_overlays(home_score, away_score, clock, visible, state)
-    if fouls:
-        fouls.set_property("silent", not visible)
-        if visible:
-            fouls.set_property(
-                "text",
-                f"F:{state.get('home_fouls', 0)} T:{state.get('home_timeouts', 3)}"
-                f"          "
-                f"F:{state.get('away_fouls', 0)} T:{state.get('away_timeouts', 3)}",
-            )
+    if home_fouls_bar:
+        path = foul_png_path("home", state.get("home_fouls", 0))
+        if path is None:
+            home_fouls_bar.set_property("alpha", 0.0)
+        else:
+            home_fouls_bar.set_property("location", path)
+            home_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
+    if away_fouls_bar:
+        path = foul_png_path("away", state.get("away_fouls", 0))
+        if path is None:
+            away_fouls_bar.set_property("alpha", 0.0)
+        else:
+            away_fouls_bar.set_property("location", path)
+            away_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
     update_milestone_overlays(milestone_player, milestone_text, state)

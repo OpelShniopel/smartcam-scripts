@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from runtime_paths import SCOREBOARD_PNG
+from runtime_paths import SCOREBOARD_PNG, SCRIPT_DIR
 
 RTMP_KEYINT = 60
 RTMP_THREADS = 2
@@ -23,13 +24,14 @@ SCOREBOARD_OFFSET_Y = 900
 @dataclass
 class RtmpElements:
     osd_bg: Any
+    osd_home_fouls_bar: Any
+    osd_away_fouls_bar: Any
     osd_quarter: Any
     osd_home: Any
     osd_away: Any
     osd_home_score: Any
     osd_away_score: Any
     osd_clock: Any
-    osd_fouls: Any
     osd_milestone_player: Any
     osd_milestone_text: Any
     enc: Any
@@ -42,13 +44,14 @@ class RtmpElements:
     def osd_map(self) -> dict[str, Any]:
         return {
             "osd_bg": self.osd_bg,
+            "osd_home_fouls_bar": self.osd_home_fouls_bar,
+            "osd_away_fouls_bar": self.osd_away_fouls_bar,
             "osd_quarter": self.osd_quarter,
             "osd_home": self.osd_home,
             "osd_away": self.osd_away,
             "osd_home_score": self.osd_home_score,
             "osd_away_score": self.osd_away_score,
             "osd_clock": self.osd_clock,
-            "osd_fouls": self.osd_fouls,
             "osd_milestone_player": self.osd_milestone_player,
             "osd_milestone_text": self.osd_milestone_text,
         }
@@ -56,13 +59,14 @@ class RtmpElements:
     def base_elements(self) -> tuple[Any, ...]:
         return (
             self.osd_bg,
+            self.osd_home_fouls_bar,
+            self.osd_away_fouls_bar,
             self.osd_quarter,
             self.osd_home,
             self.osd_away,
             self.osd_home_score,
             self.osd_away_score,
             self.osd_clock,
-            self.osd_fouls,
             self.osd_milestone_player,
             self.osd_milestone_text,
             self.enc,
@@ -76,13 +80,14 @@ class RtmpElements:
     def overlay_chain(self) -> tuple[Any, ...]:
         return (
             self.osd_bg,
+            self.osd_home_fouls_bar,
+            self.osd_away_fouls_bar,
             self.osd_quarter,
             self.osd_home,
             self.osd_away,
             self.osd_home_score,
             self.osd_away_score,
             self.osd_clock,
-            self.osd_fouls,
             self.osd_milestone_player,
             self.osd_milestone_text,
             self.enc,
@@ -93,13 +98,14 @@ class RtmpElements:
 def make_rtmp_elements(make_element: Callable[[str, str], Any]) -> RtmpElements:
     return RtmpElements(
         osd_bg=make_element("gdkpixbufoverlay", "strm_osd_bg"),
+        osd_home_fouls_bar=make_element("gdkpixbufoverlay", "strm_osd_home_fouls_bar"),
+        osd_away_fouls_bar=make_element("gdkpixbufoverlay", "strm_osd_away_fouls_bar"),
         osd_quarter=make_element("textoverlay", "strm_osd_quarter"),
         osd_home=make_element("textoverlay", "strm_osd_home"),
         osd_away=make_element("textoverlay", "strm_osd_away"),
         osd_home_score=make_element("textoverlay", "strm_osd_home_score"),
         osd_away_score=make_element("textoverlay", "strm_osd_away_score"),
         osd_clock=make_element("textoverlay", "strm_osd_clock"),
-        osd_fouls=make_element("textoverlay", "strm_osd_fouls"),
         osd_milestone_player=make_element(
             "textoverlay",
             "strm_osd_milestone_player",
@@ -202,14 +208,6 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         color=0xFFFFFFFF,
     )
     setup_text_overlay(
-        elements.osd_fouls,
-        "",
-        xpos=0.420,
-        ypos=0.950,
-        font="Sans 12",
-        color=0xA6A6A6FF,
-    )
-    setup_text_overlay(
         elements.osd_milestone_player,
         "",
         xpos=0.350,
@@ -225,6 +223,22 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         font="Sans Bold 18",
         color=0xFFFFFFFF,
     )
+
+
+def foul_png_path(team: str, count: int) -> str | None:
+    if count <= 0:
+        return None
+    count = min(count, 5)
+    return os.path.join(SCRIPT_DIR, f"fouls_{team}_{count}.png")
+
+
+def configure_foul_bars(elements: RtmpElements) -> None:
+    for bar in (elements.osd_home_fouls_bar, elements.osd_away_fouls_bar):
+        bar.set_property("offset-x", 20)
+        bar.set_property("offset-y", 965)
+        bar.set_property("overlay-width", 660)
+        bar.set_property("overlay-height", 100)
+        bar.set_property("alpha", 0.0)
 
 
 def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
@@ -253,6 +267,7 @@ def configure_rtmp_branch(
 ) -> None:
     configure_leaky_queue(queue_element)
     configure_scoreboard_background(elements.osd_bg)
+    configure_foul_bars(elements)
     configure_scoreboard_texts(elements)
     configure_rtmp_encoder(elements.enc, bitrate)
     configure_rtmp_output(elements, rtmp_url)
