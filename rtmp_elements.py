@@ -15,10 +15,18 @@ RTMP_THREADS = 2
 RTMP_PRESET = "ultrafast"
 RTMP_TUNE = "zerolatency"
 
+RTMP_OVERLAY_W = 1920
+RTMP_OVERLAY_H = 1080
+
 SCOREBOARD_W = 650
 SCOREBOARD_H = 130
 SCOREBOARD_OFFSET_X = 100
 SCOREBOARD_OFFSET_Y = 900
+
+TEXT_HALIGN_LEFT = 0
+TEXT_HALIGN_POSITION = 4
+TEXT_VALIGN_TOP = 2
+TEXT_VALIGN_POSITION = 3
 
 
 @dataclass
@@ -279,13 +287,20 @@ def setup_text_overlay(
         font: str = "Sans Bold 20",
         color: int = 0xFFFFFFFF,
         shadow: bool = True,
+        anchor_top_left: bool = False,
 ) -> None:
     element.set_property("text", text)
     element.set_property("font-desc", font)
-    element.set_property("halignment", 4)
-    element.set_property("valignment", 3)
-    element.set_property("xpos", xpos)
-    element.set_property("ypos", ypos)
+    if anchor_top_left:
+        element.set_property("halignment", TEXT_HALIGN_LEFT)
+        element.set_property("valignment", TEXT_VALIGN_TOP)
+        element.set_property("xpad", round(RTMP_OVERLAY_W * xpos))
+        element.set_property("ypad", round(RTMP_OVERLAY_H * ypos))
+    else:
+        element.set_property("halignment", TEXT_HALIGN_POSITION)
+        element.set_property("valignment", TEXT_VALIGN_POSITION)
+        element.set_property("xpos", xpos)
+        element.set_property("ypos", ypos)
     element.set_property("color", color)
     element.set_property("draw-shadow", shadow)
     element.set_property("auto-resize", False)
@@ -492,13 +507,13 @@ def configure_timeout_overlay(elements: RtmpElements) -> None:
     setup_text_overlay(elements.osd_timeout_away_blk,  "", xpos=0.640, ypos=0.565, font="Sans 16",      color=0xCCCCCCFF)
     setup_text_overlay(elements.osd_timeout_away_foul, "", xpos=0.640, ypos=0.610, font="Sans 16",      color=0xCCCCCCFF)
 
-    setup_text_overlay(elements.osd_timeout_player_h1, "", xpos=0.370, ypos=0.740, font="Sans Bold 15", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_player_h2, "", xpos=0.370, ypos=0.800, font="Sans Bold 15", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_player_h3, "", xpos=0.370, ypos=0.860, font="Sans Bold 15", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_player_h1, "", xpos=0.270, ypos=0.740, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_h2, "", xpos=0.270, ypos=0.800, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_h3, "", xpos=0.270, ypos=0.860, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
 
-    setup_text_overlay(elements.osd_timeout_player_a1, "", xpos=0.640, ypos=0.740, font="Sans Bold 15", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_player_a2, "", xpos=0.640, ypos=0.800, font="Sans Bold 15", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_player_a3, "", xpos=0.640, ypos=0.860, font="Sans Bold 15", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_player_a1, "", xpos=0.515, ypos=0.740, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_a2, "", xpos=0.515, ypos=0.800, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_a3, "", xpos=0.515, ypos=0.860, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
 
 
 def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
