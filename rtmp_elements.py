@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from runtime_paths import SCOREBOARD_PNG, SCRIPT_DIR
+from runtime_paths import SCOREBOARD_PNG, SCRIPT_DIR, TIMEOUT_BG_PNG
 
 RTMP_KEYINT = 60
 RTMP_THREADS = 2
@@ -34,6 +34,33 @@ class RtmpElements:
     osd_clock: Any
     osd_milestone_player: Any
     osd_milestone_text: Any
+    osd_timeout_bg: Any
+    osd_timeout_header: Any
+    osd_timeout_calling: Any
+    osd_timeout_home_name: Any
+    osd_timeout_home_pts: Any
+    osd_timeout_home_fg: Any
+    osd_timeout_home_3p: Any
+    osd_timeout_home_reb: Any
+    osd_timeout_home_ast: Any
+    osd_timeout_home_stl: Any
+    osd_timeout_home_blk: Any
+    osd_timeout_home_foul: Any
+    osd_timeout_away_name: Any
+    osd_timeout_away_pts: Any
+    osd_timeout_away_fg: Any
+    osd_timeout_away_3p: Any
+    osd_timeout_away_reb: Any
+    osd_timeout_away_ast: Any
+    osd_timeout_away_stl: Any
+    osd_timeout_away_blk: Any
+    osd_timeout_away_foul: Any
+    osd_timeout_player_h1: Any
+    osd_timeout_player_h2: Any
+    osd_timeout_player_h3: Any
+    osd_timeout_player_a1: Any
+    osd_timeout_player_a2: Any
+    osd_timeout_player_a3: Any
     enc: Any
     parse: Any
     flvmux: Any
@@ -54,6 +81,33 @@ class RtmpElements:
             "osd_clock": self.osd_clock,
             "osd_milestone_player": self.osd_milestone_player,
             "osd_milestone_text": self.osd_milestone_text,
+            "osd_timeout_bg": self.osd_timeout_bg,
+            "osd_timeout_header": self.osd_timeout_header,
+            "osd_timeout_calling": self.osd_timeout_calling,
+            "osd_timeout_home_name": self.osd_timeout_home_name,
+            "osd_timeout_home_pts": self.osd_timeout_home_pts,
+            "osd_timeout_home_fg": self.osd_timeout_home_fg,
+            "osd_timeout_home_3p": self.osd_timeout_home_3p,
+            "osd_timeout_home_reb": self.osd_timeout_home_reb,
+            "osd_timeout_home_ast": self.osd_timeout_home_ast,
+            "osd_timeout_home_stl": self.osd_timeout_home_stl,
+            "osd_timeout_home_blk": self.osd_timeout_home_blk,
+            "osd_timeout_home_foul": self.osd_timeout_home_foul,
+            "osd_timeout_away_name": self.osd_timeout_away_name,
+            "osd_timeout_away_pts": self.osd_timeout_away_pts,
+            "osd_timeout_away_fg": self.osd_timeout_away_fg,
+            "osd_timeout_away_3p": self.osd_timeout_away_3p,
+            "osd_timeout_away_reb": self.osd_timeout_away_reb,
+            "osd_timeout_away_ast": self.osd_timeout_away_ast,
+            "osd_timeout_away_stl": self.osd_timeout_away_stl,
+            "osd_timeout_away_blk": self.osd_timeout_away_blk,
+            "osd_timeout_away_foul": self.osd_timeout_away_foul,
+            "osd_timeout_player_h1": self.osd_timeout_player_h1,
+            "osd_timeout_player_h2": self.osd_timeout_player_h2,
+            "osd_timeout_player_h3": self.osd_timeout_player_h3,
+            "osd_timeout_player_a1": self.osd_timeout_player_a1,
+            "osd_timeout_player_a2": self.osd_timeout_player_a2,
+            "osd_timeout_player_a3": self.osd_timeout_player_a3,
         }
 
     def base_elements(self) -> tuple[Any, ...]:
@@ -69,6 +123,33 @@ class RtmpElements:
             self.osd_clock,
             self.osd_milestone_player,
             self.osd_milestone_text,
+            self.osd_timeout_bg,
+            self.osd_timeout_header,
+            self.osd_timeout_calling,
+            self.osd_timeout_home_name,
+            self.osd_timeout_home_pts,
+            self.osd_timeout_home_fg,
+            self.osd_timeout_home_3p,
+            self.osd_timeout_home_reb,
+            self.osd_timeout_home_ast,
+            self.osd_timeout_home_stl,
+            self.osd_timeout_home_blk,
+            self.osd_timeout_home_foul,
+            self.osd_timeout_away_name,
+            self.osd_timeout_away_pts,
+            self.osd_timeout_away_fg,
+            self.osd_timeout_away_3p,
+            self.osd_timeout_away_reb,
+            self.osd_timeout_away_ast,
+            self.osd_timeout_away_stl,
+            self.osd_timeout_away_blk,
+            self.osd_timeout_away_foul,
+            self.osd_timeout_player_h1,
+            self.osd_timeout_player_h2,
+            self.osd_timeout_player_h3,
+            self.osd_timeout_player_a1,
+            self.osd_timeout_player_a2,
+            self.osd_timeout_player_a3,
             self.enc,
             self.parse,
             self.flvmux,
@@ -90,6 +171,33 @@ class RtmpElements:
             self.osd_clock,
             self.osd_milestone_player,
             self.osd_milestone_text,
+            self.osd_timeout_bg,
+            self.osd_timeout_header,
+            self.osd_timeout_calling,
+            self.osd_timeout_home_name,
+            self.osd_timeout_home_pts,
+            self.osd_timeout_home_fg,
+            self.osd_timeout_home_3p,
+            self.osd_timeout_home_reb,
+            self.osd_timeout_home_ast,
+            self.osd_timeout_home_stl,
+            self.osd_timeout_home_blk,
+            self.osd_timeout_home_foul,
+            self.osd_timeout_away_name,
+            self.osd_timeout_away_pts,
+            self.osd_timeout_away_fg,
+            self.osd_timeout_away_3p,
+            self.osd_timeout_away_reb,
+            self.osd_timeout_away_ast,
+            self.osd_timeout_away_stl,
+            self.osd_timeout_away_blk,
+            self.osd_timeout_away_foul,
+            self.osd_timeout_player_h1,
+            self.osd_timeout_player_h2,
+            self.osd_timeout_player_h3,
+            self.osd_timeout_player_a1,
+            self.osd_timeout_player_a2,
+            self.osd_timeout_player_a3,
             self.enc,
             self.parse,
         )
@@ -111,6 +219,33 @@ def make_rtmp_elements(make_element: Callable[[str, str], Any]) -> RtmpElements:
             "strm_osd_milestone_player",
         ),
         osd_milestone_text=make_element("textoverlay", "strm_osd_milestone_text"),
+        osd_timeout_bg=make_element("gdkpixbufoverlay", "strm_osd_timeout_bg"),
+        osd_timeout_header=make_element("textoverlay", "strm_osd_timeout_header"),
+        osd_timeout_calling=make_element("textoverlay", "strm_osd_timeout_calling"),
+        osd_timeout_home_name=make_element("textoverlay", "strm_osd_timeout_home_name"),
+        osd_timeout_home_pts=make_element("textoverlay", "strm_osd_timeout_home_pts"),
+        osd_timeout_home_fg=make_element("textoverlay", "strm_osd_timeout_home_fg"),
+        osd_timeout_home_3p=make_element("textoverlay", "strm_osd_timeout_home_3p"),
+        osd_timeout_home_reb=make_element("textoverlay", "strm_osd_timeout_home_reb"),
+        osd_timeout_home_ast=make_element("textoverlay", "strm_osd_timeout_home_ast"),
+        osd_timeout_home_stl=make_element("textoverlay", "strm_osd_timeout_home_stl"),
+        osd_timeout_home_blk=make_element("textoverlay", "strm_osd_timeout_home_blk"),
+        osd_timeout_home_foul=make_element("textoverlay", "strm_osd_timeout_home_foul"),
+        osd_timeout_away_name=make_element("textoverlay", "strm_osd_timeout_away_name"),
+        osd_timeout_away_pts=make_element("textoverlay", "strm_osd_timeout_away_pts"),
+        osd_timeout_away_fg=make_element("textoverlay", "strm_osd_timeout_away_fg"),
+        osd_timeout_away_3p=make_element("textoverlay", "strm_osd_timeout_away_3p"),
+        osd_timeout_away_reb=make_element("textoverlay", "strm_osd_timeout_away_reb"),
+        osd_timeout_away_ast=make_element("textoverlay", "strm_osd_timeout_away_ast"),
+        osd_timeout_away_stl=make_element("textoverlay", "strm_osd_timeout_away_stl"),
+        osd_timeout_away_blk=make_element("textoverlay", "strm_osd_timeout_away_blk"),
+        osd_timeout_away_foul=make_element("textoverlay", "strm_osd_timeout_away_foul"),
+        osd_timeout_player_h1=make_element("textoverlay", "strm_osd_timeout_player_h1"),
+        osd_timeout_player_h2=make_element("textoverlay", "strm_osd_timeout_player_h2"),
+        osd_timeout_player_h3=make_element("textoverlay", "strm_osd_timeout_player_h3"),
+        osd_timeout_player_a1=make_element("textoverlay", "strm_osd_timeout_player_a1"),
+        osd_timeout_player_a2=make_element("textoverlay", "strm_osd_timeout_player_a2"),
+        osd_timeout_player_a3=make_element("textoverlay", "strm_osd_timeout_player_a3"),
         enc=make_element("x264enc", "strm_enc"),
         parse=make_element("h264parse", "strm_parse"),
         flvmux=make_element("flvmux", "strm_flvmux"),
@@ -241,6 +376,40 @@ def configure_foul_bars(elements: RtmpElements) -> None:
         bar.set_property("alpha", 0.0)
 
 
+def configure_timeout_overlay(elements: RtmpElements) -> None:
+    elements.osd_timeout_bg.set_property("location", TIMEOUT_BG_PNG)
+    elements.osd_timeout_bg.set_property("alpha", 0.0)
+    for el in (
+        elements.osd_timeout_header,
+        elements.osd_timeout_calling,
+        elements.osd_timeout_home_name,
+        elements.osd_timeout_home_pts,
+        elements.osd_timeout_home_fg,
+        elements.osd_timeout_home_3p,
+        elements.osd_timeout_home_reb,
+        elements.osd_timeout_home_ast,
+        elements.osd_timeout_home_stl,
+        elements.osd_timeout_home_blk,
+        elements.osd_timeout_home_foul,
+        elements.osd_timeout_away_name,
+        elements.osd_timeout_away_pts,
+        elements.osd_timeout_away_fg,
+        elements.osd_timeout_away_3p,
+        elements.osd_timeout_away_reb,
+        elements.osd_timeout_away_ast,
+        elements.osd_timeout_away_stl,
+        elements.osd_timeout_away_blk,
+        elements.osd_timeout_away_foul,
+        elements.osd_timeout_player_h1,
+        elements.osd_timeout_player_h2,
+        elements.osd_timeout_player_h3,
+        elements.osd_timeout_player_a1,
+        elements.osd_timeout_player_a2,
+        elements.osd_timeout_player_a3,
+    ):
+        el.set_property("silent", True)
+
+
 def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
     enc.set_property("pass", "cbr")
     enc.set_property("bitrate", bitrate)
@@ -269,6 +438,7 @@ def configure_rtmp_branch(
     configure_scoreboard_background(elements.osd_bg)
     configure_foul_bars(elements)
     configure_scoreboard_texts(elements)
+    configure_timeout_overlay(elements)
     configure_rtmp_encoder(elements.enc, bitrate)
     configure_rtmp_output(elements, rtmp_url)
 

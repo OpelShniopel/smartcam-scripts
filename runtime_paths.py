@@ -15,9 +15,11 @@ STREAM_WORKER_WRAPPER = os.path.join(SCRIPT_DIR, "run_stream_worker.py")
 STREAM_WORKER_PID_ROLE = "smartcam_stream_worker_wrapper"
 
 SCOREBOARD_PNG = os.path.join(SCRIPT_DIR, "scoreboard.png")
+TIMEOUT_BG_PNG = os.path.join(SCRIPT_DIR, "timeout_bg.png")
 
 __all__ = [
     "SCOREBOARD_PNG",
+    "TIMEOUT_BG_PNG",
     "SCORE_STATE_FILE",
     "SCRIPT_DIR",
     "STREAM_CONF",
