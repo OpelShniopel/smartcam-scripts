@@ -360,6 +360,88 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
     )
 
 
+TIMEOUT_TEXT_KEYS: tuple[str, ...] = (
+    "osd_timeout_header", "osd_timeout_calling",
+    "osd_timeout_home_name", "osd_timeout_home_pts",
+    "osd_timeout_home_fg", "osd_timeout_home_3p",
+    "osd_timeout_home_reb", "osd_timeout_home_ast",
+    "osd_timeout_home_stl", "osd_timeout_home_blk",
+    "osd_timeout_home_foul",
+    "osd_timeout_away_name", "osd_timeout_away_pts",
+    "osd_timeout_away_fg", "osd_timeout_away_3p",
+    "osd_timeout_away_reb", "osd_timeout_away_ast",
+    "osd_timeout_away_stl", "osd_timeout_away_blk",
+    "osd_timeout_away_foul",
+    "osd_timeout_player_h1", "osd_timeout_player_h2", "osd_timeout_player_h3",
+    "osd_timeout_player_a1", "osd_timeout_player_a2", "osd_timeout_player_a3",
+)
+
+
+def populate_timeout_texts(
+        timeout_stats: Mapping[str, Any],
+        state: Mapping[str, Any],
+        els: Mapping[str, Any],
+) -> None:
+    home_name = str(state.get("home_name", "HOME"))
+    away_name = str(state.get("away_name", "AWAY"))
+    calling = timeout_stats.get("calling_team", "")
+    home_stats = timeout_stats.get("home_stats") or {}
+    away_stats = timeout_stats.get("away_stats") or {}
+
+    def _set(key: str, text: str) -> None:
+        el = els.get(key)
+        if el:
+            el.set_property("text", text)
+
+    _set("osd_timeout_header", "TIMEOUT")
+    _set("osd_timeout_calling", home_name if calling == "home" else away_name)
+
+    _set("osd_timeout_home_name", home_name)
+    _set("osd_timeout_home_pts",  f"PTS  {home_stats.get('points', 0)}")
+    _set("osd_timeout_home_fg",   f"FG%  {home_stats.get('fg_pct', 0.0):.1f}")
+    _set("osd_timeout_home_3p",   f"3P%  {home_stats.get('tp_pct', 0.0):.1f}")
+    _set("osd_timeout_home_reb",  f"REB  {home_stats.get('rebounds', 0)}")
+    _set("osd_timeout_home_ast",  f"AST  {home_stats.get('assists', 0)}")
+    _set("osd_timeout_home_stl",  f"STL  {home_stats.get('steals', 0)}")
+    _set("osd_timeout_home_blk",  f"BLK  {home_stats.get('blocks', 0)}")
+    _set("osd_timeout_home_foul", f"FOULS  {home_stats.get('fouls', 0)}")
+
+    _set("osd_timeout_away_name", away_name)
+    _set("osd_timeout_away_pts",  f"PTS  {away_stats.get('points', 0)}")
+    _set("osd_timeout_away_fg",   f"FG%  {away_stats.get('fg_pct', 0.0):.1f}")
+    _set("osd_timeout_away_3p",   f"3P%  {away_stats.get('tp_pct', 0.0):.1f}")
+    _set("osd_timeout_away_reb",  f"REB  {away_stats.get('rebounds', 0)}")
+    _set("osd_timeout_away_ast",  f"AST  {away_stats.get('assists', 0)}")
+    _set("osd_timeout_away_stl",  f"STL  {away_stats.get('steals', 0)}")
+    _set("osd_timeout_away_blk",  f"BLK  {away_stats.get('blocks', 0)}")
+    _set("osd_timeout_away_foul", f"FOULS  {away_stats.get('fouls', 0)}")
+
+    home_players = timeout_stats.get("home_top_players") or []
+    away_players = timeout_stats.get("away_top_players") or []
+
+    for i, slot in enumerate(("h1", "h2", "h3")):
+        el = els.get(f"osd_timeout_player_{slot}")
+        if not el:
+            continue
+        if i < len(home_players):
+            p = home_players[i]
+            el.set_property("text", f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast  {p.get('fg_pct', 0.0):.0f}%")
+        else:
+            el.set_property("text", "")
+            el.set_property("silent", True)
+
+    for i, slot in enumerate(("a1", "a2", "a3")):
+        el = els.get(f"osd_timeout_player_{slot}")
+        if not el:
+            continue
+        if i < len(away_players):
+            p = away_players[i]
+            el.set_property("text", f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast  {p.get('fg_pct', 0.0):.0f}%")
+        else:
+            el.set_property("text", "")
+            el.set_property("silent", True)
+
+
 def foul_png_path(team: str, count: int) -> str | None:
     if count <= 0:
         return None

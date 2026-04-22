@@ -40,6 +40,8 @@ from rtmp_elements import (
     configure_rtmp_branch,
     foul_png_path,
     make_rtmp_elements,
+    populate_timeout_texts,
+    TIMEOUT_TEXT_KEYS,
     update_milestone_overlays,
     update_quarter_overlay,
     update_score_clock_overlays,
@@ -85,6 +87,20 @@ _milestone_alpha: float = 0.0
 _milestone_fading_in: bool = False
 _milestone_fading_out: bool = False
 _milestone_fade_active: bool = False
+_timeout_alpha: float = 0.0
+_timeout_fade_in: bool = False
+_timeout_fade_out: bool = False
+_timeout_fade_active: bool = False
+
+_SCOREBOARD_TEXT_KEYS: tuple[str, ...] = (
+    "osd_quarter", "osd_home", "osd_away",
+    "osd_home_score", "osd_away_score", "osd_clock",
+    "osd_milestone_player", "osd_milestone_text",
+)
+_SCOREBOARD_PIXEL_KEYS: tuple[str, ...] = (
+    "osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar",
+)
+
 _last_config: dict | None = None
 _enc_stream: Gst.Element | None = None
 _selector: Gst.Element | None = None
@@ -246,6 +262,75 @@ def _get_static_pad(el: Gst.Element, pad_name: str) -> Gst.Pad:
     return pad
 
 
+def _timeout_fade_step() -> bool:
+    global _timeout_alpha, _timeout_fade_in, _timeout_fade_out, _timeout_fade_active
+
+    els = dict(_osd_elements)
+    timeout_bg = els.get("osd_timeout_bg")
+
+    if _timeout_fade_in:
+        _timeout_alpha = min(1.0, _timeout_alpha + 0.05)
+        if timeout_bg:
+            timeout_bg.set_property("alpha", _timeout_alpha)
+        if _timeout_alpha > 0:
+            for key in TIMEOUT_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("silent", False)
+        if _timeout_alpha >= 1.0:
+            _timeout_fade_in = False
+    elif _timeout_fade_out:
+        _timeout_alpha = max(0.0, _timeout_alpha - 0.05)
+        if timeout_bg:
+            timeout_bg.set_property("alpha", _timeout_alpha)
+        if _timeout_alpha <= 0.0:
+            for key in TIMEOUT_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("silent", True)
+            if timeout_bg:
+                timeout_bg.set_property("alpha", 0.0)
+            _timeout_fade_out = False
+            _timeout_fade_active = False
+            if _last_score_state:
+                _update_overlay(_last_score_state)
+            return False
+
+    return True
+
+
+def update_timeout_overlay(state: dict, els: dict) -> None:
+    global _timeout_fade_in, _timeout_fade_out, _timeout_fade_active, _timeout_alpha
+
+    timeout_stats = state.get("timeout_stats")
+    now_ms = int(time.time() * 1000)
+    timeout_active = (
+        isinstance(timeout_stats, dict)
+        and timeout_stats.get("show_until", 0) > now_ms
+    )
+
+    if timeout_active:
+        if not _timeout_fade_active:
+            _timeout_fade_in = True
+            _timeout_fade_out = False
+            _timeout_fade_active = True
+            _timeout_alpha = 0.0
+            for key in _SCOREBOARD_PIXEL_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("alpha", 0.0)
+            for key in _SCOREBOARD_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("silent", True)
+            populate_timeout_texts(timeout_stats, state, els)
+            GLib.timeout_add(100, _timeout_fade_step)
+    else:
+        if _timeout_fade_active and not _timeout_fade_out:
+            _timeout_fade_in = False
+            _timeout_fade_out = True
+
+
 def _milestone_fade_step() -> bool:
     global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
 
@@ -372,6 +457,8 @@ def _update_overlay(state: dict) -> None:
     elif not _milestone_fade_active:
         update_milestone_overlays(milestone_player, milestone_text, state)
 
+    update_timeout_overlay(state, els)
+
 
 def _poll_score_state() -> bool:
     global _milestone_display_until, _last_milestone_show_until
@@ -390,7 +477,13 @@ def _poll_score_state() -> bool:
         _milestone_display_until = 0
         milestone_active = False
 
-    if state != _last_score_state or milestone_active:
+    timeout_stats = state.get("timeout_stats")
+    timeout_active = (
+        isinstance(timeout_stats, dict)
+        and timeout_stats.get("show_until", 0) > now_ms
+    )
+
+    if state != _last_score_state or milestone_active or timeout_active or _timeout_fade_active:
         _update_overlay(state)
     return True
 

@@ -97,6 +97,8 @@ from rtmp_elements import (
     configure_rtmp_branch,
     foul_png_path,
     make_rtmp_elements,
+    populate_timeout_texts,
+    TIMEOUT_TEXT_KEYS,
     update_milestone_overlays,
     update_quarter_overlay,
     update_score_clock_overlays,
@@ -368,6 +370,38 @@ def _update_osd_texts(state: dict) -> None:
     if bg:
         bg.set_property("alpha", 1.0 if visible else 0.0)
     update_milestone_overlays(milestone_player, milestone_text, state)
+
+    timeout_stats = state.get("timeout_stats")
+    now_ms = int(time.time() * 1000)
+    timeout_active = (
+        isinstance(timeout_stats, dict)
+        and timeout_stats.get("show_until", 0) > now_ms
+    )
+    timeout_bg = els.get("osd_timeout_bg")
+    if timeout_active:
+        for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
+            el = els.get(key)
+            if el:
+                el.set_property("alpha", 0.0)
+        for key in ("osd_quarter", "osd_home", "osd_away", "osd_home_score",
+                    "osd_away_score", "osd_clock", "osd_milestone_player", "osd_milestone_text"):
+            el = els.get(key)
+            if el:
+                el.set_property("silent", True)
+        populate_timeout_texts(timeout_stats, state, els)
+        if timeout_bg:
+            timeout_bg.set_property("alpha", 1.0)
+        for key in TIMEOUT_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("silent", False)
+    else:
+        if timeout_bg:
+            timeout_bg.set_property("alpha", 0.0)
+        for key in TIMEOUT_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("silent", True)
 
 
 def _apply_score_patch(data: dict) -> None:
