@@ -272,17 +272,32 @@ def _timeout_fade_step() -> bool:
         _timeout_alpha = min(1.0, _timeout_alpha + 0.05)
         if timeout_bg:
             timeout_bg.set_property("alpha", _timeout_alpha)
-        if _timeout_alpha > 0:
+        a = int(_timeout_alpha * 255)
+        fg = (a << 24) | 0x00FFFFFF
+        outline = (a << 24) | 0x00000000
+        for key in TIMEOUT_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("color", fg)
+                el.set_property("outline-color", outline)
+        if _timeout_alpha >= 1.0:
+            _timeout_fade_in = False
             for key in TIMEOUT_TEXT_KEYS:
                 el = els.get(key)
                 if el:
-                    el.set_property("silent", False)
-        if _timeout_alpha >= 1.0:
-            _timeout_fade_in = False
+                    el.set_property("draw-shadow", True)
     elif _timeout_fade_out:
         _timeout_alpha = max(0.0, _timeout_alpha - 0.05)
         if timeout_bg:
             timeout_bg.set_property("alpha", _timeout_alpha)
+        a = int(_timeout_alpha * 255)
+        fg = (a << 24) | 0x00FFFFFF
+        outline = (a << 24) | 0x00000000
+        for key in TIMEOUT_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("color", fg)
+                el.set_property("outline-color", outline)
         if _timeout_alpha <= 0.0:
             for key in TIMEOUT_TEXT_KEYS:
                 el = els.get(key)
@@ -324,11 +339,22 @@ def update_timeout_overlay(state: dict, els: dict) -> None:
                 if el:
                     el.set_property("silent", True)
             populate_timeout_texts(timeout_stats, state, els)
+            for key in TIMEOUT_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("draw-shadow", False)
+                    el.set_property("color", 0x00FFFFFF)
+                    el.set_property("outline-color", 0x00000000)
+                    el.set_property("silent", False)
             GLib.timeout_add(100, _timeout_fade_step)
     else:
         if _timeout_fade_active and not _timeout_fade_out:
             _timeout_fade_in = False
             _timeout_fade_out = True
+            for key in TIMEOUT_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("draw-shadow", False)
 
 
 def _milestone_fade_step() -> bool:
