@@ -416,29 +416,32 @@ def populate_timeout_texts(
     _set("osd_timeout_away_blk",  f"BLK  {away_stats.get('blocks', 0)}")
     _set("osd_timeout_away_foul", f"FOULS  {away_stats.get('fouls', 0)}")
 
-    home_players = timeout_stats.get("home_top_players") or []
-    away_players = timeout_stats.get("away_top_players") or []
+    top_players = timeout_stats.get("top_players") or []
+    home_team_id = home_stats.get("team_id")
+    away_team_id = away_stats.get("team_id")
+    home_players = [p for p in top_players if p.get("team_id") == home_team_id][:3]
+    away_players = [p for p in top_players if p.get("team_id") == away_team_id][:3]
 
-    for i, slot in enumerate(("h1", "h2", "h3")):
-        el = els.get(f"osd_timeout_player_{slot}")
+    for i, slot in enumerate(("osd_timeout_player_h1", "osd_timeout_player_h2", "osd_timeout_player_h3")):
+        el = els.get(slot)
         if not el:
             continue
         if i < len(home_players):
             p = home_players[i]
-            el.set_property("text", f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast  {p.get('fg_pct', 0.0):.0f}%")
+            el.set_property("text", f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast")
+            el.set_property("silent", False)
         else:
-            el.set_property("text", "")
             el.set_property("silent", True)
 
-    for i, slot in enumerate(("a1", "a2", "a3")):
-        el = els.get(f"osd_timeout_player_{slot}")
+    for i, slot in enumerate(("osd_timeout_player_a1", "osd_timeout_player_a2", "osd_timeout_player_a3")):
+        el = els.get(slot)
         if not el:
             continue
         if i < len(away_players):
             p = away_players[i]
-            el.set_property("text", f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast  {p.get('fg_pct', 0.0):.0f}%")
+            el.set_property("text", f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast")
+            el.set_property("silent", False)
         else:
-            el.set_property("text", "")
             el.set_property("silent", True)
 
 
