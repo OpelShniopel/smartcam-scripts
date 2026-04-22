@@ -408,13 +408,22 @@ def populate_timeout_texts(
         if el:
             el.set_property("text", text)
 
+    def _format_pct(value: Any) -> str:
+        try:
+            pct = float(value)
+        except (TypeError, ValueError):
+            pct = 0.0
+        if 0.0 <= pct <= 1.0:
+            pct *= 100.0
+        return f"{pct:.1f}%"
+
     calling_name = home_name if calling == "home" else away_name
     _set("osd_timeout_header", f"TIMEOUT  {calling_name}")
 
     _set("osd_timeout_home_name", home_name)
     _set("osd_timeout_home_pts",  f"PTS  {home_stats.get('points', 0)}")
-    _set("osd_timeout_home_fg",   f"FG%  {home_stats.get('fg_pct', 0.0):.1f}")
-    _set("osd_timeout_home_3p",   f"3P%  {home_stats.get('tp_pct', 0.0):.1f}")
+    _set("osd_timeout_home_fg",   f"FG%  {_format_pct(home_stats.get('fg_pct', 0.0))}")
+    _set("osd_timeout_home_3p",   f"3P%  {_format_pct(home_stats.get('tp_pct', 0.0))}")
     _set("osd_timeout_home_reb",  f"REB  {home_stats.get('rebounds', 0)}")
     _set("osd_timeout_home_ast",  f"AST  {home_stats.get('assists', 0)}")
     _set("osd_timeout_home_stl",  f"STL  {home_stats.get('steals', 0)}")
@@ -423,8 +432,8 @@ def populate_timeout_texts(
 
     _set("osd_timeout_away_name", away_name)
     _set("osd_timeout_away_pts",  f"PTS  {away_stats.get('points', 0)}")
-    _set("osd_timeout_away_fg",   f"FG%  {away_stats.get('fg_pct', 0.0):.1f}")
-    _set("osd_timeout_away_3p",   f"3P%  {away_stats.get('tp_pct', 0.0):.1f}")
+    _set("osd_timeout_away_fg",   f"FG%  {_format_pct(away_stats.get('fg_pct', 0.0))}")
+    _set("osd_timeout_away_3p",   f"3P%  {_format_pct(away_stats.get('tp_pct', 0.0))}")
     _set("osd_timeout_away_reb",  f"REB  {away_stats.get('rebounds', 0)}")
     _set("osd_timeout_away_ast",  f"AST  {away_stats.get('assists', 0)}")
     _set("osd_timeout_away_stl",  f"STL  {away_stats.get('steals', 0)}")
