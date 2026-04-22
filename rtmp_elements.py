@@ -377,37 +377,44 @@ def configure_foul_bars(elements: RtmpElements) -> None:
 
 
 def configure_timeout_overlay(elements: RtmpElements) -> None:
-    elements.osd_timeout_bg.set_property("location", TIMEOUT_BG_PNG)
-    elements.osd_timeout_bg.set_property("alpha", 0.0)
-    for el in (
-        elements.osd_timeout_header,
-        elements.osd_timeout_calling,
-        elements.osd_timeout_home_name,
-        elements.osd_timeout_home_pts,
-        elements.osd_timeout_home_fg,
-        elements.osd_timeout_home_3p,
-        elements.osd_timeout_home_reb,
-        elements.osd_timeout_home_ast,
-        elements.osd_timeout_home_stl,
-        elements.osd_timeout_home_blk,
-        elements.osd_timeout_home_foul,
-        elements.osd_timeout_away_name,
-        elements.osd_timeout_away_pts,
-        elements.osd_timeout_away_fg,
-        elements.osd_timeout_away_3p,
-        elements.osd_timeout_away_reb,
-        elements.osd_timeout_away_ast,
-        elements.osd_timeout_away_stl,
-        elements.osd_timeout_away_blk,
-        elements.osd_timeout_away_foul,
-        elements.osd_timeout_player_h1,
-        elements.osd_timeout_player_h2,
-        elements.osd_timeout_player_h3,
-        elements.osd_timeout_player_a1,
-        elements.osd_timeout_player_a2,
-        elements.osd_timeout_player_a3,
-    ):
-        el.set_property("silent", True)
+    bg = elements.osd_timeout_bg
+    bg.set_property("location", TIMEOUT_BG_PNG)
+    bg.set_property("offset-x", 510)
+    bg.set_property("offset-y", 110)
+    bg.set_property("overlay-width", 900)
+    bg.set_property("overlay-height", 860)
+    bg.set_property("alpha", 0.0)
+
+    setup_text_overlay(elements.osd_timeout_header,  "", xpos=0.380, ypos=0.075, font="Sans Bold 32", color=0xFF6B00FF)
+    setup_text_overlay(elements.osd_timeout_calling,  "", xpos=0.360, ypos=0.130, font="Sans Bold 24", color=0xFFFFFFFF)
+
+    setup_text_overlay(elements.osd_timeout_home_name, "", xpos=0.280, ypos=0.185, font="Sans Bold 20", color=0xFF6B00FF)
+    setup_text_overlay(elements.osd_timeout_home_pts,  "", xpos=0.280, ypos=0.250, font="Sans Bold 18", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_home_fg,   "", xpos=0.280, ypos=0.300, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_3p,   "", xpos=0.280, ypos=0.345, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_reb,  "", xpos=0.280, ypos=0.390, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_ast,  "", xpos=0.280, ypos=0.435, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_stl,  "", xpos=0.280, ypos=0.480, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_blk,  "", xpos=0.280, ypos=0.525, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_foul, "", xpos=0.280, ypos=0.570, font="Sans 16",      color=0xCCCCCCFF)
+
+    setup_text_overlay(elements.osd_timeout_away_name, "", xpos=0.550, ypos=0.185, font="Sans Bold 20", color=0xFF6B00FF)
+    setup_text_overlay(elements.osd_timeout_away_pts,  "", xpos=0.550, ypos=0.250, font="Sans Bold 18", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_away_fg,   "", xpos=0.550, ypos=0.300, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_3p,   "", xpos=0.550, ypos=0.345, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_reb,  "", xpos=0.550, ypos=0.390, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_ast,  "", xpos=0.550, ypos=0.435, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_stl,  "", xpos=0.550, ypos=0.480, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_blk,  "", xpos=0.550, ypos=0.525, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_foul, "", xpos=0.550, ypos=0.570, font="Sans 16",      color=0xCCCCCCFF)
+
+    setup_text_overlay(elements.osd_timeout_player_h1, "", xpos=0.280, ypos=0.700, font="Sans Bold 15", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_player_h2, "", xpos=0.280, ypos=0.760, font="Sans Bold 15", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_player_h3, "", xpos=0.280, ypos=0.820, font="Sans Bold 15", color=0xFFFFFFFF)
+
+    setup_text_overlay(elements.osd_timeout_player_a1, "", xpos=0.550, ypos=0.700, font="Sans Bold 15", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_player_a2, "", xpos=0.550, ypos=0.760, font="Sans Bold 15", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_player_a3, "", xpos=0.550, ypos=0.820, font="Sans Bold 15", color=0xFFFFFFFF)
 
 
 def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
