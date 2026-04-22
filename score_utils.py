@@ -13,6 +13,7 @@ DEFAULT_SCORE_STATE = {
     "game_id": 0,
     "updated_at": 0,
     "milestone": None,
+    "timeout_stats": None,
 }
 
 def default_score_state() -> dict:
