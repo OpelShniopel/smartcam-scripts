@@ -361,7 +361,7 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
 
 
 TIMEOUT_TEXT_KEYS: tuple[str, ...] = (
-    "osd_timeout_header", "osd_timeout_calling",
+    "osd_timeout_header",
     "osd_timeout_home_name", "osd_timeout_home_pts",
     "osd_timeout_home_fg", "osd_timeout_home_3p",
     "osd_timeout_home_reb", "osd_timeout_home_ast",
@@ -393,8 +393,8 @@ def populate_timeout_texts(
         if el:
             el.set_property("text", text)
 
-    _set("osd_timeout_header", "TIMEOUT")
-    _set("osd_timeout_calling", home_name if calling == "home" else away_name)
+    calling_name = home_name if calling == "home" else away_name
+    _set("osd_timeout_header", f"TIMEOUT  {calling_name}")
 
     _set("osd_timeout_home_name", home_name)
     _set("osd_timeout_home_pts",  f"PTS  {home_stats.get('points', 0)}")
@@ -467,8 +467,7 @@ def configure_timeout_overlay(elements: RtmpElements) -> None:
     bg.set_property("overlay-height", 860)
     bg.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_timeout_header,  "", xpos=0.340, ypos=0.137, font="Sans Bold 32", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_calling,  "", xpos=0.580, ypos=0.135, font="Sans Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_header,  "", xpos=0.510, ypos=0.138, font="Sans Bold 32", color=0xFFFFFFFF)
 
     setup_text_overlay(elements.osd_timeout_home_name, "", xpos=0.370, ypos=0.225, font="Sans Bold 20", color=0xFF6B00FF)
     setup_text_overlay(elements.osd_timeout_home_pts,  "", xpos=0.370, ypos=0.290, font="Sans Bold 18", color=0xFFFFFFFF)
