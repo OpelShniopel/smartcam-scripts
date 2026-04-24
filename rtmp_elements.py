@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from runtime_paths import SCOREBOARD_PNG, SCRIPT_DIR, TIMEOUT_BG_PNG
+from runtime_paths import BLITZBALL_ACTIVE_PNG, BLITZBALL_SCOREBOARD_PNG, SCOREBOARD_PNG, SCRIPT_DIR, TIMEOUT_BG_PNG
 
 RTMP_KEYINT = 60
 RTMP_THREADS = 2
@@ -69,6 +69,16 @@ class RtmpElements:
     osd_timeout_player_a1: Any
     osd_timeout_player_a2: Any
     osd_timeout_player_a3: Any
+    osd_blitz_bg: Any
+    osd_blitz_active: Any
+    osd_blitz_home_name: Any
+    osd_blitz_away_name: Any
+    osd_blitz_score: Any
+    osd_blitz_quarter: Any
+    osd_blitz_clock: Any
+    osd_blitz_indicator: Any
+    osd_blitz_home_streak: Any
+    osd_blitz_away_streak: Any
     enc: Any
     parse: Any
     flvmux: Any
@@ -116,6 +126,16 @@ class RtmpElements:
             "osd_timeout_player_a1": self.osd_timeout_player_a1,
             "osd_timeout_player_a2": self.osd_timeout_player_a2,
             "osd_timeout_player_a3": self.osd_timeout_player_a3,
+            "osd_blitz_bg": self.osd_blitz_bg,
+            "osd_blitz_active": self.osd_blitz_active,
+            "osd_blitz_home_name": self.osd_blitz_home_name,
+            "osd_blitz_away_name": self.osd_blitz_away_name,
+            "osd_blitz_score": self.osd_blitz_score,
+            "osd_blitz_quarter": self.osd_blitz_quarter,
+            "osd_blitz_clock": self.osd_blitz_clock,
+            "osd_blitz_indicator": self.osd_blitz_indicator,
+            "osd_blitz_home_streak": self.osd_blitz_home_streak,
+            "osd_blitz_away_streak": self.osd_blitz_away_streak,
         }
 
     def base_elements(self) -> tuple[Any, ...]:
@@ -158,6 +178,16 @@ class RtmpElements:
             self.osd_timeout_player_a1,
             self.osd_timeout_player_a2,
             self.osd_timeout_player_a3,
+            self.osd_blitz_bg,
+            self.osd_blitz_active,
+            self.osd_blitz_home_name,
+            self.osd_blitz_away_name,
+            self.osd_blitz_score,
+            self.osd_blitz_quarter,
+            self.osd_blitz_clock,
+            self.osd_blitz_indicator,
+            self.osd_blitz_home_streak,
+            self.osd_blitz_away_streak,
             self.enc,
             self.parse,
             self.flvmux,
@@ -206,6 +236,16 @@ class RtmpElements:
             self.osd_timeout_player_a1,
             self.osd_timeout_player_a2,
             self.osd_timeout_player_a3,
+            self.osd_blitz_bg,
+            self.osd_blitz_active,
+            self.osd_blitz_home_name,
+            self.osd_blitz_away_name,
+            self.osd_blitz_score,
+            self.osd_blitz_quarter,
+            self.osd_blitz_clock,
+            self.osd_blitz_indicator,
+            self.osd_blitz_home_streak,
+            self.osd_blitz_away_streak,
             self.enc,
             self.parse,
         )
@@ -254,6 +294,16 @@ def make_rtmp_elements(make_element: Callable[[str, str], Any]) -> RtmpElements:
         osd_timeout_player_a1=make_element("textoverlay", "strm_osd_timeout_player_a1"),
         osd_timeout_player_a2=make_element("textoverlay", "strm_osd_timeout_player_a2"),
         osd_timeout_player_a3=make_element("textoverlay", "strm_osd_timeout_player_a3"),
+        osd_blitz_bg=make_element("gdkpixbufoverlay", "strm_osd_blitz_bg"),
+        osd_blitz_active=make_element("gdkpixbufoverlay", "strm_osd_blitz_active"),
+        osd_blitz_home_name=make_element("textoverlay", "strm_osd_blitz_home_name"),
+        osd_blitz_away_name=make_element("textoverlay", "strm_osd_blitz_away_name"),
+        osd_blitz_score=make_element("textoverlay", "strm_osd_blitz_score"),
+        osd_blitz_quarter=make_element("textoverlay", "strm_osd_blitz_quarter"),
+        osd_blitz_clock=make_element("textoverlay", "strm_osd_blitz_clock"),
+        osd_blitz_indicator=make_element("textoverlay", "strm_osd_blitz_indicator"),
+        osd_blitz_home_streak=make_element("textoverlay", "strm_osd_blitz_home_streak"),
+        osd_blitz_away_streak=make_element("textoverlay", "strm_osd_blitz_away_streak"),
         enc=make_element("x264enc", "strm_enc"),
         parse=make_element("h264parse", "strm_parse"),
         flvmux=make_element("flvmux", "strm_flvmux"),
@@ -525,6 +575,129 @@ def configure_timeout_overlay(elements: RtmpElements) -> None:
     setup_text_overlay(elements.osd_timeout_player_a3, "", xpos=0.515, ypos=0.860, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
 
 
+BLITZ_TEXT_KEYS: tuple[str, ...] = (
+    "osd_blitz_home_name", "osd_blitz_away_name",
+    "osd_blitz_score", "osd_blitz_quarter", "osd_blitz_clock",
+    "osd_blitz_indicator", "osd_blitz_home_streak", "osd_blitz_away_streak",
+)
+BLITZ_PIXEL_KEYS: tuple[str, ...] = ("osd_blitz_bg", "osd_blitz_active")
+
+_BLITZ_SCOREBOARD_TEXT_KEYS: tuple[str, ...] = (
+    "osd_quarter", "osd_home", "osd_away",
+    "osd_home_score", "osd_away_score", "osd_clock",
+    "osd_milestone_player", "osd_milestone_text",
+)
+
+
+def configure_blitzball_overlay(elements: RtmpElements) -> None:
+    bg = elements.osd_blitz_bg
+    bg.set_property("location", BLITZBALL_SCOREBOARD_PNG)
+    bg.set_property("offset-x", 20)
+    bg.set_property("offset-y", 940)
+    bg.set_property("overlay-width", 660)
+    bg.set_property("overlay-height", 120)
+    bg.set_property("alpha", 0.0)
+
+    active = elements.osd_blitz_active
+    active.set_property("location", BLITZBALL_ACTIVE_PNG)
+    active.set_property("offset-x", 20)
+    active.set_property("offset-y", 940)
+    active.set_property("overlay-width", 660)
+    active.set_property("overlay-height", 120)
+    active.set_property("alpha", 0.0)
+
+    setup_text_overlay(elements.osd_blitz_home_name, "", xpos=0.060, ypos=0.880, font="Sans Bold 16", color=0x00BFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_name, "", xpos=0.060, ypos=0.920, font="Sans Bold 16", color=0xFFD700FF)
+    setup_text_overlay(elements.osd_blitz_score,     "", xpos=0.300, ypos=0.878, font="Sans Bold 28", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_quarter,   "", xpos=0.012, ypos=0.878, font="Sans Bold 18", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_clock,     "", xpos=0.360, ypos=0.878, font="Sans Bold 16", color=0xB2E5FFFF)
+    setup_text_overlay(elements.osd_blitz_indicator, "", xpos=0.150, ypos=0.860, font="Sans Bold 20", color=0xFFD700FF)
+    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.220, ypos=0.878, font="Sans Bold 18", color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.220, ypos=0.918, font="Sans Bold 18", color=0xFF4500FF)
+
+
+def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
+    """Update blitzball overlay. Returns True if blitz pulse should be active."""
+    sport_code = state.get("sport_code", "")
+
+    if sport_code != "BLITZBALL":
+        for key in BLITZ_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("silent", True)
+        for key in BLITZ_PIXEL_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("alpha", 0.0)
+        return False
+
+    # Hide regular scoreboard elements
+    osd_bg = els.get("osd_bg")
+    if osd_bg:
+        osd_bg.set_property("alpha", 0.0)
+    for key in ("osd_home_fouls_bar", "osd_away_fouls_bar"):
+        el = els.get(key)
+        if el:
+            el.set_property("alpha", 0.0)
+    for key in _BLITZ_SCOREBOARD_TEXT_KEYS:
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
+
+    visible = state.get("visible", False)
+    blitz_bg = els.get("osd_blitz_bg")
+    if blitz_bg:
+        blitz_bg.set_property("alpha", 1.0 if visible else 0.0)
+
+    if not visible:
+        for key in BLITZ_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("silent", True)
+        blitz_active_el = els.get("osd_blitz_active")
+        if blitz_active_el:
+            blitz_active_el.set_property("alpha", 0.0)
+        return False
+
+    home_name = str(state.get("home_name", "HOME"))
+    away_name = str(state.get("away_name", "AWAY"))
+
+    set_overlay_text(els.get("osd_blitz_home_name"), True, home_name)
+    set_overlay_text(els.get("osd_blitz_away_name"), True, away_name)
+    set_overlay_text(
+        els.get("osd_blitz_score"), True,
+        f"{state.get('home_points', 0)}\n{state.get('away_points', 0)}",
+    )
+
+    quarter = state.get("quarter", 1)
+    quarter_text = f"H{quarter}" if quarter in (1, 2) else f"Q{quarter}"
+    set_overlay_text(els.get("osd_blitz_quarter"), True, quarter_text)
+    set_overlay_text(els.get("osd_blitz_clock"), True, str(state.get("clock", "10:00")))
+
+    blitz_active = bool(state.get("blitz_active", False))
+    indicator_el = els.get("osd_blitz_indicator")
+    if blitz_active:
+        set_overlay_text(indicator_el, True, "⚡ BLITZ ZONE")
+    else:
+        blitz_active_el = els.get("osd_blitz_active")
+        if blitz_active_el:
+            blitz_active_el.set_property("alpha", 0.0)
+        set_overlay_text(indicator_el, False, "")
+
+    set_overlay_text(
+        els.get("osd_blitz_home_streak"),
+        bool(state.get("home_hot_streak", False)),
+        "🔥",
+    )
+    set_overlay_text(
+        els.get("osd_blitz_away_streak"),
+        bool(state.get("away_hot_streak", False)),
+        "🔥",
+    )
+
+    return blitz_active
+
+
 def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
     enc.set_property("pass", "cbr")
     enc.set_property("bitrate", bitrate)
@@ -554,6 +727,7 @@ def configure_rtmp_branch(
     configure_foul_bars(elements)
     configure_scoreboard_texts(elements)
     configure_timeout_overlay(elements)
+    configure_blitzball_overlay(elements)
     configure_rtmp_encoder(elements.enc, bitrate)
     configure_rtmp_output(elements, rtmp_url)
 

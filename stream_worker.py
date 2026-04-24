@@ -42,6 +42,7 @@ from rtmp_elements import (
     make_rtmp_elements,
     populate_timeout_texts,
     TIMEOUT_TEXT_KEYS,
+    update_blitzball_overlay,
     update_milestone_overlays,
     update_quarter_overlay,
     update_score_clock_overlays,
@@ -97,6 +98,9 @@ _pre_timeout_away_foul_alpha: float = 0.0
 _sb_timeout_alpha: float = 1.0   # scoreboard alpha during timeout transition
 _timeout_pause_ticks: int = 0    # countdown ticks for pause between phases
 TIMEOUT_TRANSITION_PAUSE_TICKS = 20  # 20 × 100 ms = 2 s
+
+_blitz_pulse_active: bool = False
+_blitz_pulse_alpha: float = 0.6
 
 _SCOREBOARD_TEXT_KEYS: tuple[str, ...] = (
     "osd_quarter", "osd_home", "osd_away",
@@ -271,6 +275,29 @@ def _get_static_pad(el: Gst.Element, pad_name: str) -> Gst.Pad:
     if not pad:
         raise RuntimeError(f"Unable to get pad {pad_name!r} from {el.get_name()}")
     return pad
+
+
+def _blitz_pulse_step() -> bool:
+    global _blitz_pulse_active, _blitz_pulse_alpha
+
+    if not _blitz_pulse_active:
+        return False
+
+    state = _last_score_state
+    if not (state and state.get("blitz_active", False) and state.get("sport_code") == "BLITZBALL"):
+        _blitz_pulse_active = False
+        els = dict(_osd_elements)
+        el = els.get("osd_blitz_active")
+        if el:
+            el.set_property("alpha", 0.0)
+        return False
+
+    _blitz_pulse_alpha = 1.0 if _blitz_pulse_alpha < 0.8 else 0.6
+    els = dict(_osd_elements)
+    el = els.get("osd_blitz_active")
+    if el:
+        el.set_property("alpha", _blitz_pulse_alpha)
+    return True
 
 
 def _timeout_fade_step() -> bool:
@@ -512,7 +539,7 @@ def _update_overlay(state: dict) -> None:
     if not els:
         return
 
-    if not _timeout_fade_active:
+    if not _timeout_fade_active and state.get("sport_code", "") != "BLITZBALL":
         visible = state.get("visible", False)
         quarter = els.get("osd_quarter")
         home = els.get("osd_home")
@@ -595,6 +622,15 @@ def _update_overlay(state: dict) -> None:
             _milestone_fading_out = True
         elif not _milestone_fade_active:
             update_milestone_overlays(milestone_player, milestone_text, state)
+
+    global _blitz_pulse_active, _blitz_pulse_alpha
+    blitz_pulse_needed = update_blitzball_overlay(state, els)
+    if blitz_pulse_needed and not _blitz_pulse_active:
+        _blitz_pulse_active = True
+        _blitz_pulse_alpha = 0.6
+        GLib.timeout_add(300, _blitz_pulse_step)
+    elif not blitz_pulse_needed:
+        _blitz_pulse_active = False
 
     update_timeout_overlay(state, els)
 
