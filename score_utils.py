@@ -14,6 +14,12 @@ DEFAULT_SCORE_STATE = {
     "updated_at": 0,
     "milestone": None,
     "timeout_stats": None,
+    "blitz_active": False,
+    "home_blitz_score": 0,
+    "away_blitz_score": 0,
+    "home_hot_streak": False,
+    "away_hot_streak": False,
+    "sport_code": "",
 }
 
 def default_score_state() -> dict:
