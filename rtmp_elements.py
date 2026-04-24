@@ -618,16 +618,16 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
     active.set_property("overlay-height", 180)
     active.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.300, ypos=0.838, font="Rajdhani Bold 18", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.300, ypos=0.858, font="Rajdhani Bold 24", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.360, ypos=0.845, font="Rajdhani Bold 20", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.360, ypos=0.888, font="Rajdhani Bold 20", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_pts,    "", xpos=0.520, ypos=0.845, font="Rajdhani Bold 36", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_blitz,  "", xpos=0.565, ypos=0.852, font="Rajdhani Bold 24", color=0xFFD700FF)
-    setup_text_overlay(elements.osd_blitz_away_pts,    "", xpos=0.520, ypos=0.888, font="Rajdhani Bold 36", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_blitz,  "", xpos=0.565, ypos=0.895, font="Rajdhani Bold 24", color=0xFFD700FF)
-    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font="Rajdhani Bold 22", color=0xFF4500FF)
-    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font="Rajdhani Bold 22", color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.680, ypos=0.838, font="Ubuntu Mono Bold 18", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.680, ypos=0.875, font="Ubuntu Mono Bold 28", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.360, ypos=0.845, font="Ubuntu Mono Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.360, ypos=0.888, font="Ubuntu Mono Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_pts,    "", xpos=0.490, ypos=0.845, font="Ubuntu Mono Bold 36", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_blitz,  "", xpos=0.535, ypos=0.852, font="Ubuntu Mono Bold 24", color=0xFFD700FF)  # gold
+    setup_text_overlay(elements.osd_blitz_away_pts,    "", xpos=0.490, ypos=0.888, font="Ubuntu Mono Bold 36", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_blitz,  "", xpos=0.535, ypos=0.895, font="Ubuntu Mono Bold 24", color=0xFFD700FF)  # gold
+    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font="Ubuntu Mono Bold 22", color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font="Ubuntu Mono Bold 22", color=0xFF4500FF)
 
 
 def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
