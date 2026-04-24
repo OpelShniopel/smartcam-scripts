@@ -73,7 +73,10 @@ class RtmpElements:
     osd_blitz_active: Any
     osd_blitz_home_name: Any
     osd_blitz_away_name: Any
-    osd_blitz_score: Any
+    osd_blitz_home_pts: Any
+    osd_blitz_home_blitz: Any
+    osd_blitz_away_pts: Any
+    osd_blitz_away_blitz: Any
     osd_blitz_quarter: Any
     osd_blitz_clock: Any
     osd_blitz_home_streak: Any
@@ -129,7 +132,10 @@ class RtmpElements:
             "osd_blitz_active": self.osd_blitz_active,
             "osd_blitz_home_name": self.osd_blitz_home_name,
             "osd_blitz_away_name": self.osd_blitz_away_name,
-            "osd_blitz_score": self.osd_blitz_score,
+            "osd_blitz_home_pts": self.osd_blitz_home_pts,
+            "osd_blitz_home_blitz": self.osd_blitz_home_blitz,
+            "osd_blitz_away_pts": self.osd_blitz_away_pts,
+            "osd_blitz_away_blitz": self.osd_blitz_away_blitz,
             "osd_blitz_quarter": self.osd_blitz_quarter,
             "osd_blitz_clock": self.osd_blitz_clock,
             "osd_blitz_home_streak": self.osd_blitz_home_streak,
@@ -180,7 +186,10 @@ class RtmpElements:
             self.osd_blitz_active,
             self.osd_blitz_home_name,
             self.osd_blitz_away_name,
-            self.osd_blitz_score,
+            self.osd_blitz_home_pts,
+            self.osd_blitz_home_blitz,
+            self.osd_blitz_away_pts,
+            self.osd_blitz_away_blitz,
             self.osd_blitz_quarter,
             self.osd_blitz_clock,
             self.osd_blitz_home_streak,
@@ -237,7 +246,10 @@ class RtmpElements:
             self.osd_blitz_active,
             self.osd_blitz_home_name,
             self.osd_blitz_away_name,
-            self.osd_blitz_score,
+            self.osd_blitz_home_pts,
+            self.osd_blitz_home_blitz,
+            self.osd_blitz_away_pts,
+            self.osd_blitz_away_blitz,
             self.osd_blitz_quarter,
             self.osd_blitz_clock,
             self.osd_blitz_home_streak,
@@ -294,7 +306,10 @@ def make_rtmp_elements(make_element: Callable[[str, str], Any]) -> RtmpElements:
         osd_blitz_active=make_element("gdkpixbufoverlay", "strm_osd_blitz_active"),
         osd_blitz_home_name=make_element("textoverlay", "strm_osd_blitz_home_name"),
         osd_blitz_away_name=make_element("textoverlay", "strm_osd_blitz_away_name"),
-        osd_blitz_score=make_element("textoverlay", "strm_osd_blitz_score"),
+        osd_blitz_home_pts=make_element("textoverlay", "strm_osd_blitz_home_pts"),
+        osd_blitz_home_blitz=make_element("textoverlay", "strm_osd_blitz_home_blitz"),
+        osd_blitz_away_pts=make_element("textoverlay", "strm_osd_blitz_away_pts"),
+        osd_blitz_away_blitz=make_element("textoverlay", "strm_osd_blitz_away_blitz"),
         osd_blitz_quarter=make_element("textoverlay", "strm_osd_blitz_quarter"),
         osd_blitz_clock=make_element("textoverlay", "strm_osd_blitz_clock"),
         osd_blitz_home_streak=make_element("textoverlay", "strm_osd_blitz_home_streak"),
@@ -572,7 +587,9 @@ def configure_timeout_overlay(elements: RtmpElements) -> None:
 
 BLITZ_TEXT_KEYS: tuple[str, ...] = (
     "osd_blitz_home_name", "osd_blitz_away_name",
-    "osd_blitz_score", "osd_blitz_quarter", "osd_blitz_clock",
+    "osd_blitz_home_pts", "osd_blitz_home_blitz",
+    "osd_blitz_away_pts", "osd_blitz_away_blitz",
+    "osd_blitz_quarter", "osd_blitz_clock",
     "osd_blitz_home_streak", "osd_blitz_away_streak",
 )
 BLITZ_PIXEL_KEYS: tuple[str, ...] = ("osd_blitz_bg", "osd_blitz_active")
@@ -601,13 +618,16 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
     active.set_property("overlay-height", 180)
     active.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.250, ypos=0.838, font="Sans Bold 24", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.290, ypos=0.848, font="Sans Bold 20", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.290, ypos=0.893, font="Sans Bold 20", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_score,       "", xpos=0.460, ypos=0.843, font="Sans Bold 36", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.530, ypos=0.838, font="Sans Bold 20", color=0xB2E5FFFF)
-    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.440, ypos=0.848, font="Sans Bold 22", color=0xFF4500FF)
-    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.440, ypos=0.893, font="Sans Bold 22", color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.300, ypos=0.838, font="Rajdhani Bold 18", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.300, ypos=0.858, font="Rajdhani Bold 24", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.360, ypos=0.845, font="Rajdhani Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.360, ypos=0.888, font="Rajdhani Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_pts,    "", xpos=0.520, ypos=0.845, font="Rajdhani Bold 36", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_blitz,  "", xpos=0.565, ypos=0.852, font="Rajdhani Bold 24", color=0xFFD700FF)
+    setup_text_overlay(elements.osd_blitz_away_pts,    "", xpos=0.520, ypos=0.888, font="Rajdhani Bold 36", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_blitz,  "", xpos=0.565, ypos=0.895, font="Rajdhani Bold 24", color=0xFFD700FF)
+    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font="Rajdhani Bold 22", color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font="Rajdhani Bold 22", color=0xFF4500FF)
 
 
 def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
@@ -658,13 +678,18 @@ def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -
 
     set_overlay_text(els.get("osd_blitz_home_name"), True, home_name)
     set_overlay_text(els.get("osd_blitz_away_name"), True, away_name)
-    set_overlay_text(
-        els.get("osd_blitz_score"), True,
-        f"{state.get('home_points', 0)}\n{state.get('away_points', 0)}",
-    )
+
+    home_pts = state.get("home_points", 0)
+    away_pts = state.get("away_points", 0)
+    home_blitz = state.get("home_blitz_score", 0)
+    away_blitz = state.get("away_blitz_score", 0)
+    set_overlay_text(els.get("osd_blitz_home_pts"),   True, str(home_pts))
+    set_overlay_text(els.get("osd_blitz_home_blitz"), True, f":{home_blitz}")
+    set_overlay_text(els.get("osd_blitz_away_pts"),   True, str(away_pts))
+    set_overlay_text(els.get("osd_blitz_away_blitz"), True, f":{away_blitz}")
 
     quarter = state.get("quarter", 1)
-    quarter_text = f"H{quarter}" if quarter in (1, 2) else f"Q{quarter}"
+    quarter_text = f"H{quarter}" if quarter <= 2 else "H2"
     set_overlay_text(els.get("osd_blitz_quarter"), True, quarter_text)
     set_overlay_text(els.get("osd_blitz_clock"), True, str(state.get("clock", "10:00")))
 
