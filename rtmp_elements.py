@@ -76,7 +76,6 @@ class RtmpElements:
     osd_blitz_score: Any
     osd_blitz_quarter: Any
     osd_blitz_clock: Any
-    osd_blitz_indicator: Any
     osd_blitz_home_streak: Any
     osd_blitz_away_streak: Any
     enc: Any
@@ -133,7 +132,6 @@ class RtmpElements:
             "osd_blitz_score": self.osd_blitz_score,
             "osd_blitz_quarter": self.osd_blitz_quarter,
             "osd_blitz_clock": self.osd_blitz_clock,
-            "osd_blitz_indicator": self.osd_blitz_indicator,
             "osd_blitz_home_streak": self.osd_blitz_home_streak,
             "osd_blitz_away_streak": self.osd_blitz_away_streak,
         }
@@ -185,7 +183,6 @@ class RtmpElements:
             self.osd_blitz_score,
             self.osd_blitz_quarter,
             self.osd_blitz_clock,
-            self.osd_blitz_indicator,
             self.osd_blitz_home_streak,
             self.osd_blitz_away_streak,
             self.enc,
@@ -243,7 +240,6 @@ class RtmpElements:
             self.osd_blitz_score,
             self.osd_blitz_quarter,
             self.osd_blitz_clock,
-            self.osd_blitz_indicator,
             self.osd_blitz_home_streak,
             self.osd_blitz_away_streak,
             self.enc,
@@ -301,7 +297,6 @@ def make_rtmp_elements(make_element: Callable[[str, str], Any]) -> RtmpElements:
         osd_blitz_score=make_element("textoverlay", "strm_osd_blitz_score"),
         osd_blitz_quarter=make_element("textoverlay", "strm_osd_blitz_quarter"),
         osd_blitz_clock=make_element("textoverlay", "strm_osd_blitz_clock"),
-        osd_blitz_indicator=make_element("textoverlay", "strm_osd_blitz_indicator"),
         osd_blitz_home_streak=make_element("textoverlay", "strm_osd_blitz_home_streak"),
         osd_blitz_away_streak=make_element("textoverlay", "strm_osd_blitz_away_streak"),
         enc=make_element("x264enc", "strm_enc"),
@@ -578,7 +573,7 @@ def configure_timeout_overlay(elements: RtmpElements) -> None:
 BLITZ_TEXT_KEYS: tuple[str, ...] = (
     "osd_blitz_home_name", "osd_blitz_away_name",
     "osd_blitz_score", "osd_blitz_quarter", "osd_blitz_clock",
-    "osd_blitz_indicator", "osd_blitz_home_streak", "osd_blitz_away_streak",
+    "osd_blitz_home_streak", "osd_blitz_away_streak",
 )
 BLITZ_PIXEL_KEYS: tuple[str, ...] = ("osd_blitz_bg", "osd_blitz_active")
 
@@ -611,7 +606,6 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
     setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.290, ypos=0.893, font="Sans Bold 20", color=0xFFFFFFFF)
     setup_text_overlay(elements.osd_blitz_score,       "", xpos=0.460, ypos=0.843, font="Sans Bold 36", color=0xFFFFFFFF)
     setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.530, ypos=0.838, font="Sans Bold 20", color=0xB2E5FFFF)
-    setup_text_overlay(elements.osd_blitz_indicator,   "", xpos=0.350, ypos=0.825, font="Sans Bold 22", color=0xFFD700FF)
     setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.440, ypos=0.848, font="Sans Bold 22", color=0xFF4500FF)
     setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.440, ypos=0.893, font="Sans Bold 22", color=0xFF4500FF)
 
@@ -675,14 +669,10 @@ def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -
     set_overlay_text(els.get("osd_blitz_clock"), True, str(state.get("clock", "10:00")))
 
     blitz_active = bool(state.get("blitz_active", False))
-    indicator_el = els.get("osd_blitz_indicator")
-    if blitz_active:
-        set_overlay_text(indicator_el, True, "⚡ BLITZ ZONE")
-    else:
+    if not blitz_active:
         blitz_active_el = els.get("osd_blitz_active")
         if blitz_active_el:
             blitz_active_el.set_property("alpha", 0.0)
-        set_overlay_text(indicator_el, False, "")
 
     set_overlay_text(
         els.get("osd_blitz_home_streak"),

@@ -10,6 +10,7 @@ RTMP failures do not tear down the local camera/AI service.
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import socket as _socket
@@ -101,6 +102,7 @@ TIMEOUT_TRANSITION_PAUSE_TICKS = 20  # 20 × 100 ms = 2 s
 
 _blitz_pulse_active: bool = False
 _blitz_pulse_alpha: float = 0.6
+_blitz_pulse_phase: float = 0.0
 
 _SCOREBOARD_TEXT_KEYS: tuple[str, ...] = (
     "osd_quarter", "osd_home", "osd_away",
@@ -278,7 +280,7 @@ def _get_static_pad(el: Gst.Element, pad_name: str) -> Gst.Pad:
 
 
 def _blitz_pulse_step() -> bool:
-    global _blitz_pulse_active, _blitz_pulse_alpha
+    global _blitz_pulse_active, _blitz_pulse_alpha, _blitz_pulse_phase
 
     if not _blitz_pulse_active:
         return False
@@ -292,11 +294,13 @@ def _blitz_pulse_step() -> bool:
             el.set_property("alpha", 0.0)
         return False
 
-    _blitz_pulse_alpha = 1.0 if _blitz_pulse_alpha < 0.8 else 0.6
+    _blitz_pulse_phase += 0.15
+    alpha = 0.5 + 0.4 * math.sin(_blitz_pulse_phase)
+    _blitz_pulse_alpha = alpha
     els = dict(_osd_elements)
     el = els.get("osd_blitz_active")
     if el:
-        el.set_property("alpha", _blitz_pulse_alpha)
+        el.set_property("alpha", alpha)
     return True
 
 
@@ -628,7 +632,7 @@ def _update_overlay(state: dict) -> None:
     if blitz_pulse_needed and not _blitz_pulse_active:
         _blitz_pulse_active = True
         _blitz_pulse_alpha = 0.6
-        GLib.timeout_add(300, _blitz_pulse_step)
+        GLib.timeout_add(50, _blitz_pulse_step)
     elif not blitz_pulse_needed:
         _blitz_pulse_active = False
 
