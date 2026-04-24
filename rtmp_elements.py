@@ -592,28 +592,28 @@ _BLITZ_SCOREBOARD_TEXT_KEYS: tuple[str, ...] = (
 def configure_blitzball_overlay(elements: RtmpElements) -> None:
     bg = elements.osd_blitz_bg
     bg.set_property("location", BLITZBALL_SCOREBOARD_PNG)
-    bg.set_property("offset-x", 20)
-    bg.set_property("offset-y", 940)
-    bg.set_property("overlay-width", 660)
-    bg.set_property("overlay-height", 120)
+    bg.set_property("offset-x", 465)
+    bg.set_property("offset-y", 900)
+    bg.set_property("overlay-width", 990)
+    bg.set_property("overlay-height", 180)
     bg.set_property("alpha", 0.0)
 
     active = elements.osd_blitz_active
     active.set_property("location", BLITZBALL_ACTIVE_PNG)
-    active.set_property("offset-x", 20)
-    active.set_property("offset-y", 940)
-    active.set_property("overlay-width", 660)
-    active.set_property("overlay-height", 120)
+    active.set_property("offset-x", 465)
+    active.set_property("offset-y", 900)
+    active.set_property("overlay-width", 990)
+    active.set_property("overlay-height", 180)
     active.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_blitz_home_name, "", xpos=0.060, ypos=0.880, font="Sans Bold 16", color=0x00BFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_name, "", xpos=0.060, ypos=0.920, font="Sans Bold 16", color=0xFFD700FF)
-    setup_text_overlay(elements.osd_blitz_score,     "", xpos=0.300, ypos=0.878, font="Sans Bold 28", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_quarter,   "", xpos=0.012, ypos=0.878, font="Sans Bold 18", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_clock,     "", xpos=0.360, ypos=0.878, font="Sans Bold 16", color=0xB2E5FFFF)
-    setup_text_overlay(elements.osd_blitz_indicator, "", xpos=0.150, ypos=0.860, font="Sans Bold 20", color=0xFFD700FF)
-    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.220, ypos=0.878, font="Sans Bold 18", color=0xFF4500FF)
-    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.220, ypos=0.918, font="Sans Bold 18", color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.250, ypos=0.838, font="Sans Bold 24", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.290, ypos=0.848, font="Sans Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.290, ypos=0.893, font="Sans Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_score,       "", xpos=0.460, ypos=0.843, font="Sans Bold 36", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.530, ypos=0.838, font="Sans Bold 20", color=0xB2E5FFFF)
+    setup_text_overlay(elements.osd_blitz_indicator,   "", xpos=0.350, ypos=0.825, font="Sans Bold 22", color=0xFFD700FF)
+    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.440, ypos=0.848, font="Sans Bold 22", color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.440, ypos=0.893, font="Sans Bold 22", color=0xFF4500FF)
 
 
 def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
