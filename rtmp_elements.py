@@ -24,6 +24,7 @@ SCOREBOARD_OFFSET_X = 100
 SCOREBOARD_OFFSET_Y = 900
 
 TEXT_HALIGN_LEFT = 0
+TEXT_HALIGN_CENTER = 1
 TEXT_HALIGN_POSITION = 4
 TEXT_VALIGN_TOP = 2
 TEXT_VALIGN_POSITION = 3
@@ -888,36 +889,44 @@ def configure_end_stats_overlay(elements: RtmpElements) -> None:
     bg.set_property("overlay-height", 1080)
     bg.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_end_winner,      "", xpos=0.320, ypos=0.080, font="Ubuntu Mono Bold 52", color=0xFFFFD700)
+    # Winner — horizontally centered
+    w = elements.osd_end_winner
+    w.set_property("text", "")
+    w.set_property("font-desc", "Ubuntu Mono Bold 52")
+    w.set_property("halignment", TEXT_HALIGN_CENTER)
+    w.set_property("valignment", TEXT_VALIGN_POSITION)
+    w.set_property("ypos", 0.080)
+    w.set_property("color", 0xFFFFD700)
+    w.set_property("draw-shadow", True)
+    w.set_property("auto-resize", False)
+    w.set_property("wait-text", False)
+    w.set_property("silent", True)
 
-    setup_text_overlay(elements.osd_end_header_home, "", xpos=0.120, ypos=0.180, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_header_away, "", xpos=0.560, ypos=0.180, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
+    # Two-column layout: left col at 0.080 (154px), right col at 0.520 (998px)
+    # Each column is left-aligned; together they span symmetrically around center.
+    setup_text_overlay(elements.osd_end_header_home, "", xpos=0.180, ypos=0.200, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_header_away, "", xpos=0.720, ypos=0.200, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
 
-    setup_text_overlay(elements.osd_end_home_pts,        "", xpos=0.120, ypos=0.270, font="Ubuntu Mono Bold 28", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_home_blitz,      "", xpos=0.120, ypos=0.340, font="Ubuntu Mono Bold 28", color=0xFFFFD700)
-    setup_text_overlay(elements.osd_end_home_inner,      "", xpos=0.120, ypos=0.420, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_middle,     "", xpos=0.120, ypos=0.480, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_outer,      "", xpos=0.120, ypos=0.540, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_intercept,  "", xpos=0.120, ypos=0.600, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_blitz_rate, "", xpos=0.120, ypos=0.535, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_pts,       "", xpos=0.180, ypos=0.290, font="Ubuntu Mono Bold 26", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_home_blitz,     "", xpos=0.180, ypos=0.360, font="Ubuntu Mono Bold 26", color=0xFFFFD700)
+    setup_text_overlay(elements.osd_end_home_inner,     "", xpos=0.180, ypos=0.430, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_middle,    "", xpos=0.180, ypos=0.490, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_outer,     "", xpos=0.180, ypos=0.550, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_intercept, "", xpos=0.180, ypos=0.610, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
 
-    setup_text_overlay(elements.osd_end_away_pts,        "", xpos=0.560, ypos=0.270, font="Ubuntu Mono Bold 28", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_away_blitz,      "", xpos=0.560, ypos=0.340, font="Ubuntu Mono Bold 28", color=0xFFFFD700)
-    setup_text_overlay(elements.osd_end_away_inner,      "", xpos=0.560, ypos=0.420, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_middle,     "", xpos=0.560, ypos=0.480, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_outer,      "", xpos=0.560, ypos=0.540, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_intercept,  "", xpos=0.560, ypos=0.600, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_blitz_rate, "", xpos=0.560, ypos=0.535, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_pts,       "", xpos=0.720, ypos=0.290, font="Ubuntu Mono Bold 26", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_away_blitz,     "", xpos=0.720, ypos=0.360, font="Ubuntu Mono Bold 26", color=0xFFFFD700)
+    setup_text_overlay(elements.osd_end_away_inner,     "", xpos=0.720, ypos=0.430, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_middle,    "", xpos=0.720, ypos=0.490, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_outer,     "", xpos=0.720, ypos=0.550, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_intercept, "", xpos=0.720, ypos=0.610, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
 
-    setup_text_overlay(elements.osd_end_players_header,  "", xpos=0.350, ypos=0.670, font="Ubuntu Mono Bold 22", color=0xFFFFD700)
-
-    setup_text_overlay(elements.osd_end_player_h1, "", xpos=0.100, ypos=0.730, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_player_h2, "", xpos=0.100, ypos=0.790, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_player_h3, "", xpos=0.100, ypos=0.850, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
-
-    setup_text_overlay(elements.osd_end_player_a1, "", xpos=0.550, ypos=0.730, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_player_a2, "", xpos=0.550, ypos=0.790, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_player_a3, "", xpos=0.550, ypos=0.850, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
+    # Unused elements — silenced
+    for el in (elements.osd_end_home_blitz_rate, elements.osd_end_away_blitz_rate,
+               elements.osd_end_players_header,
+               elements.osd_end_player_h1, elements.osd_end_player_h2, elements.osd_end_player_h3,
+               elements.osd_end_player_a1, elements.osd_end_player_a2, elements.osd_end_player_a3):
+        el.set_property("silent", True)
 
 
 def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:

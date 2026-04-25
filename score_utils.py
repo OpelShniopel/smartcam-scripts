@@ -23,6 +23,14 @@ DEFAULT_SCORE_STATE = {
     "game_finished": False,
     "winner": "",
     "end_stats": None,
+    "home_inner_scores": 0,
+    "home_middle_scores": 0,
+    "home_outer_scores": 0,
+    "home_interceptions": 0,
+    "away_inner_scores": 0,
+    "away_middle_scores": 0,
+    "away_outer_scores": 0,
+    "away_interceptions": 0,
 }
 
 def default_score_state() -> dict:

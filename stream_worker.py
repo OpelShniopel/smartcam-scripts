@@ -598,18 +598,22 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
         if color is not None:
             el.set_property("color", color)
 
-    show_el("osd_end_winner",      winner_text,            0xFFFFD700)
+    show_el("osd_end_winner",      winner_text,                          0xFFFFD700)
     show_el("osd_end_header_home", home_name)
     show_el("osd_end_header_away", away_name)
     show_el("osd_end_home_pts",    f"TOTAL  {home_pts} PTS")
-    show_el("osd_end_home_blitz",  f"BLITZ  {home_blitz}", 0xFFFFD700)
-    show_el("osd_end_away_pts",    f"TOTAL  {away_pts} PTS")
-    show_el("osd_end_away_blitz",  f"BLITZ  {away_blitz}", 0xFFFFD700)
-    # inner/middle/outer/intercept not in state yet — keep silent
-    for key in ("osd_end_home_inner", "osd_end_home_middle", "osd_end_home_outer",
-                "osd_end_home_intercept", "osd_end_home_blitz_rate",
-                "osd_end_away_inner", "osd_end_away_middle", "osd_end_away_outer",
-                "osd_end_away_intercept", "osd_end_away_blitz_rate"):
+    show_el("osd_end_home_blitz",  f"BLITZ  {home_blitz}",              0xFFFFD700)
+    show_el("osd_end_home_inner",     f"INNER   {state.get('home_inner_scores', 0)}")
+    show_el("osd_end_home_middle",    f"MIDDLE  {state.get('home_middle_scores', 0)}")
+    show_el("osd_end_home_outer",     f"OUTER   {state.get('home_outer_scores', 0)}")
+    show_el("osd_end_home_intercept", f"INTERCEPTS  {state.get('home_interceptions', 0)}")
+    show_el("osd_end_away_pts",       f"TOTAL  {away_pts} PTS")
+    show_el("osd_end_away_blitz",     f"BLITZ  {away_blitz}",              0xFFFFD700)
+    show_el("osd_end_away_inner",     f"INNER   {state.get('away_inner_scores', 0)}")
+    show_el("osd_end_away_middle",    f"MIDDLE  {state.get('away_middle_scores', 0)}")
+    show_el("osd_end_away_outer",     f"OUTER   {state.get('away_outer_scores', 0)}")
+    show_el("osd_end_away_intercept", f"INTERCEPTS  {state.get('away_interceptions', 0)}")
+    for key in ("osd_end_home_blitz_rate", "osd_end_away_blitz_rate"):
         el = els.get(key)
         if el:
             el.set_property("silent", True)
