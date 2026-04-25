@@ -618,14 +618,14 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
     active.set_property("overlay-height", 180)
     active.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.680, ypos=0.838, font="Ubuntu Mono Bold 20", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.680, ypos=0.875, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.360, ypos=0.845, font="Ubuntu Mono Bold 22", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.360, ypos=0.888, font="Ubuntu Mono Bold 22", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_pts,    "", xpos=0.470, ypos=0.843, font="Ubuntu Mono Bold 42", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_blitz,  "", xpos=0.505, ypos=0.843, font="Ubuntu Mono Bold 42", color=0xFFFFD700)  # gold
-    setup_text_overlay(elements.osd_blitz_away_pts,    "", xpos=0.470, ypos=0.886, font="Ubuntu Mono Bold 42", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_blitz,  "", xpos=0.505, ypos=0.886, font="Ubuntu Mono Bold 42", color=0xFFFFD700)  # gold
+    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.710, ypos=0.895, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.710, ypos=0.945, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.450, ypos=0.888, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.450, ypos=0.950, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_pts,    "", xpos=0.614, ypos=0.895, font="Ubuntu Mono Bold 42", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_blitz,  "", xpos=0.640, ypos=0.895, font="Ubuntu Mono Bold 42", color=0xFFFFD700)  # gold
+    setup_text_overlay(elements.osd_blitz_away_pts,    "", xpos=0.614, ypos=0.952, font="Ubuntu Mono Bold 42", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_blitz,  "", xpos=0.640, ypos=0.952, font="Ubuntu Mono Bold 42", color=0xFFFFD700)  # gold
     setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font="Ubuntu Mono Bold 22", color=0xFF4500FF)
     setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font="Ubuntu Mono Bold 22", color=0xFF4500FF)
 
