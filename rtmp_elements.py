@@ -618,14 +618,14 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
     active.set_property("overlay-height", 180)
     active.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.680, ypos=0.838, font="Ubuntu Mono Bold 18", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.680, ypos=0.875, font="Ubuntu Mono Bold 28", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.360, ypos=0.845, font="Ubuntu Mono Bold 20", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.360, ypos=0.888, font="Ubuntu Mono Bold 20", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_pts,    "", xpos=0.490, ypos=0.845, font="Ubuntu Mono Bold 36", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_blitz,  "", xpos=0.535, ypos=0.852, font="Ubuntu Mono Bold 24", color=0xFFD700FF)  # gold
-    setup_text_overlay(elements.osd_blitz_away_pts,    "", xpos=0.490, ypos=0.888, font="Ubuntu Mono Bold 36", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_blitz,  "", xpos=0.535, ypos=0.895, font="Ubuntu Mono Bold 24", color=0xFFD700FF)  # gold
+    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.680, ypos=0.838, font="Ubuntu Mono Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.680, ypos=0.875, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.360, ypos=0.845, font="Ubuntu Mono Bold 22", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.360, ypos=0.888, font="Ubuntu Mono Bold 22", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_pts,    "", xpos=0.470, ypos=0.843, font="Ubuntu Mono Bold 42", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_blitz,  "", xpos=0.505, ypos=0.843, font="Ubuntu Mono Bold 42", color=0xFFFFD700)  # gold
+    setup_text_overlay(elements.osd_blitz_away_pts,    "", xpos=0.470, ypos=0.886, font="Ubuntu Mono Bold 42", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_blitz,  "", xpos=0.505, ypos=0.886, font="Ubuntu Mono Bold 42", color=0xFFFFD700)  # gold
     setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font="Ubuntu Mono Bold 22", color=0xFF4500FF)
     setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font="Ubuntu Mono Bold 22", color=0xFF4500FF)
 
@@ -684,9 +684,17 @@ def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -
     home_blitz = state.get("home_blitz_score", 0)
     away_blitz = state.get("away_blitz_score", 0)
     set_overlay_text(els.get("osd_blitz_home_pts"),   True, str(home_pts))
-    set_overlay_text(els.get("osd_blitz_home_blitz"), True, f":{home_blitz}")
+    home_blitz_el = els.get("osd_blitz_home_blitz")
+    if home_blitz_el:
+        home_blitz_el.set_property("silent", False)
+        home_blitz_el.set_property("text", f":{home_blitz}")
+        home_blitz_el.set_property("color", 0xFFFFD700)  # gold
     set_overlay_text(els.get("osd_blitz_away_pts"),   True, str(away_pts))
-    set_overlay_text(els.get("osd_blitz_away_blitz"), True, f":{away_blitz}")
+    away_blitz_el = els.get("osd_blitz_away_blitz")
+    if away_blitz_el:
+        away_blitz_el.set_property("silent", False)
+        away_blitz_el.set_property("text", f":{away_blitz}")
+        away_blitz_el.set_property("color", 0xFFFFD700)  # gold
 
     quarter = state.get("quarter", 1)
     quarter_text = f"H{quarter}" if quarter <= 2 else "H2"
