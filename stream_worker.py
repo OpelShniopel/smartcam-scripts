@@ -583,11 +583,11 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
     away_blitz = state.get("away_blitz_score", 0)
 
     if winner == "home":
-        winner_text = f"BLITZ  {home_name} WINS!"
+        winner_text = f"{home_name} WINS!"
     elif winner == "away":
-        winner_text = f"BLITZ  {away_name} WINS!"
+        winner_text = f"{away_name} WINS!"
     else:
-        winner_text = "BLITZ  DRAW!"
+        winner_text = "DRAW!"
 
     def show_el(key: str, text: str, color: int | None = None) -> None:
         el = els.get(key)
@@ -598,13 +598,21 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
         if color is not None:
             el.set_property("color", color)
 
-    show_el("osd_end_winner",      winner_text,             0xFFFFD700)
+    show_el("osd_end_winner",      winner_text,            0xFFFFD700)
     show_el("osd_end_header_home", home_name)
     show_el("osd_end_header_away", away_name)
     show_el("osd_end_home_pts",    f"TOTAL  {home_pts} PTS")
-    show_el("osd_end_home_blitz",  f"BLITZ  {home_blitz}",  0xFFFFD700)
+    show_el("osd_end_home_blitz",  f"BLITZ  {home_blitz}", 0xFFFFD700)
     show_el("osd_end_away_pts",    f"TOTAL  {away_pts} PTS")
-    show_el("osd_end_away_blitz",  f"BLITZ  {away_blitz}",  0xFFFFD700)
+    show_el("osd_end_away_blitz",  f"BLITZ  {away_blitz}", 0xFFFFD700)
+    # inner/middle/outer/intercept not in state yet — keep silent
+    for key in ("osd_end_home_inner", "osd_end_home_middle", "osd_end_home_outer",
+                "osd_end_home_intercept", "osd_end_home_blitz_rate",
+                "osd_end_away_inner", "osd_end_away_middle", "osd_end_away_outer",
+                "osd_end_away_intercept", "osd_end_away_blitz_rate"):
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
 
 
 def _update_overlay(state: dict) -> None:
