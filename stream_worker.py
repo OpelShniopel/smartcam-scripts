@@ -540,19 +540,40 @@ def _milestone_fade_step() -> bool:
 
 
 def _show_blitzball_end_stats(state: dict, els: dict) -> None:
-    global _end_stats_show_until
-    if _end_stats_show_until == 0:
-        _end_stats_show_until = int(time.time() * 1000) + 20000
+    # Step 1 — hide regular scoreboard pixel elements (gdkpixbufoverlay → alpha only)
+    for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
+        el = els.get(key)
+        if el:
+            el.set_property("alpha", 0.0)
+    # Hide regular scoreboard text elements (textoverlay → silent only)
+    for key in ("osd_quarter", "osd_home", "osd_away",
+                "osd_home_score", "osd_away_score", "osd_clock",
+                "osd_milestone_player", "osd_milestone_text"):
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
 
-    # Dark background: prefer osd_end_bg, fall back to osd_blitz_bg
+    # Step 2 — hide blitz pixel elements (gdkpixbufoverlay → alpha only)
+    for key in ("osd_blitz_bg", "osd_blitz_active"):
+        el = els.get(key)
+        if el:
+            el.set_property("alpha", 0.0)
+    # Hide blitz text elements (textoverlay → silent only)
+    for key in ("osd_blitz_home_name", "osd_blitz_away_name",
+                "osd_blitz_home_pts", "osd_blitz_home_blitz",
+                "osd_blitz_away_pts", "osd_blitz_away_blitz",
+                "osd_blitz_quarter", "osd_blitz_clock",
+                "osd_blitz_home_streak", "osd_blitz_away_streak"):
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
+
+    # Step 3 — show dark background
     end_bg = els.get("osd_end_bg")
     if end_bg:
         end_bg.set_property("alpha", 0.85)
-    else:
-        blitz_bg = els.get("osd_blitz_bg")
-        if blitz_bg:
-            blitz_bg.set_property("alpha", 1.0)
 
+    # Step 4 — populate stats text
     winner = state.get("winner", "")
     home_name = state.get("home_name", "HOME")
     away_name = state.get("away_name", "AWAY")
@@ -561,57 +582,29 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
     home_blitz = state.get("home_blitz_score", 0)
     away_blitz = state.get("away_blitz_score", 0)
 
-    home_name_el = els.get("osd_blitz_home_name")
-    if home_name_el:
-        home_name_el.set_property("silent", False)
-        home_name_el.set_property("text", home_name)
-
-    away_name_el = els.get("osd_blitz_away_name")
-    if away_name_el:
-        away_name_el.set_property("silent", False)
-        away_name_el.set_property("text", away_name)
-
-    home_pts_el = els.get("osd_blitz_home_pts")
-    if home_pts_el:
-        home_pts_el.set_property("silent", False)
-        home_pts_el.set_property("text", str(home_pts))
-
-    away_pts_el = els.get("osd_blitz_away_pts")
-    if away_pts_el:
-        away_pts_el.set_property("silent", False)
-        away_pts_el.set_property("text", str(away_pts))
-
-    home_blitz_el = els.get("osd_blitz_home_blitz")
-    if home_blitz_el:
-        home_blitz_el.set_property("silent", False)
-        home_blitz_el.set_property("text", f":{home_blitz}")
-        home_blitz_el.set_property("color", 0xFFFFD700)
-
-    away_blitz_el = els.get("osd_blitz_away_blitz")
-    if away_blitz_el:
-        away_blitz_el.set_property("silent", False)
-        away_blitz_el.set_property("text", f":{away_blitz}")
-        away_blitz_el.set_property("color", 0xFFFFD700)
-
-    home_streak_el = els.get("osd_blitz_home_streak")
-    away_streak_el = els.get("osd_blitz_away_streak")
     if winner == "home":
-        if home_streak_el:
-            home_streak_el.set_property("silent", False)
-            home_streak_el.set_property("text", "WINNER")
-        if away_streak_el:
-            away_streak_el.set_property("silent", True)
+        winner_text = f"BLITZ  {home_name} WINS!"
     elif winner == "away":
-        if away_streak_el:
-            away_streak_el.set_property("silent", False)
-            away_streak_el.set_property("text", "WINNER")
-        if home_streak_el:
-            home_streak_el.set_property("silent", True)
+        winner_text = f"BLITZ  {away_name} WINS!"
     else:
-        if home_streak_el:
-            home_streak_el.set_property("silent", True)
-        if away_streak_el:
-            away_streak_el.set_property("silent", True)
+        winner_text = "BLITZ  DRAW!"
+
+    def show_el(key: str, text: str, color: int | None = None) -> None:
+        el = els.get(key)
+        if not el:
+            return
+        el.set_property("text", text)
+        el.set_property("silent", False)
+        if color is not None:
+            el.set_property("color", color)
+
+    show_el("osd_end_winner",      winner_text,             0xFFFFD700)
+    show_el("osd_end_header_home", home_name)
+    show_el("osd_end_header_away", away_name)
+    show_el("osd_end_home_pts",    f"TOTAL  {home_pts} PTS")
+    show_el("osd_end_home_blitz",  f"BLITZ  {home_blitz}",  0xFFFFD700)
+    show_el("osd_end_away_pts",    f"TOTAL  {away_pts} PTS")
+    show_el("osd_end_away_blitz",  f"BLITZ  {away_blitz}",  0xFFFFD700)
 
 
 def _update_overlay(state: dict) -> None:
@@ -623,13 +616,15 @@ def _update_overlay(state: dict) -> None:
 
     game_finished = state.get("game_finished", False)
     sport_code = state.get("sport_code", "")
+    now_ms = int(time.time() * 1000)
 
     if not game_finished:
         _end_stats_show_until = 0
 
     if game_finished and sport_code == "BLITZBALL":
-        now_ms = int(time.time() * 1000)
-        if _end_stats_show_until == 0 or now_ms < _end_stats_show_until:
+        if _end_stats_show_until == 0:
+            _end_stats_show_until = now_ms + 20000
+        if now_ms < _end_stats_show_until:
             _show_blitzball_end_stats(state, els)
             return
         else:
@@ -758,9 +753,9 @@ def _poll_score_state() -> bool:
         and timeout_stats.get("show_until", 0) > now_ms
     )
 
-    game_finished = state.get("game_finished", False)
-    end_active = game_finished and (
-        _end_stats_show_until == 0 or int(time.time() * 1000) < _end_stats_show_until
+    end_active = (
+        state.get("game_finished", False)
+        and _end_stats_show_until > int(time.time() * 1000)
     )
     if state != _last_score_state or milestone_active or timeout_active or _timeout_fade_active or end_active:
         _update_overlay(state)
