@@ -20,6 +20,9 @@ DEFAULT_SCORE_STATE = {
     "home_hot_streak": False,
     "away_hot_streak": False,
     "sport_code": "",
+    "game_finished": False,
+    "winner": "",
+    "end_stats": None,
 }
 
 def default_score_state() -> dict:

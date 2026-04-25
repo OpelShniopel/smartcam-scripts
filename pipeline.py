@@ -99,6 +99,7 @@ from rtmp_elements import (
     make_rtmp_elements,
     populate_timeout_texts,
     TIMEOUT_TEXT_KEYS,
+    update_blitzball_end_stats,
     update_blitzball_overlay,
     update_milestone_overlays,
     update_quarter_overlay,
@@ -315,6 +316,10 @@ def _update_osd_texts(state: dict) -> None:
     with _osd_lock:
         els = dict(_osd_elements)
     if not els:
+        return
+
+    end_showing = update_blitzball_end_stats(state, els)
+    if end_showing:
         return
 
     visible = state.get("visible", False)

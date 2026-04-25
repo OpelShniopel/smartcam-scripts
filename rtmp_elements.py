@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from runtime_paths import BLITZBALL_ACTIVE_PNG, BLITZBALL_SCOREBOARD_PNG, SCOREBOARD_PNG, SCRIPT_DIR, TIMEOUT_BG_PNG
+from runtime_paths import BLITZBALL_ACTIVE_PNG, BLITZBALL_SCOREBOARD_PNG, END_STATS_BG_PNG, SCOREBOARD_PNG, SCRIPT_DIR, TIMEOUT_BG_PNG
 
 RTMP_KEYINT = 60
 RTMP_THREADS = 2
@@ -81,6 +81,31 @@ class RtmpElements:
     osd_blitz_clock: Any
     osd_blitz_home_streak: Any
     osd_blitz_away_streak: Any
+    osd_end_bg: Any
+    osd_end_winner: Any
+    osd_end_header_home: Any
+    osd_end_header_away: Any
+    osd_end_home_pts: Any
+    osd_end_home_inner: Any
+    osd_end_home_middle: Any
+    osd_end_home_outer: Any
+    osd_end_home_blitz: Any
+    osd_end_home_blitz_rate: Any
+    osd_end_home_intercept: Any
+    osd_end_away_pts: Any
+    osd_end_away_inner: Any
+    osd_end_away_middle: Any
+    osd_end_away_outer: Any
+    osd_end_away_blitz: Any
+    osd_end_away_blitz_rate: Any
+    osd_end_away_intercept: Any
+    osd_end_players_header: Any
+    osd_end_player_h1: Any
+    osd_end_player_h2: Any
+    osd_end_player_h3: Any
+    osd_end_player_a1: Any
+    osd_end_player_a2: Any
+    osd_end_player_a3: Any
     enc: Any
     parse: Any
     flvmux: Any
@@ -140,6 +165,31 @@ class RtmpElements:
             "osd_blitz_clock": self.osd_blitz_clock,
             "osd_blitz_home_streak": self.osd_blitz_home_streak,
             "osd_blitz_away_streak": self.osd_blitz_away_streak,
+            "osd_end_bg": self.osd_end_bg,
+            "osd_end_winner": self.osd_end_winner,
+            "osd_end_header_home": self.osd_end_header_home,
+            "osd_end_header_away": self.osd_end_header_away,
+            "osd_end_home_pts": self.osd_end_home_pts,
+            "osd_end_home_inner": self.osd_end_home_inner,
+            "osd_end_home_middle": self.osd_end_home_middle,
+            "osd_end_home_outer": self.osd_end_home_outer,
+            "osd_end_home_blitz": self.osd_end_home_blitz,
+            "osd_end_home_blitz_rate": self.osd_end_home_blitz_rate,
+            "osd_end_home_intercept": self.osd_end_home_intercept,
+            "osd_end_away_pts": self.osd_end_away_pts,
+            "osd_end_away_inner": self.osd_end_away_inner,
+            "osd_end_away_middle": self.osd_end_away_middle,
+            "osd_end_away_outer": self.osd_end_away_outer,
+            "osd_end_away_blitz": self.osd_end_away_blitz,
+            "osd_end_away_blitz_rate": self.osd_end_away_blitz_rate,
+            "osd_end_away_intercept": self.osd_end_away_intercept,
+            "osd_end_players_header": self.osd_end_players_header,
+            "osd_end_player_h1": self.osd_end_player_h1,
+            "osd_end_player_h2": self.osd_end_player_h2,
+            "osd_end_player_h3": self.osd_end_player_h3,
+            "osd_end_player_a1": self.osd_end_player_a1,
+            "osd_end_player_a2": self.osd_end_player_a2,
+            "osd_end_player_a3": self.osd_end_player_a3,
         }
 
     def base_elements(self) -> tuple[Any, ...]:
@@ -194,6 +244,31 @@ class RtmpElements:
             self.osd_blitz_clock,
             self.osd_blitz_home_streak,
             self.osd_blitz_away_streak,
+            self.osd_end_bg,
+            self.osd_end_winner,
+            self.osd_end_header_home,
+            self.osd_end_header_away,
+            self.osd_end_home_pts,
+            self.osd_end_home_inner,
+            self.osd_end_home_middle,
+            self.osd_end_home_outer,
+            self.osd_end_home_blitz,
+            self.osd_end_home_blitz_rate,
+            self.osd_end_home_intercept,
+            self.osd_end_away_pts,
+            self.osd_end_away_inner,
+            self.osd_end_away_middle,
+            self.osd_end_away_outer,
+            self.osd_end_away_blitz,
+            self.osd_end_away_blitz_rate,
+            self.osd_end_away_intercept,
+            self.osd_end_players_header,
+            self.osd_end_player_h1,
+            self.osd_end_player_h2,
+            self.osd_end_player_h3,
+            self.osd_end_player_a1,
+            self.osd_end_player_a2,
+            self.osd_end_player_a3,
             self.enc,
             self.parse,
             self.flvmux,
@@ -254,6 +329,31 @@ class RtmpElements:
             self.osd_blitz_clock,
             self.osd_blitz_home_streak,
             self.osd_blitz_away_streak,
+            self.osd_end_bg,
+            self.osd_end_winner,
+            self.osd_end_header_home,
+            self.osd_end_header_away,
+            self.osd_end_home_pts,
+            self.osd_end_home_inner,
+            self.osd_end_home_middle,
+            self.osd_end_home_outer,
+            self.osd_end_home_blitz,
+            self.osd_end_home_blitz_rate,
+            self.osd_end_home_intercept,
+            self.osd_end_away_pts,
+            self.osd_end_away_inner,
+            self.osd_end_away_middle,
+            self.osd_end_away_outer,
+            self.osd_end_away_blitz,
+            self.osd_end_away_blitz_rate,
+            self.osd_end_away_intercept,
+            self.osd_end_players_header,
+            self.osd_end_player_h1,
+            self.osd_end_player_h2,
+            self.osd_end_player_h3,
+            self.osd_end_player_a1,
+            self.osd_end_player_a2,
+            self.osd_end_player_a3,
             self.enc,
             self.parse,
         )
@@ -314,6 +414,31 @@ def make_rtmp_elements(make_element: Callable[[str, str], Any]) -> RtmpElements:
         osd_blitz_clock=make_element("textoverlay", "strm_osd_blitz_clock"),
         osd_blitz_home_streak=make_element("textoverlay", "strm_osd_blitz_home_streak"),
         osd_blitz_away_streak=make_element("textoverlay", "strm_osd_blitz_away_streak"),
+        osd_end_bg=make_element("gdkpixbufoverlay", "strm_osd_end_bg"),
+        osd_end_winner=make_element("textoverlay", "strm_osd_end_winner"),
+        osd_end_header_home=make_element("textoverlay", "strm_osd_end_header_home"),
+        osd_end_header_away=make_element("textoverlay", "strm_osd_end_header_away"),
+        osd_end_home_pts=make_element("textoverlay", "strm_osd_end_home_pts"),
+        osd_end_home_inner=make_element("textoverlay", "strm_osd_end_home_inner"),
+        osd_end_home_middle=make_element("textoverlay", "strm_osd_end_home_middle"),
+        osd_end_home_outer=make_element("textoverlay", "strm_osd_end_home_outer"),
+        osd_end_home_blitz=make_element("textoverlay", "strm_osd_end_home_blitz"),
+        osd_end_home_blitz_rate=make_element("textoverlay", "strm_osd_end_home_blitz_rate"),
+        osd_end_home_intercept=make_element("textoverlay", "strm_osd_end_home_intercept"),
+        osd_end_away_pts=make_element("textoverlay", "strm_osd_end_away_pts"),
+        osd_end_away_inner=make_element("textoverlay", "strm_osd_end_away_inner"),
+        osd_end_away_middle=make_element("textoverlay", "strm_osd_end_away_middle"),
+        osd_end_away_outer=make_element("textoverlay", "strm_osd_end_away_outer"),
+        osd_end_away_blitz=make_element("textoverlay", "strm_osd_end_away_blitz"),
+        osd_end_away_blitz_rate=make_element("textoverlay", "strm_osd_end_away_blitz_rate"),
+        osd_end_away_intercept=make_element("textoverlay", "strm_osd_end_away_intercept"),
+        osd_end_players_header=make_element("textoverlay", "strm_osd_end_players_header"),
+        osd_end_player_h1=make_element("textoverlay", "strm_osd_end_player_h1"),
+        osd_end_player_h2=make_element("textoverlay", "strm_osd_end_player_h2"),
+        osd_end_player_h3=make_element("textoverlay", "strm_osd_end_player_h3"),
+        osd_end_player_a1=make_element("textoverlay", "strm_osd_end_player_a1"),
+        osd_end_player_a2=make_element("textoverlay", "strm_osd_end_player_a2"),
+        osd_end_player_a3=make_element("textoverlay", "strm_osd_end_player_a3"),
         enc=make_element("x264enc", "strm_enc"),
         parse=make_element("h264parse", "strm_parse"),
         flvmux=make_element("flvmux", "strm_flvmux"),
@@ -739,6 +864,198 @@ def configure_rtmp_output(elements: RtmpElements, rtmp_url: str) -> None:
     elements.aacenc.set_property("bitrate", 128000)
 
 
+END_STATS_TEXT_KEYS: tuple[str, ...] = (
+    "osd_end_winner",
+    "osd_end_header_home", "osd_end_header_away",
+    "osd_end_home_pts", "osd_end_home_inner", "osd_end_home_middle",
+    "osd_end_home_outer", "osd_end_home_blitz", "osd_end_home_blitz_rate",
+    "osd_end_home_intercept",
+    "osd_end_away_pts", "osd_end_away_inner", "osd_end_away_middle",
+    "osd_end_away_outer", "osd_end_away_blitz", "osd_end_away_blitz_rate",
+    "osd_end_away_intercept",
+    "osd_end_players_header",
+    "osd_end_player_h1", "osd_end_player_h2", "osd_end_player_h3",
+    "osd_end_player_a1", "osd_end_player_a2", "osd_end_player_a3",
+)
+
+
+def configure_end_stats_overlay(elements: RtmpElements) -> None:
+    bg = elements.osd_end_bg
+    bg.set_property("location", END_STATS_BG_PNG)
+    bg.set_property("offset-x", 0)
+    bg.set_property("offset-y", 0)
+    bg.set_property("overlay-width", 1920)
+    bg.set_property("overlay-height", 1080)
+    bg.set_property("alpha", 0.0)
+
+    setup_text_overlay(elements.osd_end_winner,      "", xpos=0.350, ypos=0.060, font="Ubuntu Mono Bold 48", color=0xFFFFD700)
+
+    setup_text_overlay(elements.osd_end_header_home, "", xpos=0.100, ypos=0.140, font="Ubuntu Mono Bold 28", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_header_away, "", xpos=0.550, ypos=0.140, font="Ubuntu Mono Bold 28", color=0xFFFFFFFF)
+
+    setup_text_overlay(elements.osd_end_home_pts,        "", xpos=0.100, ypos=0.210, font="Ubuntu Mono Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_home_inner,      "", xpos=0.100, ypos=0.275, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_middle,     "", xpos=0.100, ypos=0.340, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_outer,      "", xpos=0.100, ypos=0.405, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_blitz,      "", xpos=0.100, ypos=0.470, font="Ubuntu Mono Bold 20", color=0xFFFFD700)
+    setup_text_overlay(elements.osd_end_home_blitz_rate, "", xpos=0.100, ypos=0.535, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_intercept,  "", xpos=0.100, ypos=0.600, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+
+    setup_text_overlay(elements.osd_end_away_pts,        "", xpos=0.550, ypos=0.210, font="Ubuntu Mono Bold 20", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_away_inner,      "", xpos=0.550, ypos=0.275, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_middle,     "", xpos=0.550, ypos=0.340, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_outer,      "", xpos=0.550, ypos=0.405, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_blitz,      "", xpos=0.550, ypos=0.470, font="Ubuntu Mono Bold 20", color=0xFFFFD700)
+    setup_text_overlay(elements.osd_end_away_blitz_rate, "", xpos=0.550, ypos=0.535, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_intercept,  "", xpos=0.550, ypos=0.600, font="Ubuntu Mono 18",      color=0xFFCCCCCC)
+
+    setup_text_overlay(elements.osd_end_players_header,  "", xpos=0.350, ypos=0.670, font="Ubuntu Mono Bold 22", color=0xFFFFD700)
+
+    setup_text_overlay(elements.osd_end_player_h1, "", xpos=0.100, ypos=0.730, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_player_h2, "", xpos=0.100, ypos=0.790, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_player_h3, "", xpos=0.100, ypos=0.850, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
+
+    setup_text_overlay(elements.osd_end_player_a1, "", xpos=0.550, ypos=0.730, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_player_a2, "", xpos=0.550, ypos=0.790, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_player_a3, "", xpos=0.550, ypos=0.850, font="Ubuntu Mono Bold 16", color=0xFFFFFFFF)
+
+
+def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
+    """Show end-game stats overlay. Returns True if the overlay is active."""
+    end_stats = state.get("end_stats")
+    game_finished = state.get("game_finished", False)
+    now_ms = int(time.time() * 1000)
+
+    active = (
+        game_finished
+        and isinstance(end_stats, dict)
+        and end_stats.get("show_until", 0) > now_ms
+    )
+
+    if not active:
+        end_bg = els.get("osd_end_bg")
+        if end_bg:
+            end_bg.set_property("alpha", 0.0)
+        for key in END_STATS_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("silent", True)
+        return False
+
+    end_bg = els.get("osd_end_bg")
+    if end_bg:
+        end_bg.set_property("alpha", 0.85)
+
+    # Hide regular and blitz scoreboards
+    for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
+        el = els.get(key)
+        if el:
+            el.set_property("alpha", 0.0)
+    for key in _BLITZ_SCOREBOARD_TEXT_KEYS:
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
+    for key in BLITZ_TEXT_KEYS:
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
+    for key in BLITZ_PIXEL_KEYS:
+        el = els.get(key)
+        if el:
+            el.set_property("alpha", 0.0)
+
+    winner = state.get("winner", "")
+    home_name = state.get("home_name", "HOME")
+    away_name = state.get("away_name", "AWAY")
+
+    if winner == "home":
+        winner_text = f"BLITZ  {home_name} WINS!"
+    elif winner == "away":
+        winner_text = f"BLITZ  {away_name} WINS!"
+    else:
+        winner_text = "BLITZ  DRAW!"
+
+    winner_el = els.get("osd_end_winner")
+    if winner_el:
+        winner_el.set_property("text", winner_text)
+        winner_el.set_property("silent", False)
+        winner_el.set_property("color", 0xFFFFD700)
+
+    header_home = els.get("osd_end_header_home")
+    if header_home:
+        header_home.set_property("text", home_name)
+        header_home.set_property("silent", False)
+    header_away = els.get("osd_end_header_away")
+    if header_away:
+        header_away.set_property("text", away_name)
+        header_away.set_property("silent", False)
+
+    home = end_stats.get("home_stats", {})
+    away = end_stats.get("away_stats", {})
+
+    _end_stat_pairs = [
+        ("osd_end_home_pts",        f"TOTAL  {home.get('total_points', 0)} PTS"),
+        ("osd_end_home_inner",      f"INNER  {home.get('inner_scores', 0)}"),
+        ("osd_end_home_middle",     f"MIDDLE {home.get('middle_scores', 0)}"),
+        ("osd_end_home_outer",      f"OUTER  {home.get('outer_scores', 0)}"),
+        ("osd_end_home_blitz",      f"BLITZ  {home.get('blitz_scores', 0)}"),
+        ("osd_end_home_blitz_rate", f"BLITZ% {home.get('blitz_conversion_rate', 0):.0f}%"),
+        ("osd_end_home_intercept",  f"INTERCEPTS {home.get('interceptions', 0)}"),
+        ("osd_end_away_pts",        f"TOTAL  {away.get('total_points', 0)} PTS"),
+        ("osd_end_away_inner",      f"INNER  {away.get('inner_scores', 0)}"),
+        ("osd_end_away_middle",     f"MIDDLE {away.get('middle_scores', 0)}"),
+        ("osd_end_away_outer",      f"OUTER  {away.get('outer_scores', 0)}"),
+        ("osd_end_away_blitz",      f"BLITZ  {away.get('blitz_scores', 0)}"),
+        ("osd_end_away_blitz_rate", f"BLITZ% {away.get('blitz_conversion_rate', 0):.0f}%"),
+        ("osd_end_away_intercept",  f"INTERCEPTS {away.get('interceptions', 0)}"),
+    ]
+    for key, text in _end_stat_pairs:
+        el = els.get(key)
+        if el:
+            el.set_property("text", text)
+            el.set_property("silent", False)
+
+    players = end_stats.get("players", [])
+    home_team_id = home.get("team_id")
+    away_team_id = away.get("team_id")
+    home_players = [p for p in players if p.get("team_id") == home_team_id][:3]
+    away_players = [p for p in players if p.get("team_id") == away_team_id][:3]
+
+    home_slots = ["osd_end_player_h1", "osd_end_player_h2", "osd_end_player_h3"]
+    away_slots = ["osd_end_player_a1", "osd_end_player_a2", "osd_end_player_a3"]
+
+    for i, slot in enumerate(home_slots):
+        el = els.get(slot)
+        if not el:
+            continue
+        if i < len(home_players):
+            p = home_players[i]
+            el.set_property("text",
+                f"{p.get('player_name', '')}  {p.get('points', 0)}pts  BLITZ:{p.get('blitz_scores', 0)}")
+            el.set_property("silent", False)
+        else:
+            el.set_property("silent", True)
+
+    for i, slot in enumerate(away_slots):
+        el = els.get(slot)
+        if not el:
+            continue
+        if i < len(away_players):
+            p = away_players[i]
+            el.set_property("text",
+                f"{p.get('player_name', '')}  {p.get('points', 0)}pts  BLITZ:{p.get('blitz_scores', 0)}")
+            el.set_property("silent", False)
+        else:
+            el.set_property("silent", True)
+
+    players_header = els.get("osd_end_players_header")
+    if players_header:
+        players_header.set_property("text", "TOP PLAYERS")
+        players_header.set_property("silent", False)
+
+    return True
+
+
 def configure_rtmp_branch(
         elements: RtmpElements,
         queue_element: Any,
@@ -751,6 +1068,7 @@ def configure_rtmp_branch(
     configure_scoreboard_texts(elements)
     configure_timeout_overlay(elements)
     configure_blitzball_overlay(elements)
+    configure_end_stats_overlay(elements)
     configure_rtmp_encoder(elements.enc, bitrate)
     configure_rtmp_output(elements, rtmp_url)
 

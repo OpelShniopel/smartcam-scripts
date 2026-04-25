@@ -43,6 +43,7 @@ from rtmp_elements import (
     make_rtmp_elements,
     populate_timeout_texts,
     TIMEOUT_TEXT_KEYS,
+    update_blitzball_end_stats,
     update_blitzball_overlay,
     update_milestone_overlays,
     update_quarter_overlay,
@@ -103,6 +104,8 @@ TIMEOUT_TRANSITION_PAUSE_TICKS = 20  # 20 × 100 ms = 2 s
 _blitz_pulse_active: bool = False
 _blitz_pulse_alpha: float = 0.6
 _blitz_pulse_phase: float = 0.0
+
+_end_stats_show_until: int = 0
 
 _SCOREBOARD_TEXT_KEYS: tuple[str, ...] = (
     "osd_quarter", "osd_home", "osd_away",
@@ -536,14 +539,107 @@ def _milestone_fade_step() -> bool:
     return True
 
 
+def _show_blitzball_end_stats(state: dict, els: dict) -> None:
+    global _end_stats_show_until
+    if _end_stats_show_until == 0:
+        _end_stats_show_until = int(time.time() * 1000) + 20000
+
+    # Dark background: prefer osd_end_bg, fall back to osd_blitz_bg
+    end_bg = els.get("osd_end_bg")
+    if end_bg:
+        end_bg.set_property("alpha", 0.85)
+    else:
+        blitz_bg = els.get("osd_blitz_bg")
+        if blitz_bg:
+            blitz_bg.set_property("alpha", 1.0)
+
+    winner = state.get("winner", "")
+    home_name = state.get("home_name", "HOME")
+    away_name = state.get("away_name", "AWAY")
+    home_pts = state.get("home_points", 0)
+    away_pts = state.get("away_points", 0)
+    home_blitz = state.get("home_blitz_score", 0)
+    away_blitz = state.get("away_blitz_score", 0)
+
+    home_name_el = els.get("osd_blitz_home_name")
+    if home_name_el:
+        home_name_el.set_property("silent", False)
+        home_name_el.set_property("text", home_name)
+
+    away_name_el = els.get("osd_blitz_away_name")
+    if away_name_el:
+        away_name_el.set_property("silent", False)
+        away_name_el.set_property("text", away_name)
+
+    home_pts_el = els.get("osd_blitz_home_pts")
+    if home_pts_el:
+        home_pts_el.set_property("silent", False)
+        home_pts_el.set_property("text", str(home_pts))
+
+    away_pts_el = els.get("osd_blitz_away_pts")
+    if away_pts_el:
+        away_pts_el.set_property("silent", False)
+        away_pts_el.set_property("text", str(away_pts))
+
+    home_blitz_el = els.get("osd_blitz_home_blitz")
+    if home_blitz_el:
+        home_blitz_el.set_property("silent", False)
+        home_blitz_el.set_property("text", f":{home_blitz}")
+        home_blitz_el.set_property("color", 0xFFFFD700)
+
+    away_blitz_el = els.get("osd_blitz_away_blitz")
+    if away_blitz_el:
+        away_blitz_el.set_property("silent", False)
+        away_blitz_el.set_property("text", f":{away_blitz}")
+        away_blitz_el.set_property("color", 0xFFFFD700)
+
+    home_streak_el = els.get("osd_blitz_home_streak")
+    away_streak_el = els.get("osd_blitz_away_streak")
+    if winner == "home":
+        if home_streak_el:
+            home_streak_el.set_property("silent", False)
+            home_streak_el.set_property("text", "WINNER")
+        if away_streak_el:
+            away_streak_el.set_property("silent", True)
+    elif winner == "away":
+        if away_streak_el:
+            away_streak_el.set_property("silent", False)
+            away_streak_el.set_property("text", "WINNER")
+        if home_streak_el:
+            home_streak_el.set_property("silent", True)
+    else:
+        if home_streak_el:
+            home_streak_el.set_property("silent", True)
+        if away_streak_el:
+            away_streak_el.set_property("silent", True)
+
+
 def _update_overlay(state: dict) -> None:
-    global _last_score_state
+    global _last_score_state, _end_stats_show_until
     _last_score_state = dict(state)
     els = dict(_osd_elements)
     if not els:
         return
 
-    if not _timeout_fade_active and state.get("sport_code", "") != "BLITZBALL":
+    game_finished = state.get("game_finished", False)
+    sport_code = state.get("sport_code", "")
+
+    if not game_finished:
+        _end_stats_show_until = 0
+
+    if game_finished and sport_code == "BLITZBALL":
+        now_ms = int(time.time() * 1000)
+        if _end_stats_show_until == 0 or now_ms < _end_stats_show_until:
+            _show_blitzball_end_stats(state, els)
+            return
+        else:
+            _end_stats_show_until = 0
+
+    end_showing = update_blitzball_end_stats(state, els)
+    if end_showing:
+        return
+
+    if not _timeout_fade_active and sport_code != "BLITZBALL":
         visible = state.get("visible", False)
         quarter = els.get("osd_quarter")
         home = els.get("osd_home")
@@ -662,7 +758,11 @@ def _poll_score_state() -> bool:
         and timeout_stats.get("show_until", 0) > now_ms
     )
 
-    if state != _last_score_state or milestone_active or timeout_active or _timeout_fade_active:
+    game_finished = state.get("game_finished", False)
+    end_active = game_finished and (
+        _end_stats_show_until == 0 or int(time.time() * 1000) < _end_stats_show_until
+    )
+    if state != _last_score_state or milestone_active or timeout_active or _timeout_fade_active or end_active:
         _update_overlay(state)
     return True
 
@@ -967,8 +1067,23 @@ def bus_call(_bus, message, loop: GLib.MainLoop):
     return True
 
 
+def create_dark_bg_png() -> None:
+    from PIL import Image
+    from runtime_paths import END_STATS_BG_PNG
+    if os.path.exists(END_STATS_BG_PNG):
+        return
+    try:
+        img = Image.new("RGBA", (1920, 1080), (26, 26, 26, 230))
+        img.save(END_STATS_BG_PNG)
+        print(f"[worker] created dark bg: {END_STATS_BG_PNG}")
+    except Exception as e:
+        print(f"[worker] failed to create dark bg: {e}")
+
+
 def main() -> None:
     global _loop
+
+    create_dark_bg_png()
 
     rtmp_url = read_stream_url()
     if not rtmp_url:

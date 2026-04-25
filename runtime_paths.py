@@ -18,10 +18,12 @@ SCOREBOARD_PNG = os.path.join(SCRIPT_DIR, "scoreboard.png")
 TIMEOUT_BG_PNG = os.path.join(SCRIPT_DIR, "timeout_bg.png")
 BLITZBALL_SCOREBOARD_PNG = os.path.join(SCRIPT_DIR, "blitzball_scoreboard.png")
 BLITZBALL_ACTIVE_PNG = os.path.join(SCRIPT_DIR, "blitzball_blitz_active.png")
+END_STATS_BG_PNG = os.path.join(SCRIPT_DIR, "end_stats_bg.png")
 
 __all__ = [
     "BLITZBALL_ACTIVE_PNG",
     "BLITZBALL_SCOREBOARD_PNG",
+    "END_STATS_BG_PNG",
     "SCOREBOARD_PNG",
     "TIMEOUT_BG_PNG",
     "SCORE_STATE_FILE",
