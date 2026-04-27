@@ -7,16 +7,11 @@ import signal
 from pan_control_esp_stationary import PanController
 from zoom_control_stationary import ZoomController
 
-# --- CONFIGURATION ---
 UNIX_SOCK  = "/tmp/ptz_control.sock"
 TARGET_CAM = "fixed"
-
-DEBUG = False   # print every raw line received from the socket
-
-# --- ENABLE / DISABLE CONTROLLERS ---
+DEBUG = False 
 ENABLE_PAN  = True
 ENABLE_ZOOM = True
-
 
 class PTZController:
     def __init__(self):
@@ -27,7 +22,7 @@ class PTZController:
             print("WARNING: Both pan and zoom are disabled.")
 
     def process_detection(self, detections):
-        speed_scale = self.zoom.get_pan_speed_factor() if (self.zoom and self.zoom.ser_z) else 1.0
+        speed_scale = self.zoom.get_pan_speed_factor() if (self.zoom and hasattr(self.zoom, 'ser_z') and self.zoom.ser_z) else 1.0
         if self.pan:
             self.pan.process_detection(detections, speed_scale=speed_scale)
         if self.zoom:
@@ -47,57 +42,81 @@ class PTZController:
         if self.pan:
             self.pan.return_home()
 
+    def cleanup(self):
+        print("\nInitiating clean shutdown...")
+        try:
+            self.return_home()
+            time.sleep(0.5) 
+        except:
+            pass
+
+        if self.pan and hasattr(self.pan, 'ser_p') and self.pan.ser_p:
+            self.pan.ser_p.close()
+            print("Pan serial closed.")
+        elif self.pan and hasattr(self.pan, 'ser') and self.pan.ser:
+            self.pan.ser.close()
+            print("Pan serial closed.")
+
+        if self.zoom and hasattr(self.zoom, 'ser_z') and self.zoom.ser_z:
+            self.zoom.ser_z.close()
+            print("Zoom serial closed.")
+        elif self.zoom and hasattr(self.zoom, 'ser') and self.zoom.ser:
+            self.zoom.ser.close()
+            print("Zoom serial closed.")
 
 def socket_listener(controller):
     while True:
         try:
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(1.0)
             client.connect(UNIX_SOCK)
             print("Connected to socket.")
 
             buf = ""
             while True:
-                chunk = client.recv(4096).decode()
-                if not chunk:
-                    break
-                buf += chunk
+                try:
+                    chunk = client.recv(4096).decode()
+                    if not chunk:
+                        break
+                    buf += chunk
 
-                latest_msg = None
-                while "\n" in buf:
-                    line, buf = buf.split("\n", 1)
-                    if DEBUG:
-                        print(f"[SOCKET] {line}")
-                    try:
-                        latest_msg = json.loads(line)
-                    except json.JSONDecodeError:
-                        print(f"[SOCKET] invalid JSON: {line}")
-                        continue
+                    latest_msg = None
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        if DEBUG:
+                            print(f"[SOCKET] {line}")
+                        try:
+                            latest_msg = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
 
-                if latest_msg:
-                    if latest_msg.get("camera") == TARGET_CAM:
-                        controller.process_detection(latest_msg.get("detections", []))
-                    elif DEBUG:
-                        print(f"[SOCKET] ignored camera={latest_msg.get('camera')}")
+                    if latest_msg:
+                        if latest_msg.get("camera") == TARGET_CAM:
+                            controller.process_detection(latest_msg.get("detections", []))
+                except socket.timeout:
+                    continue
 
         except (ConnectionRefusedError, FileNotFoundError):
-            print("Waiting for socket...")
             time.sleep(2)
         except Exception as e:
+            if isinstance(e, KeyboardInterrupt):
+                raise e
             print(f"Socket Error: {e}")
             time.sleep(1)
-
 
 if __name__ == "__main__":
     motor_ctrl = PTZController()
 
-    atexit.register(motor_ctrl.return_home)
-
     def signal_handler(sig, frame):
-        print("\nInterrupt detected! Homing before exit...")
-        motor_ctrl.return_home()
+        motor_ctrl.cleanup()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    atexit.register(motor_ctrl.cleanup)
 
-    socket_listener(motor_ctrl)
+    try:
+        socket_listener(motor_ctrl)
+    except KeyboardInterrupt:
+        motor_ctrl.cleanup()
+        sys.exit(0)
