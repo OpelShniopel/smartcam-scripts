@@ -11,7 +11,7 @@ from zoom_control_stationary import ZoomController
 UNIX_SOCK  = "/tmp/ptz_control.sock"
 TARGET_CAM = "fixed"
 
-DEBUG = True   # print every raw line received from the socket
+DEBUG = False   # print every raw line received from the socket
 
 # --- ENABLE / DISABLE CONTROLLERS ---
 ENABLE_PAN  = True
