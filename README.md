@@ -60,8 +60,8 @@ The main process publishes:
     - `POST http://127.0.0.1:9101/score`
 - Unix socket for the Go bridge:
     - `/tmp/smartcam.sock`
-- Unix socket for camera control detections:
-    - `/tmp/pycam.sock`
+- Unix socket for PTZ control detections:
+    - `/tmp/ptz-control.sock`
 
 Example score update:
 
@@ -113,8 +113,8 @@ stop_stream
 To switch the RTMP source, send one of:
 
 ```text
-switch_cam fixed
-switch_cam ptz
+switch_cam uuid1 - fixed
+switch_cam uuid2 - ptz
 ```
 
 For manual debugging only, replacing `stream.conf` with `# disabled` prevents

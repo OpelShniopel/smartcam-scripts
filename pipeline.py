@@ -29,7 +29,7 @@ STREAM DESIGN:
     - stream branch: 1080p internal RTSP feed for the external RTMP worker
 
 SERVICES (for Go backend):
-  Unix socket  /tmp/smartcam.sock  — bidirectional newline-delimited JSON
+  Unix socket  /tmp/smartcam.sock  — Go bridge, bidirectional newline-delimited JSON
     Python -> Go: {"type":"state", "streaming":bool, "stream_active_camera":"ptz",
                    "webrtc":{...}, "internal_streams":{...}}
                   {"type":"stream_status", "active":bool, "error":"..."}
@@ -43,8 +43,8 @@ SERVICES (for Go backend):
                   {"type":"cmd", "action":"set_score", ...score fields...}
                   {"type":"ping"}
 
-  Unix socket  /tmp/pycam.sock  — outbound only, newline-delimited JSON
-    Python -> camera control: {"camera":"fixed","frame":N,"timestamp":T,"detections":[...]}
+  Unix socket  /tmp/ptz-control.sock  — outbound only, newline-delimited JSON
+    Python -> PTZ control: {"camera":"fixed","frame":N,"timestamp":T,"detections":[...]}
 
 HTTP API (internal / debug only):
   GET  /status
@@ -123,8 +123,8 @@ def _get_local_ip() -> str:
 
 
 JETSON_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
-UNIX_SOCK = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
-PYCAM_SOCK = "/tmp/pycam.sock"
+GO_BRIDGE_SOCK = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
+PTZ_CONTROL_SOCK = "/tmp/pycam.sock"
 HTTP_PORT = 9101
 
 CLASS_ID_RIM = 0
@@ -255,7 +255,7 @@ def _send_stream_status(active: bool, error: str = "") -> None:
         _rtmp_status_sent = True
         _rtmp_status_cached = msg
 
-    _out_q.put(msg)
+    _go_bridge_out_q.put(msg)
     if active:
         print("[stream_status] RTMP stream verified active")
     else:
@@ -277,9 +277,9 @@ _fps_lock = threading.Lock()
 
 def _ai_fps_metric_enabled(cam_label: str) -> bool:
     return (
-        ENABLE_TERMINAL_FPS_METRICS
-        and ENABLE_AI_FPS_METRICS
-        and _ai_enabled(cam_label)
+            ENABLE_TERMINAL_FPS_METRICS
+            and ENABLE_AI_FPS_METRICS
+            and _ai_enabled(cam_label)
     )
 
 
@@ -455,11 +455,11 @@ def _apply_score_patch(data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pycam socket server
+# PTZ control socket server
 # ---------------------------------------------------------------------------
-_pycam_clients: list[socket.socket] = []
-_pycam_clients_lock = threading.Lock()
-_pycam_q: queue.SimpleQueue = queue.SimpleQueue()
+_ptz_control_clients: list[socket.socket] = []
+_ptz_control_clients_lock = threading.Lock()
+_ptz_control_q: queue.SimpleQueue = queue.SimpleQueue()
 
 
 def _json_socket_sender_loop(
@@ -485,38 +485,38 @@ def _json_socket_sender_loop(
                     pass
 
 
-def start_pycam_server() -> None:
+def start_ptz_control_server() -> None:
     try:
-        os.unlink(PYCAM_SOCK)
+        os.unlink(PTZ_CONTROL_SOCK)
     except FileNotFoundError:
         pass
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(PYCAM_SOCK)
-    os.chmod(PYCAM_SOCK, 0o660)
+    srv.bind(PTZ_CONTROL_SOCK)
+    os.chmod(PTZ_CONTROL_SOCK, 0o660)
     srv.listen(2)
-    print(f"Pycam socket -> {PYCAM_SOCK}")
+    print(f"PTZ control socket -> {PTZ_CONTROL_SOCK}")
 
     def _accept_loop():
         while True:
             try:
                 conn, _ = srv.accept()
-                with _pycam_clients_lock:
-                    _pycam_clients.append(conn)
-                print("[pycam] camera control client connected")
+                with _ptz_control_clients_lock:
+                    _ptz_control_clients.append(conn)
+                print("[ptz-control] client connected")
             except OSError:
                 break
 
     threading.Thread(
         target=_json_socket_sender_loop,
-        args=(_pycam_q, _pycam_clients, _pycam_clients_lock),
+        args=(_ptz_control_q, _ptz_control_clients, _ptz_control_clients_lock),
         daemon=True,
-        name="pycam-sender",
+        name="ptz-control-sender",
     ).start()
-    threading.Thread(target=_accept_loop, daemon=True, name="pycam-accept").start()
+    threading.Thread(target=_accept_loop, daemon=True, name="ptz-control-accept").start()
 
 
-def send_to_pycam(cam_label: str, frame_num: int, detections: list) -> None:
-    _pycam_q.put({
+def send_to_ptz_control(cam_label: str, frame_num: int, detections: list) -> None:
+    _ptz_control_q.put({
         "camera": _stream_camera_name(cam_label),
         "frame": frame_num,
         "timestamp": time.time(),
@@ -525,25 +525,25 @@ def send_to_pycam(cam_label: str, frame_num: int, detections: list) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Unix socket server (Go bridge)
+# Go bridge socket server
 # ---------------------------------------------------------------------------
-_sock_clients: list[socket.socket] = []
-_sock_clients_lock = threading.Lock()
-_out_q: queue.SimpleQueue = queue.SimpleQueue()
+_go_bridge_clients: list[socket.socket] = []
+_go_bridge_clients_lock = threading.Lock()
+_go_bridge_out_q: queue.SimpleQueue = queue.SimpleQueue()
 
 
 def _handle_go_connection(conn: socket.socket) -> None:
-    with _sock_clients_lock:
-        _sock_clients.append(conn)
+    with _go_bridge_clients_lock:
+        _go_bridge_clients.append(conn)
     _push_state()
 
     # Replay cached stream_status if already determined.
     # Fixes the race where stream_status fired before Go reconnected
     # (Python restarts faster than Go's 2s reconnect delay, so the
-    # original stream_status was sent to an empty _sock_clients list).
+    # original stream_status was sent to an empty _go_bridge_clients list).
     cached_status = _get_cached_stream_status()
     if cached_status is not None:
-        _out_q.put(cached_status)
+        _go_bridge_out_q.put(cached_status)
         print(f"[stream_status] replayed to new Go connection: active={cached_status.get('active')}")
 
     buf = b""
@@ -568,13 +568,13 @@ def _handle_go_connection(conn: socket.socket) -> None:
                 if msg.get("type") == "cmd":
                     _dispatch_cmd(msg)
                 elif msg.get("type") == "ping":
-                    _out_q.put({"type": "pong"})
+                    _go_bridge_out_q.put({"type": "pong"})
     except OSError:
         pass
     finally:
-        with _sock_clients_lock:
+        with _go_bridge_clients_lock:
             try:
-                _sock_clients.remove(conn)
+                _go_bridge_clients.remove(conn)
             except ValueError:
                 pass
         try:
@@ -587,7 +587,7 @@ def _ack(action: str, ok: bool, error: str = "") -> None:
     msg: dict = {"type": "ack", "action": action, "ok": ok}
     if error:
         msg["error"] = error
-    _out_q.put(msg)
+    _go_bridge_out_q.put(msg)
 
 
 def _dispatch_cmd(msg: dict) -> None:
@@ -727,7 +727,7 @@ def _push_state() -> None:
         internal_streams["ptz_stream"] = ptz_stream_url
         internal_streams["cam2_stream"] = ptz_stream_url
 
-    _out_q.put({
+    _go_bridge_out_q.put({
         "type": "state",
         "streaming": bool(url) and worker_running,
         "stream_configured": bool(url),
@@ -752,21 +752,21 @@ def _push_state() -> None:
     })
 
 
-def start_unix_server() -> None:
+def start_go_bridge_server() -> None:
     try:
-        os.unlink(UNIX_SOCK)
+        os.unlink(GO_BRIDGE_SOCK)
     except FileNotFoundError:
         pass
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(UNIX_SOCK)
-    os.chmod(UNIX_SOCK, 0o660)
+    srv.bind(GO_BRIDGE_SOCK)
+    os.chmod(GO_BRIDGE_SOCK, 0o660)
     srv.listen(4)
-    print(f"Unix socket -> {UNIX_SOCK}")
+    print(f"Go bridge socket -> {GO_BRIDGE_SOCK}")
     threading.Thread(
         target=_json_socket_sender_loop,
-        args=(_out_q, _sock_clients, _sock_clients_lock),
+        args=(_go_bridge_out_q, _go_bridge_clients, _go_bridge_clients_lock),
         daemon=True,
-        name="unix-sender",
+        name="go-bridge-sender",
     ).start()
 
     def _accept_loop():
@@ -778,7 +778,7 @@ def start_unix_server() -> None:
             except OSError:
                 break
 
-    threading.Thread(target=_accept_loop, daemon=True).start()
+    threading.Thread(target=_accept_loop, daemon=True, name="go-bridge-accept").start()
 
 
 # ---------------------------------------------------------------------------
@@ -800,8 +800,10 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "stream_active_camera": _read_stream_worker_config().get("activeCamera", PTZ_CAMERA),
                 "rtmp_url": url or "",
                 "score_overlay": score_visible,
-                "unix_sock": UNIX_SOCK,
-                "pycam_sock": PYCAM_SOCK,
+                "go_bridge_sock": GO_BRIDGE_SOCK,
+                "ptz_control_sock": PTZ_CONTROL_SOCK,
+                "unix_sock": GO_BRIDGE_SOCK,
+                "pycam_sock": PTZ_CONTROL_SOCK,
                 "encoders": list(_encoders.keys()),
                 "cameras": {
                     FIXED_CAMERA: {
@@ -884,6 +886,9 @@ class ControlHandler(BaseHTTPRequestHandler):
         return self.rfile.read(length).decode() if length else ""
 
     def log_message(self, format_string, *args):
+        # Silence BaseHTTPRequestHandler's default access log; the pipeline
+        # uses its own structured/explicit logging and these per-request lines
+        # add noise without useful signal.
         pass
 
 
@@ -1247,9 +1252,8 @@ def _worker_pid_info_is_current(info: dict | None) -> bool:
         owner_pid = _pid_metadata_int(info, "owner_pid")
     except ValueError:
         return False
-    if owner_pid is not None:
-        if owner_pid not in (0, os.getpid()):
-            return False
+    if owner_pid is not None and owner_pid not in (0, os.getpid()):
+        return False
 
     try:
         owner_start_ticks = _pid_metadata_int(info, "owner_start_ticks")
@@ -1370,7 +1374,7 @@ def _sync_stream_status_cache(active: bool, error: str = "") -> None:
 
 def _emit_stream_status_and_sync_cache(active: bool, error: str = "") -> None:
     _sync_stream_status_cache(active, error)
-    _out_q.put(_get_cached_stream_status())
+    _go_bridge_out_q.put(_get_cached_stream_status())
     if active:
         print("[stream_status] RTMP stream verified active")
     else:
@@ -1442,7 +1446,7 @@ def pgie_src_pad_buffer_probe(_pad, info, cam_label):
                     break
 
             if detections:
-                send_to_pycam(cam_label, frame_meta.frame_num, detections)
+                send_to_ptz_control(cam_label, frame_meta.frame_num, detections)
 
         try:
             l_frame = l_frame.next
@@ -1859,9 +1863,9 @@ def main():
 
     Gst.init(None)
 
-    start_unix_server()
+    start_go_bridge_server()
     start_http_server()
-    start_pycam_server()
+    start_ptz_control_server()
 
     _persist_score_state()
     _persist_stream_worker_config()
@@ -1918,11 +1922,11 @@ def main():
         pipeline.set_state(Gst.State.NULL)
         pipeline.get_state(Gst.CLOCK_TIME_NONE)
         try:
-            os.unlink(UNIX_SOCK)
+            os.unlink(GO_BRIDGE_SOCK)
         except FileNotFoundError:
             pass
         try:
-            os.unlink(PYCAM_SOCK)
+            os.unlink(PTZ_CONTROL_SOCK)
         except FileNotFoundError:
             pass
 

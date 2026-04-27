@@ -14,9 +14,13 @@ from runtime_paths import (
     SCOREBOARD_PNG, TIMEOUT_BG_PNG,
 )
 
+# Sets a keyframe every 60 encoded frames.
 RTMP_KEYINT = 60
+# Sets the x264 encoder to use 2 threads.
 RTMP_THREADS = 2
+# Uses x264's fastest preset.
 RTMP_PRESET = "ultrafast"
+# Tunes x264 for low-latency streaming.
 RTMP_TUNE = "zerolatency"
 
 RTMP_OVERLAY_W = 1920
@@ -853,8 +857,11 @@ def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -
 
 
 def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
+    # Uses constant bitrate mode.
     enc.set_property("pass", "cbr")
+    # Sets the RTMP video bitrate in kbps.
     enc.set_property("bitrate", bitrate)
+    # Sets the encoder's VBV buffer size.
     enc.set_property("vbv-buf-capacity", 200)
     enc.set_property("tune", RTMP_TUNE)
     enc.set_property("speed-preset", RTMP_PRESET)
@@ -863,10 +870,15 @@ def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
 
 
 def configure_rtmp_output(elements: RtmpElements, rtmp_url: str) -> None:
+    # Makes the FLV output streamable.
     elements.flvmux.set_property("streamable", True)
+    # Sets the RTMP destination URL.
     elements.rtmpsink.set_property("location", rtmp_url)
+    # Starts the RTMP sink synchronously.
     elements.rtmpsink.set_property("async", False)
+    # Generates a simple audio source for the stream.
     elements.audiosrc.set_property("wave", 4)
+    # Sets the AAC audio bitrate.
     elements.aacenc.set_property("bitrate", 128000)
 
 
