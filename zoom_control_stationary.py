@@ -36,8 +36,16 @@ ZOOM_CURVE   = 1.5
 # Assumes the pan camera is pointing at the stationary cam centre (step 0).
 # This over-triggers when the pan has already rotated, but that only causes
 # extra zoom-out which is the safe failure mode.
-STATIONARY_CENTER_X = 640.0    # half of FRAME_W
-STATIONARY_CENTER_Y = 360.0    # half of FRAME_H
+STATIONARY_CENTER_X = 640.0    # half of FRAME_W — used for horizontal pan-relative math
+STATIONARY_CENTER_Y = 360.0    # half of FRAME_H (not used for zoom logic directly)
+
+# Where the pan camera is actually pointing vertically, expressed as a y-pixel in the
+# stationary camera's frame.  Pan can only pan (no tilt), so this is fixed by how
+# the camera is physically mounted.  If zoom-out triggers too early on the TOP and
+# too late on the BOTTOM, lower this value.  If the opposite, raise it.
+# To calibrate: look at the pan cam feed and find the y-pixel in the stationary frame
+# that maps to the vertical centre of the pan cam's view.
+PAN_CENTER_Y = 280.0
 
 VELOCITY_HORIZON   = 6         # frames ahead to predict ball position
 EDGE_MARGIN        = 0.30      # fraction of FOV half-width inside which we consider safe (higher = more aggressive zoom-out)
@@ -180,14 +188,19 @@ class ZoomController:
         horiz_offset  = abs(ball_x - pan_center_x)
         edge_req_h    = _edge_req(horiz_offset, STATIONARY_CENTER_X)
 
-        # Vertical: pan cannot tilt, so offset is absolute from stationary frame centre.
-        # Zoom out whenever the ball is near the top or bottom of the stationary frame.
-        vert_offset   = abs(ball_y - STATIONARY_CENTER_Y)
-        # Use vertical velocity for vertical prediction
+        # Vertical: pan cannot tilt, so offset is relative to PAN_CENTER_Y — the actual
+        # vertical pointing position of the pan camera in the stationary frame.
+        # Use PAN_CENTER_Y (not STATIONARY_CENTER_Y) so top/bottom pressure is symmetric
+        # around where the pan cam is actually looking, not the stationary frame midpoint.
+        vert_offset    = abs(ball_y - PAN_CENTER_Y)
         vert_predicted = vert_offset + self.smooth_vel_y * VELOCITY_HORIZON
+        # The pan cam's vertical FOV half at 1x equals PAN_CENTER_Y pixels to the top
+        # and (FRAME_H - PAN_CENTER_Y) pixels to the bottom.  Use the smaller of the two
+        # as the effective half-width so we zoom out for whichever edge is closer.
+        pan_vfov_half  = min(PAN_CENTER_Y, FRAME_H - PAN_CENTER_Y)
         if vert_predicted > 0.0:
-            max_zr_v  = STATIONARY_CENTER_Y * (1.0 - EDGE_MARGIN) / vert_predicted
-            req_t_v   = max(0.0, min(1.0, (max_zr_v - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)))
+            max_zr_v   = pan_vfov_half * (1.0 - EDGE_MARGIN) / vert_predicted
+            req_t_v    = max(0.0, min(1.0, (max_zr_v - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)))
             edge_req_v = ZOOM_MAX_STEPS - req_t_v * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
         else:
             edge_req_v = ZOOM_MIN_STEPS
@@ -199,7 +212,8 @@ class ZoomController:
         desired_zoom_pos = min(ZOOM_MAX_STEPS, max(base_zoom_pos, edge_required_pos))
 
         if DEBUG:
-            print(f"[ZOOM] ball_w={ball_width:.0f}  vel_x={self.smooth_velocity:.1f}  vel_y={self.smooth_vel_y:.1f}  "
+            print(f"[ZOOM] ball_w={ball_width:.0f}  bx={ball_x:.0f}  by={ball_y:.0f}  "
+                  f"vel_x={self.smooth_velocity:.1f}  vel_y={self.smooth_vel_y:.1f}  "
                   f"pan_err={pan_error_x:.0f}  h_off={horiz_offset:.0f}  v_off={vert_offset:.0f}  "
                   f"edge_h={edge_req_h:.0f}  edge_v={edge_req_v:.0f}  "
                   f"base={base_zoom_pos:.0f}  desired={desired_zoom_pos:.0f}")
