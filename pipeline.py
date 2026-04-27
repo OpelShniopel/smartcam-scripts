@@ -1102,7 +1102,7 @@ def _drain_program_camera_switch_request() -> bool:
     global _program_switch_requested_camera, _program_switch_timer_queued
     global _program_switch_settle_until_monotonic
 
-    reschedule = False
+    requested_camera: str | None = None
 
     with _program_switch_lock:
         remaining_ms = max(
@@ -1110,15 +1110,11 @@ def _drain_program_camera_switch_request() -> bool:
             int((_program_switch_settle_until_monotonic - time.monotonic()) * 1000),
         )
         if remaining_ms > 0:
-            reschedule = True
+            return True
         else:
             requested_camera = _program_switch_requested_camera
             _program_switch_requested_camera = None
             _program_switch_timer_queued = False
-
-    if reschedule:
-        GLib.timeout_add(remaining_ms, _drain_program_camera_switch_request)
-        return False
 
     if requested_camera is not None:
         previous_switch_seq = _program_switch_seq
