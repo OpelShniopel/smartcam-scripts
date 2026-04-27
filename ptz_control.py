@@ -11,6 +11,8 @@ from zoom_control_stationary import ZoomController
 UNIX_SOCK  = "/tmp/ptz_control.sock"
 TARGET_CAM = "CAM0"
 
+DEBUG = True   # print every raw line received from the socket
+
 # --- ENABLE / DISABLE CONTROLLERS ---
 ENABLE_PAN  = True
 ENABLE_ZOOM = True
@@ -62,13 +64,19 @@ def socket_listener(controller):
                 latest_msg = None
                 while "\n" in buf:
                     line, buf = buf.split("\n", 1)
+                    if DEBUG:
+                        print(f"[SOCKET] {line}")
                     try:
                         latest_msg = json.loads(line)
                     except json.JSONDecodeError:
+                        print(f"[SOCKET] invalid JSON: {line}")
                         continue
 
-                if latest_msg and latest_msg.get("camera") == TARGET_CAM:
-                    controller.process_detection(latest_msg.get("detections", []))
+                if latest_msg:
+                    if latest_msg.get("camera") == TARGET_CAM:
+                        controller.process_detection(latest_msg.get("detections", []))
+                    elif DEBUG:
+                        print(f"[SOCKET] ignored camera={latest_msg.get('camera')}")
 
         except (ConnectionRefusedError, FileNotFoundError):
             print("Waiting for socket...")
