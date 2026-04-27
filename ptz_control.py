@@ -5,7 +5,7 @@ import sys
 import atexit
 import signal
 from pan_control_esp_stationary import PanController
-from zoom_control_v2 import ZoomController
+from zoom_control_stationary import ZoomController
 
 # --- CONFIGURATION ---
 UNIX_SOCK  = "/tmp/ptz_control.sock"
