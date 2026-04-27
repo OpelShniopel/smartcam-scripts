@@ -206,6 +206,7 @@ PROGRAM_CLEAN_BITRATE = 5000
 PROGRAM_CLEAN_KEYINT = 30
 PROGRAM_CLEAN_THREADS = 1
 PROGRAM_RTSP_PATH = "program_clean"
+PROGRAM_SWITCH_DEBOUNCE_MS = 150
 
 # AI branch encoder settings
 AI_BITRATE = 3500
@@ -235,6 +236,9 @@ _program_previous_camera: str = PTZ_CAMERA
 _program_switch_seq = 0
 _program_last_switch_at_ms = 0
 _last_program_cfg: dict | None = None
+_program_switch_lock = threading.Lock()
+_program_switch_requested_camera: str | None = None
+_program_switch_debounce_queued = False
 
 # ---------------------------------------------------------------------------
 # RTMP stream status tracking
@@ -671,7 +675,7 @@ def _dispatch_cmd(msg: dict) -> None:
             _ack("switch_cam", False, err)
             return
         _persist_stream_worker_config(active_camera=normalized)
-        _switch_program_camera(normalized)
+        _request_program_camera_switch(normalized)
         running = _is_stream_worker_running()
         print(f"[cmd] switch_cam -> {normalized} (running={running})")
         _ack("switch_cam", True)
@@ -1059,6 +1063,40 @@ def _force_key_unit(enc: Gst.Element | None, label: str) -> None:
     )
     if sink_pad.send_event(event):
         print(f"[program] forced keyframe -> {label}")
+
+
+def _request_program_camera_switch(active_camera: str) -> None:
+    global _program_switch_requested_camera, _program_switch_debounce_queued
+
+    normalized = _normalize_stream_camera(active_camera) or PTZ_CAMERA
+
+    schedule_debounce = False
+    with _program_switch_lock:
+        _program_switch_requested_camera = normalized
+        if not _program_switch_debounce_queued:
+            _program_switch_debounce_queued = True
+            schedule_debounce = True
+
+    if schedule_debounce:
+        GLib.idle_add(_queue_program_camera_switch_debounce)
+
+
+def _queue_program_camera_switch_debounce() -> bool:
+    GLib.timeout_add(PROGRAM_SWITCH_DEBOUNCE_MS, _drain_program_camera_switch_request)
+    return False
+
+
+def _drain_program_camera_switch_request() -> bool:
+    global _program_switch_requested_camera, _program_switch_debounce_queued
+
+    with _program_switch_lock:
+        requested_camera = _program_switch_requested_camera
+        _program_switch_requested_camera = None
+        _program_switch_debounce_queued = False
+
+    if requested_camera is not None:
+        _switch_program_camera(requested_camera)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1865,7 +1903,7 @@ def _poll_program_config() -> bool:
         previous = _last_program_cfg or {}
         _last_program_cfg = dict(cfg)
         if cfg.get("activeCamera") != previous.get("activeCamera"):
-            _switch_program_camera(cfg.get("activeCamera", PTZ_CAMERA))
+            _request_program_camera_switch(cfg.get("activeCamera", PTZ_CAMERA))
         else:
             _push_state()
     return True
@@ -1999,6 +2037,7 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
 def build_pipeline() -> tuple:
     global _encoders, _program_selector, _program_enc, _last_program_cfg
     global _program_previous_camera, _program_switch_seq, _program_last_switch_at_ms
+    global _program_switch_requested_camera, _program_switch_debounce_queued
     _encoders = {}
     _program_selector = None
     _program_enc = None
@@ -2006,6 +2045,8 @@ def build_pipeline() -> tuple:
     _program_previous_camera = PTZ_CAMERA
     _program_switch_seq = 0
     _program_last_switch_at_ms = 0
+    _program_switch_requested_camera = None
+    _program_switch_debounce_queued = False
 
     pipeline = Gst.Pipeline()
     if not pipeline:
