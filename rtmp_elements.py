@@ -8,7 +8,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from runtime_paths import BLITZBALL_ACTIVE_PNG, BLITZBALL_SCOREBOARD_PNG, END_STATS_BG_PNG, SCOREBOARD_PNG, SCRIPT_DIR, TIMEOUT_BG_PNG
+from runtime_paths import (
+    BLITZBALL_ACTIVE_PNG, BLITZBALL_SCOREBOARD_PNG, END_STATS_BG_PNG,
+    FOULS_AWAY_DIR, FOULS_HOME_DIR,
+    SCOREBOARD_PNG, TIMEOUT_BG_PNG,
+)
 
 RTMP_KEYINT = 60
 RTMP_THREADS = 2
@@ -659,7 +663,8 @@ def foul_png_path(team: str, count: int) -> str | None:
     if count <= 0:
         return None
     count = min(count, 5)
-    return os.path.join(SCRIPT_DIR, f"fouls_{team}_{count}.png")
+    base = FOULS_HOME_DIR if team == "home" else FOULS_AWAY_DIR
+    return os.path.join(base, f"{count}.png")
 
 
 def configure_foul_bars(elements: RtmpElements) -> None:
