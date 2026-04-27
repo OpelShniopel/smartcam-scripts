@@ -36,10 +36,11 @@ ZOOM_CURVE   = 1.5
 # Assumes the pan camera is pointing at the stationary cam centre (step 0).
 # This over-triggers when the pan has already rotated, but that only causes
 # extra zoom-out which is the safe failure mode.
-STATIONARY_CENTER_X = 640.0    # half of FRAME_W — stationary cam optical centre
+STATIONARY_CENTER_X = 640.0    # half of FRAME_W
+STATIONARY_CENTER_Y = 360.0    # half of FRAME_H
 
-VELOCITY_HORIZON = 6           # frames ahead to predict ball position
-EDGE_MARGIN      = 0.20        # fraction of pan FOV half-width — zoom-out starts here
+VELOCITY_HORIZON   = 6         # frames ahead to predict ball position
+EDGE_MARGIN        = 0.20      # fraction of FOV half-width inside which we consider safe
 VELOCITY_EMA_ALPHA = 0.35      # smoothing factor for ball velocity (0=frozen, 1=raw)
 
 FRAME_W = 1280   # stationary cam frame width (px)
@@ -63,7 +64,9 @@ class ZoomController:
         self.current_zoom_pos  = ZOOM_BASE_POS
         self.target_zoom_pos   = ZOOM_BASE_POS
         self.last_ball_x       = None
+        self.last_ball_y       = None
         self.smooth_velocity   = 0.0
+        self.smooth_vel_y      = 0.0
         self.last_cmd_time     = 0
         self.cmd_interval      = 0.05
 
@@ -136,7 +139,9 @@ class ZoomController:
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball or ball['width'] <= 0:
             self.last_ball_x     = None
+            self.last_ball_y     = None
             self.smooth_velocity = 0.0
+            self.smooth_vel_y    = 0.0
             self.target_zoom_pos = ZOOM_MAX_STEPS  # widen FOV when ball is lost
             self._drive_motor()
             return
@@ -151,37 +156,51 @@ class ZoomController:
         base_zoom_pos = ZOOM_MIN_STEPS + t_curved * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
 
         ball_x = ball['center_x']
-        raw_velocity = abs(ball_x - self.last_ball_x) if self.last_ball_x is not None else 0.0
-        self.smooth_velocity = VELOCITY_EMA_ALPHA * raw_velocity + (1.0 - VELOCITY_EMA_ALPHA) * self.smooth_velocity
+        ball_y = ball['center_y']
+        raw_vel_x = abs(ball_x - self.last_ball_x) if self.last_ball_x is not None else 0.0
+        raw_vel_y = abs(ball_y - self.last_ball_y) if self.last_ball_y is not None else 0.0
+        self.smooth_velocity = VELOCITY_EMA_ALPHA * raw_vel_x + (1.0 - VELOCITY_EMA_ALPHA) * self.smooth_velocity
+        self.smooth_vel_y    = VELOCITY_EMA_ALPHA * raw_vel_y + (1.0 - VELOCITY_EMA_ALPHA) * self.smooth_vel_y
         self.last_ball_x = ball_x
+        self.last_ball_y = ball_y
 
-        # Solve geometrically for the minimum zoom_pos (widest FOV) needed to keep
-        # the predicted ball position inside the pan cam's safe FOV zone.
-        #
-        # pan_error_x is the pixel error the pan sent this frame (ball_x - STATIONARY_CENTER_X).
-        # Adding it back gives an estimate of where the pan is currently pointing.
-        # When tracking, pan_center_x ≈ ball_x → offset_now ≈ 0 → only high velocity
-        # (ball outrunning the pan) still forces zoom-out.
-        pan_center_x     = STATIONARY_CENTER_X + pan_error_x
-        offset_now       = abs(ball_x - pan_center_x)
-        predicted_offset = offset_now + self.smooth_velocity * VELOCITY_HORIZON
+        def _edge_req(offset, center_half):
+            """Minimum zoom_pos to keep `offset` inside the safe FOV zone."""
+            predicted = offset + self.smooth_velocity * VELOCITY_HORIZON
+            if predicted <= 0.0:
+                return ZOOM_MIN_STEPS
+            max_zr    = center_half * (1.0 - EDGE_MARGIN) / predicted
+            req_t     = max(0.0, min(1.0, (max_zr - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)))
+            return ZOOM_MAX_STEPS - req_t * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
 
-        if predicted_offset > 0.0:
-            max_zoom_ratio    = STATIONARY_CENTER_X * (1.0 - EDGE_MARGIN) / predicted_offset
-            required_t        = (max_zoom_ratio - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)
-            required_t        = max(0.0, min(1.0, required_t))
-            edge_required_pos = ZOOM_MAX_STEPS - required_t * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
+        # Horizontal: pan tracks left/right, so offset relative to where the pan is pointing.
+        # pan_center_x ≈ ball_x when tracking → offset ≈ 0, only fast balls trigger zoom-out.
+        pan_center_x  = STATIONARY_CENTER_X + pan_error_x
+        horiz_offset  = abs(ball_x - pan_center_x)
+        edge_req_h    = _edge_req(horiz_offset, STATIONARY_CENTER_X)
+
+        # Vertical: pan cannot tilt, so offset is absolute from stationary frame centre.
+        # Zoom out whenever the ball is near the top or bottom of the stationary frame.
+        vert_offset   = abs(ball_y - STATIONARY_CENTER_Y)
+        # Use vertical velocity for vertical prediction
+        vert_predicted = vert_offset + self.smooth_vel_y * VELOCITY_HORIZON
+        if vert_predicted > 0.0:
+            max_zr_v  = STATIONARY_CENTER_Y * (1.0 - EDGE_MARGIN) / vert_predicted
+            req_t_v   = max(0.0, min(1.0, (max_zr_v - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)))
+            edge_req_v = ZOOM_MAX_STEPS - req_t_v * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
         else:
-            edge_required_pos = ZOOM_MIN_STEPS
+            edge_req_v = ZOOM_MIN_STEPS
+
+        edge_required_pos = max(edge_req_h, edge_req_v)
 
         # Take the more zoomed-out of ball-size target and edge requirement.
         # Higher zoom_pos = more zoomed out (1x). Lower = more zoomed in (8x).
         desired_zoom_pos = min(ZOOM_MAX_STEPS, max(base_zoom_pos, edge_required_pos))
 
         if DEBUG:
-            print(f"[ZOOM] ball_w={ball_width:.0f}  vel={self.smooth_velocity:.1f}  "
-                  f"pan_err={pan_error_x:.0f}  offset={offset_now:.0f}  pred={predicted_offset:.0f}  "
-                  f"edge_req={edge_required_pos:.0f}  "
+            print(f"[ZOOM] ball_w={ball_width:.0f}  vel_x={self.smooth_velocity:.1f}  vel_y={self.smooth_vel_y:.1f}  "
+                  f"pan_err={pan_error_x:.0f}  h_off={horiz_offset:.0f}  v_off={vert_offset:.0f}  "
+                  f"edge_h={edge_req_h:.0f}  edge_v={edge_req_v:.0f}  "
                   f"base={base_zoom_pos:.0f}  desired={desired_zoom_pos:.0f}")
 
         self.target_zoom_pos = desired_zoom_pos
