@@ -1028,15 +1028,17 @@ def _set_if_supported(el: Gst.Element, prop: str, value) -> None:
 def _force_key_unit(enc: Gst.Element | None, label: str) -> None:
     if enc is None:
         return
-    src_pad = enc.get_static_pad("src")
-    if src_pad is None:
+    sink_pad = enc.get_static_pad("sink")
+    if sink_pad is None:
         return
-    event = GstVideo.video_event_new_upstream_force_key_unit(
+    event = GstVideo.video_event_new_downstream_force_key_unit(
+        Gst.CLOCK_TIME_NONE,
+        Gst.CLOCK_TIME_NONE,
         Gst.CLOCK_TIME_NONE,
         True,
         0,
     )
-    if src_pad.send_event(event):
+    if sink_pad.send_event(event):
         print(f"[program] forced keyframe -> {label}")
 
 
@@ -1556,6 +1558,10 @@ def _configure_x264_encoder(
     enc.set_property("bitrate", bitrate)
     enc.set_property("key-int-max", keyint)
     enc.set_property("threads", threads)
+    _set_if_supported(enc, "byte-stream", True)
+    _set_if_supported(enc, "bframes", 0)
+    _set_if_supported(enc, "ref", 1)
+    _set_if_supported(enc, "sliced-threads", True)
 
 
 def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
@@ -1582,7 +1588,7 @@ def _build_simple_rtsp_encode_branch(
     q.set_property("max-size-bytes", 0)
     q.set_property("max-size-time", 0)
     q.set_property("leaky", 2)
-    _set_if_supported(parse, "config-interval", 1)
+    _set_if_supported(parse, "config-interval", -1)
     _configure_rtsp_sink(sink, rtsp_path)
 
     for el in (q, conv, caps, enc, parse, sink):
@@ -1873,7 +1879,7 @@ def _build_program_clean_branch(
         keyint=PROGRAM_CLEAN_KEYINT,
         threads=PROGRAM_CLEAN_THREADS,
     )
-    _set_if_supported(parse, "config-interval", 1)
+    _set_if_supported(parse, "config-interval", -1)
     _configure_rtsp_sink(sink, PROGRAM_RTSP_PATH)
 
     for el in (selector, q, conv, caps, enc, parse, sink):
