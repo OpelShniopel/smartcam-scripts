@@ -620,23 +620,23 @@ def populate_timeout_texts(
     _set("osd_timeout_header", f"TIMEOUT  {calling_name}")
 
     _set("osd_timeout_home_name", home_name)
-    _set("osd_timeout_home_pts",  f"PTS  {home_stats.get('points', 0)}")
-    _set("osd_timeout_home_fg",   f"FG%  {_format_pct(home_stats.get('fg_pct', 0.0))}")
-    _set("osd_timeout_home_3p",   f"3P%  {_format_pct(home_stats.get('tp_pct', 0.0))}")
-    _set("osd_timeout_home_reb",  f"REB  {home_stats.get('rebounds', 0)}")
-    _set("osd_timeout_home_ast",  f"AST  {home_stats.get('assists', 0)}")
-    _set("osd_timeout_home_stl",  f"STL  {home_stats.get('steals', 0)}")
-    _set("osd_timeout_home_blk",  f"BLK  {home_stats.get('blocks', 0)}")
+    _set("osd_timeout_home_pts", f"PTS  {home_stats.get('points', 0)}")
+    _set("osd_timeout_home_fg", f"FG%  {_format_pct(home_stats.get('fg_pct', 0.0))}")
+    _set("osd_timeout_home_3p", f"3P%  {_format_pct(home_stats.get('tp_pct', 0.0))}")
+    _set("osd_timeout_home_reb", f"REB  {home_stats.get('rebounds', 0)}")
+    _set("osd_timeout_home_ast", f"AST  {home_stats.get('assists', 0)}")
+    _set("osd_timeout_home_stl", f"STL  {home_stats.get('steals', 0)}")
+    _set("osd_timeout_home_blk", f"BLK  {home_stats.get('blocks', 0)}")
     _set("osd_timeout_home_foul", f"FOULS  {home_stats.get('fouls', 0)}")
 
     _set("osd_timeout_away_name", away_name)
-    _set("osd_timeout_away_pts",  f"PTS  {away_stats.get('points', 0)}")
-    _set("osd_timeout_away_fg",   f"FG%  {_format_pct(away_stats.get('fg_pct', 0.0))}")
-    _set("osd_timeout_away_3p",   f"3P%  {_format_pct(away_stats.get('tp_pct', 0.0))}")
-    _set("osd_timeout_away_reb",  f"REB  {away_stats.get('rebounds', 0)}")
-    _set("osd_timeout_away_ast",  f"AST  {away_stats.get('assists', 0)}")
-    _set("osd_timeout_away_stl",  f"STL  {away_stats.get('steals', 0)}")
-    _set("osd_timeout_away_blk",  f"BLK  {away_stats.get('blocks', 0)}")
+    _set("osd_timeout_away_pts", f"PTS  {away_stats.get('points', 0)}")
+    _set("osd_timeout_away_fg", f"FG%  {_format_pct(away_stats.get('fg_pct', 0.0))}")
+    _set("osd_timeout_away_3p", f"3P%  {_format_pct(away_stats.get('tp_pct', 0.0))}")
+    _set("osd_timeout_away_reb", f"REB  {away_stats.get('rebounds', 0)}")
+    _set("osd_timeout_away_ast", f"AST  {away_stats.get('assists', 0)}")
+    _set("osd_timeout_away_stl", f"STL  {away_stats.get('steals', 0)}")
+    _set("osd_timeout_away_blk", f"BLK  {away_stats.get('blocks', 0)}")
     _set("osd_timeout_away_foul", f"FOULS  {away_stats.get('fouls', 0)}")
 
     top_players = timeout_stats.get("top_players") or []
@@ -651,7 +651,8 @@ def populate_timeout_texts(
             continue
         if i < len(home_players):
             p = home_players[i]
-            el.set_property("text", f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast")
+            el.set_property("text",
+                            f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast")
             el.set_property("silent", False)
         else:
             el.set_property("silent", True)
@@ -662,7 +663,8 @@ def populate_timeout_texts(
             continue
         if i < len(away_players):
             p = away_players[i]
-            el.set_property("text", f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast")
+            el.set_property("text",
+                            f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast")
             el.set_property("silent", False)
         else:
             el.set_property("silent", True)
@@ -694,35 +696,43 @@ def configure_timeout_overlay(elements: RtmpElements) -> None:
     bg.set_property("overlay-height", 860)
     bg.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_timeout_header,  "", xpos=0.510, ypos=0.138, font="Sans Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_header, "", xpos=0.510, ypos=0.138, font="Sans Bold 32", color=0xFFFFFFFF)
 
-    setup_text_overlay(elements.osd_timeout_home_name, "", xpos=0.370, ypos=0.225, font="Sans Bold 20", color=0xFF6B00FF)
-    setup_text_overlay(elements.osd_timeout_home_pts,  "", xpos=0.370, ypos=0.290, font="Sans Bold 18", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_home_fg,   "", xpos=0.370, ypos=0.340, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_3p,   "", xpos=0.370, ypos=0.385, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_reb,  "", xpos=0.370, ypos=0.430, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_ast,  "", xpos=0.370, ypos=0.475, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_stl,  "", xpos=0.370, ypos=0.520, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_blk,  "", xpos=0.370, ypos=0.565, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_foul, "", xpos=0.370, ypos=0.610, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_name, "", xpos=0.370, ypos=0.225, font="Sans Bold 20",
+                       color=0xFF6B00FF)
+    setup_text_overlay(elements.osd_timeout_home_pts, "", xpos=0.370, ypos=0.290, font="Sans Bold 18", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_home_fg, "", xpos=0.370, ypos=0.340, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_3p, "", xpos=0.370, ypos=0.385, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_reb, "", xpos=0.370, ypos=0.430, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_ast, "", xpos=0.370, ypos=0.475, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_stl, "", xpos=0.370, ypos=0.520, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_blk, "", xpos=0.370, ypos=0.565, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_foul, "", xpos=0.370, ypos=0.610, font="Sans 16", color=0xCCCCCCFF)
 
-    setup_text_overlay(elements.osd_timeout_away_name, "", xpos=0.640, ypos=0.225, font="Sans Bold 20", color=0xFF6B00FF)
-    setup_text_overlay(elements.osd_timeout_away_pts,  "", xpos=0.640, ypos=0.290, font="Sans Bold 18", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_away_fg,   "", xpos=0.640, ypos=0.340, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_3p,   "", xpos=0.640, ypos=0.385, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_reb,  "", xpos=0.640, ypos=0.430, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_ast,  "", xpos=0.640, ypos=0.475, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_stl,  "", xpos=0.640, ypos=0.520, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_blk,  "", xpos=0.640, ypos=0.565, font="Sans 16",      color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_foul, "", xpos=0.640, ypos=0.610, font="Sans 16",      color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_name, "", xpos=0.640, ypos=0.225, font="Sans Bold 20",
+                       color=0xFF6B00FF)
+    setup_text_overlay(elements.osd_timeout_away_pts, "", xpos=0.640, ypos=0.290, font="Sans Bold 18", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_timeout_away_fg, "", xpos=0.640, ypos=0.340, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_3p, "", xpos=0.640, ypos=0.385, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_reb, "", xpos=0.640, ypos=0.430, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_ast, "", xpos=0.640, ypos=0.475, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_stl, "", xpos=0.640, ypos=0.520, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_blk, "", xpos=0.640, ypos=0.565, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_foul, "", xpos=0.640, ypos=0.610, font="Sans 16", color=0xCCCCCCFF)
 
-    setup_text_overlay(elements.osd_timeout_player_h1, "", xpos=0.270, ypos=0.740, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
-    setup_text_overlay(elements.osd_timeout_player_h2, "", xpos=0.270, ypos=0.800, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
-    setup_text_overlay(elements.osd_timeout_player_h3, "", xpos=0.270, ypos=0.860, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_h1, "", xpos=0.270, ypos=0.740, font="Sans Bold 15",
+                       color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_h2, "", xpos=0.270, ypos=0.800, font="Sans Bold 15",
+                       color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_h3, "", xpos=0.270, ypos=0.860, font="Sans Bold 15",
+                       color=0xFFFFFFFF, anchor_top_left=True)
 
-    setup_text_overlay(elements.osd_timeout_player_a1, "", xpos=0.515, ypos=0.740, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
-    setup_text_overlay(elements.osd_timeout_player_a2, "", xpos=0.515, ypos=0.800, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
-    setup_text_overlay(elements.osd_timeout_player_a3, "", xpos=0.515, ypos=0.860, font="Sans Bold 15", color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_a1, "", xpos=0.515, ypos=0.740, font="Sans Bold 15",
+                       color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_a2, "", xpos=0.515, ypos=0.800, font="Sans Bold 15",
+                       color=0xFFFFFFFF, anchor_top_left=True)
+    setup_text_overlay(elements.osd_timeout_player_a3, "", xpos=0.515, ypos=0.860, font="Sans Bold 15",
+                       color=0xFFFFFFFF, anchor_top_left=True)
 
 
 BLITZ_TEXT_KEYS: tuple[str, ...] = (
@@ -758,16 +768,26 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
     active.set_property("overlay-height", 180)
     active.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_blitz_quarter,     "", xpos=0.710, ypos=0.895, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_clock,       "", xpos=0.710, ypos=0.945, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_name,   "", xpos=0.450, ypos=0.888, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_name,   "", xpos=0.450, ypos=0.950, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_pts,    "", xpos=0.614, ypos=0.895, font="Ubuntu Mono Bold 42", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_blitz,  "", xpos=0.640, ypos=0.895, font="Ubuntu Mono Bold 42", color=0xFFFFD700)  # gold
-    setup_text_overlay(elements.osd_blitz_away_pts,    "", xpos=0.614, ypos=0.952, font="Ubuntu Mono Bold 42", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_blitz,  "", xpos=0.640, ypos=0.952, font="Ubuntu Mono Bold 42", color=0xFFFFD700)  # gold
-    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font="Ubuntu Mono Bold 22", color=0xFF4500FF)
-    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font="Ubuntu Mono Bold 22", color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_quarter, "", xpos=0.710, ypos=0.895, font="Ubuntu Mono Bold 32",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_clock, "", xpos=0.710, ypos=0.945, font="Ubuntu Mono Bold 32",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_name, "", xpos=0.450, ypos=0.888, font="Ubuntu Mono Bold 32",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_name, "", xpos=0.450, ypos=0.950, font="Ubuntu Mono Bold 32",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_pts, "", xpos=0.614, ypos=0.895, font="Ubuntu Mono Bold 42",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_home_blitz, "", xpos=0.640, ypos=0.895, font="Ubuntu Mono Bold 42",
+                       color=0xFFFFD700)  # gold
+    setup_text_overlay(elements.osd_blitz_away_pts, "", xpos=0.614, ypos=0.952, font="Ubuntu Mono Bold 42",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_blitz_away_blitz, "", xpos=0.640, ypos=0.952, font="Ubuntu Mono Bold 42",
+                       color=0xFFFFD700)  # gold
+    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font="Ubuntu Mono Bold 22",
+                       color=0xFF4500FF)
+    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font="Ubuntu Mono Bold 22",
+                       color=0xFF4500FF)
 
 
 def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
@@ -823,13 +843,13 @@ def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -
     away_pts = state.get("away_points", 0)
     home_blitz = state.get("home_blitz_score", 0)
     away_blitz = state.get("away_blitz_score", 0)
-    set_overlay_text(els.get("osd_blitz_home_pts"),   True, str(home_pts))
+    set_overlay_text(els.get("osd_blitz_home_pts"), True, str(home_pts))
     home_blitz_el = els.get("osd_blitz_home_blitz")
     if home_blitz_el:
         home_blitz_el.set_property("silent", False)
         home_blitz_el.set_property("text", f":{home_blitz}")
         home_blitz_el.set_property("color", 0xFFFFD700)  # gold
-    set_overlay_text(els.get("osd_blitz_away_pts"),   True, str(away_pts))
+    set_overlay_text(els.get("osd_blitz_away_pts"), True, str(away_pts))
     away_blitz_el = els.get("osd_blitz_away_blitz")
     if away_blitz_el:
         away_blitz_el.set_property("silent", False)
@@ -931,22 +951,36 @@ def configure_end_stats_overlay(elements: RtmpElements) -> None:
 
     # Two-column layout: left col at 0.080 (154px), right col at 0.520 (998px)
     # Each column is left-aligned; together they span symmetrically around center.
-    setup_text_overlay(elements.osd_end_header_home, "", xpos=0.180, ypos=0.200, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_header_away, "", xpos=0.720, ypos=0.200, font="Ubuntu Mono Bold 32", color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_header_home, "", xpos=0.180, ypos=0.200, font="Ubuntu Mono Bold 32",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_header_away, "", xpos=0.720, ypos=0.200, font="Ubuntu Mono Bold 32",
+                       color=0xFFFFFFFF)
 
-    setup_text_overlay(elements.osd_end_home_pts,       "", xpos=0.180, ypos=0.290, font="Ubuntu Mono Bold 26", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_home_blitz,     "", xpos=0.180, ypos=0.360, font="Ubuntu Mono Bold 26", color=0xFFFFD700)
-    setup_text_overlay(elements.osd_end_home_inner,     "", xpos=0.180, ypos=0.430, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_middle,    "", xpos=0.180, ypos=0.490, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_outer,     "", xpos=0.180, ypos=0.550, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_intercept, "", xpos=0.180, ypos=0.610, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_pts, "", xpos=0.180, ypos=0.290, font="Ubuntu Mono Bold 26",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_home_blitz, "", xpos=0.180, ypos=0.360, font="Ubuntu Mono Bold 26",
+                       color=0xFFFFD700)
+    setup_text_overlay(elements.osd_end_home_inner, "", xpos=0.180, ypos=0.430, font="Ubuntu Mono Bold 22",
+                       color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_middle, "", xpos=0.180, ypos=0.490, font="Ubuntu Mono Bold 22",
+                       color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_outer, "", xpos=0.180, ypos=0.550, font="Ubuntu Mono Bold 22",
+                       color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_home_intercept, "", xpos=0.180, ypos=0.610, font="Ubuntu Mono Bold 22",
+                       color=0xFFCCCCCC)
 
-    setup_text_overlay(elements.osd_end_away_pts,       "", xpos=0.720, ypos=0.290, font="Ubuntu Mono Bold 26", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_away_blitz,     "", xpos=0.720, ypos=0.360, font="Ubuntu Mono Bold 26", color=0xFFFFD700)
-    setup_text_overlay(elements.osd_end_away_inner,     "", xpos=0.720, ypos=0.430, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_middle,    "", xpos=0.720, ypos=0.490, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_outer,     "", xpos=0.720, ypos=0.550, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_intercept, "", xpos=0.720, ypos=0.610, font="Ubuntu Mono Bold 22", color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_pts, "", xpos=0.720, ypos=0.290, font="Ubuntu Mono Bold 26",
+                       color=0xFFFFFFFF)
+    setup_text_overlay(elements.osd_end_away_blitz, "", xpos=0.720, ypos=0.360, font="Ubuntu Mono Bold 26",
+                       color=0xFFFFD700)
+    setup_text_overlay(elements.osd_end_away_inner, "", xpos=0.720, ypos=0.430, font="Ubuntu Mono Bold 22",
+                       color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_middle, "", xpos=0.720, ypos=0.490, font="Ubuntu Mono Bold 22",
+                       color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_outer, "", xpos=0.720, ypos=0.550, font="Ubuntu Mono Bold 22",
+                       color=0xFFCCCCCC)
+    setup_text_overlay(elements.osd_end_away_intercept, "", xpos=0.720, ypos=0.610, font="Ubuntu Mono Bold 22",
+                       color=0xFFCCCCCC)
 
     # Unused elements — silenced
     for el in (elements.osd_end_home_blitz_rate, elements.osd_end_away_blitz_rate,
@@ -963,9 +997,9 @@ def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any])
     now_ms = int(time.time() * 1000)
 
     active = (
-        game_finished
-        and isinstance(end_stats, dict)
-        and end_stats.get("show_until", 0) > now_ms
+            game_finished
+            and isinstance(end_stats, dict)
+            and end_stats.get("show_until", 0) > now_ms
     )
 
     if not active:
@@ -1030,20 +1064,20 @@ def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any])
     away = end_stats.get("away_stats", {})
 
     _end_stat_pairs = [
-        ("osd_end_home_pts",        f"TOTAL  {home.get('total_points', 0)} PTS"),
-        ("osd_end_home_inner",      f"INNER  {home.get('inner_scores', 0)}"),
-        ("osd_end_home_middle",     f"MIDDLE {home.get('middle_scores', 0)}"),
-        ("osd_end_home_outer",      f"OUTER  {home.get('outer_scores', 0)}"),
-        ("osd_end_home_blitz",      f"BLITZ  {home.get('blitz_scores', 0)}"),
+        ("osd_end_home_pts", f"TOTAL  {home.get('total_points', 0)} PTS"),
+        ("osd_end_home_inner", f"INNER  {home.get('inner_scores', 0)}"),
+        ("osd_end_home_middle", f"MIDDLE {home.get('middle_scores', 0)}"),
+        ("osd_end_home_outer", f"OUTER  {home.get('outer_scores', 0)}"),
+        ("osd_end_home_blitz", f"BLITZ  {home.get('blitz_scores', 0)}"),
         ("osd_end_home_blitz_rate", f"BLITZ% {home.get('blitz_conversion_rate', 0):.0f}%"),
-        ("osd_end_home_intercept",  f"INTERCEPTS {home.get('interceptions', 0)}"),
-        ("osd_end_away_pts",        f"TOTAL  {away.get('total_points', 0)} PTS"),
-        ("osd_end_away_inner",      f"INNER  {away.get('inner_scores', 0)}"),
-        ("osd_end_away_middle",     f"MIDDLE {away.get('middle_scores', 0)}"),
-        ("osd_end_away_outer",      f"OUTER  {away.get('outer_scores', 0)}"),
-        ("osd_end_away_blitz",      f"BLITZ  {away.get('blitz_scores', 0)}"),
+        ("osd_end_home_intercept", f"INTERCEPTS {home.get('interceptions', 0)}"),
+        ("osd_end_away_pts", f"TOTAL  {away.get('total_points', 0)} PTS"),
+        ("osd_end_away_inner", f"INNER  {away.get('inner_scores', 0)}"),
+        ("osd_end_away_middle", f"MIDDLE {away.get('middle_scores', 0)}"),
+        ("osd_end_away_outer", f"OUTER  {away.get('outer_scores', 0)}"),
+        ("osd_end_away_blitz", f"BLITZ  {away.get('blitz_scores', 0)}"),
         ("osd_end_away_blitz_rate", f"BLITZ% {away.get('blitz_conversion_rate', 0):.0f}%"),
-        ("osd_end_away_intercept",  f"INTERCEPTS {away.get('interceptions', 0)}"),
+        ("osd_end_away_intercept", f"INTERCEPTS {away.get('interceptions', 0)}"),
     ]
     for key, text in _end_stat_pairs:
         el = els.get(key)
@@ -1067,7 +1101,7 @@ def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any])
         if i < len(home_players):
             p = home_players[i]
             el.set_property("text",
-                f"{p.get('player_name', '')}  {p.get('points', 0)}pts  BLITZ:{p.get('blitz_scores', 0)}")
+                            f"{p.get('player_name', '')}  {p.get('points', 0)}pts  BLITZ:{p.get('blitz_scores', 0)}")
             el.set_property("silent", False)
         else:
             el.set_property("silent", True)
@@ -1079,7 +1113,7 @@ def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any])
         if i < len(away_players):
             p = away_players[i]
             el.set_property("text",
-                f"{p.get('player_name', '')}  {p.get('points', 0)}pts  BLITZ:{p.get('blitz_scores', 0)}")
+                            f"{p.get('player_name', '')}  {p.get('points', 0)}pts  BLITZ:{p.get('blitz_scores', 0)}")
             el.set_property("silent", False)
         else:
             el.set_property("silent", True)

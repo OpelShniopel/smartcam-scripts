@@ -396,8 +396,8 @@ def _update_osd_texts(state: dict) -> None:
     timeout_stats = state.get("timeout_stats")
     now_ms = int(time.time() * 1000)
     timeout_active = (
-        isinstance(timeout_stats, dict)
-        and timeout_stats.get("show_until", 0) > now_ms
+            isinstance(timeout_stats, dict)
+            and timeout_stats.get("show_until", 0) > now_ms
     )
     timeout_bg = els.get("osd_timeout_bg")
     if timeout_active:
@@ -1025,6 +1025,8 @@ def _capsfilter(name: str, caps_str: str) -> Gst.Element:
 def _set_if_supported(el: Gst.Element, prop: str, value) -> None:
     if el.find_property(prop) is not None:
         el.set_property(prop, value)
+
+
 def _request_program_camera_switch(active_camera: str) -> None:
     global _program_switch_requested_camera, _program_switch_timer_queued
 
@@ -1080,7 +1082,7 @@ def _drain_program_camera_switch_request() -> bool:
         if _program_switch_seq != previous_switch_seq:
             with _program_switch_lock:
                 _program_switch_settle_until_monotonic = (
-                    time.monotonic() + (PROGRAM_SWITCH_SETTLE_MS / 1000.0)
+                        time.monotonic() + (PROGRAM_SWITCH_SETTLE_MS / 1000.0)
                 )
     return False
 
@@ -1642,6 +1644,7 @@ def _build_simple_rtsp_encode_branch(
 
     return enc
 
+
 # ---------------------------------------------------------------------------
 # AI branch
 # ---------------------------------------------------------------------------
@@ -1768,6 +1771,7 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         print(f"{_stream_camera_name(cam_label)} AI recording disabled")
 
     return pgie, enc
+
 
 def _link_tee_to_program_selector(
         pipeline: Gst.Pipeline,
@@ -1921,6 +1925,7 @@ def _build_program_clean_branch(
     )
 
     return enc
+
 
 # ---------------------------------------------------------------------------
 # Main pipeline builder

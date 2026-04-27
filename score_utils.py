@@ -33,6 +33,7 @@ DEFAULT_SCORE_STATE = {
     "away_interceptions": 0,
 }
 
+
 def default_score_state() -> dict:
     return DEFAULT_SCORE_STATE.copy()
 

@@ -101,8 +101,8 @@ _timeout_fade_active: bool = False
 _pre_timeout_bg_alpha: float = 0.0
 _pre_timeout_home_foul_alpha: float = 0.0
 _pre_timeout_away_foul_alpha: float = 0.0
-_sb_timeout_alpha: float = 1.0   # scoreboard alpha during timeout transition
-_timeout_pause_ticks: int = 0    # countdown ticks for pause between phases
+_sb_timeout_alpha: float = 1.0  # scoreboard alpha during timeout transition
+_timeout_pause_ticks: int = 0  # countdown ticks for pause between phases
 TIMEOUT_TRANSITION_PAUSE_TICKS = 20  # 20 × 100 ms = 2 s
 
 _blitz_pulse_active: bool = False
@@ -235,6 +235,8 @@ def _make(factory: str, name: str) -> Gst.Element:
     if not el:
         raise RuntimeError(f"Unable to create element {factory!r} ({name!r})")
     return el
+
+
 def _link(src: Gst.Element, dst: Gst.Element) -> None:
     if not src.link(dst):
         raise RuntimeError(f"Failed to link {src.get_name()} -> {dst.get_name()}")
@@ -427,8 +429,8 @@ def update_timeout_overlay(state: dict, els: dict) -> None:
     timeout_stats = state.get("timeout_stats")
     now_ms = int(time.time() * 1000)
     timeout_active = (
-        isinstance(timeout_stats, dict)
-        and timeout_stats.get("show_until", 0) > now_ms
+            isinstance(timeout_stats, dict)
+            and timeout_stats.get("show_until", 0) > now_ms
     )
 
     if timeout_active:
@@ -576,20 +578,20 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
         if color is not None:
             el.set_property("color", color)
 
-    show_el("osd_end_winner",      winner_text,                          0xFFFFD700)
+    show_el("osd_end_winner", winner_text, 0xFFFFD700)
     show_el("osd_end_header_home", home_name)
     show_el("osd_end_header_away", away_name)
-    show_el("osd_end_home_pts",    f"TOTAL  {home_pts} PTS")
-    show_el("osd_end_home_blitz",  f"BLITZ  {home_blitz}",              0xFFFFD700)
-    show_el("osd_end_home_inner",     f"INNER   {state.get('home_inner_scores', 0)}")
-    show_el("osd_end_home_middle",    f"MIDDLE  {state.get('home_middle_scores', 0)}")
-    show_el("osd_end_home_outer",     f"OUTER   {state.get('home_outer_scores', 0)}")
+    show_el("osd_end_home_pts", f"TOTAL  {home_pts} PTS")
+    show_el("osd_end_home_blitz", f"BLITZ  {home_blitz}", 0xFFFFD700)
+    show_el("osd_end_home_inner", f"INNER   {state.get('home_inner_scores', 0)}")
+    show_el("osd_end_home_middle", f"MIDDLE  {state.get('home_middle_scores', 0)}")
+    show_el("osd_end_home_outer", f"OUTER   {state.get('home_outer_scores', 0)}")
     show_el("osd_end_home_intercept", f"INTERCEPTS  {state.get('home_interceptions', 0)}")
-    show_el("osd_end_away_pts",       f"TOTAL  {away_pts} PTS")
-    show_el("osd_end_away_blitz",     f"BLITZ  {away_blitz}",              0xFFFFD700)
-    show_el("osd_end_away_inner",     f"INNER   {state.get('away_inner_scores', 0)}")
-    show_el("osd_end_away_middle",    f"MIDDLE  {state.get('away_middle_scores', 0)}")
-    show_el("osd_end_away_outer",     f"OUTER   {state.get('away_outer_scores', 0)}")
+    show_el("osd_end_away_pts", f"TOTAL  {away_pts} PTS")
+    show_el("osd_end_away_blitz", f"BLITZ  {away_blitz}", 0xFFFFD700)
+    show_el("osd_end_away_inner", f"INNER   {state.get('away_inner_scores', 0)}")
+    show_el("osd_end_away_middle", f"MIDDLE  {state.get('away_middle_scores', 0)}")
+    show_el("osd_end_away_outer", f"OUTER   {state.get('away_outer_scores', 0)}")
     show_el("osd_end_away_intercept", f"INTERCEPTS  {state.get('away_interceptions', 0)}")
     for key in ("osd_end_home_blitz_rate", "osd_end_away_blitz_rate"):
         el = els.get(key)
@@ -739,13 +741,13 @@ def _poll_score_state() -> bool:
 
     timeout_stats = state.get("timeout_stats")
     timeout_active = (
-        isinstance(timeout_stats, dict)
-        and timeout_stats.get("show_until", 0) > now_ms
+            isinstance(timeout_stats, dict)
+            and timeout_stats.get("show_until", 0) > now_ms
     )
 
     end_active = (
-        state.get("game_finished", False)
-        and _end_stats_show_until > int(time.time() * 1000)
+            state.get("game_finished", False)
+            and _end_stats_show_until > int(time.time() * 1000)
     )
     if state != _last_score_state or milestone_active or timeout_active or _timeout_fade_active or end_active:
         _update_overlay(state)
