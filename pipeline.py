@@ -207,6 +207,7 @@ PROGRAM_CLEAN_KEYINT = 30
 PROGRAM_CLEAN_THREADS = 1
 PROGRAM_RTSP_PATH = "program_clean"
 PROGRAM_SWITCH_DEBOUNCE_MS = 150
+PROGRAM_SWITCH_SETTLE_MS = 700
 
 # AI branch encoder settings
 AI_BITRATE = 3500
@@ -238,7 +239,8 @@ _program_last_switch_at_ms = 0
 _last_program_cfg: dict | None = None
 _program_switch_lock = threading.Lock()
 _program_switch_requested_camera: str | None = None
-_program_switch_debounce_queued = False
+_program_switch_timer_queued = False
+_program_switch_settle_until_monotonic = 0.0
 
 # ---------------------------------------------------------------------------
 # RTMP stream status tracking
@@ -1066,36 +1068,66 @@ def _force_key_unit(enc: Gst.Element | None, label: str) -> None:
 
 
 def _request_program_camera_switch(active_camera: str) -> None:
-    global _program_switch_requested_camera, _program_switch_debounce_queued
+    global _program_switch_requested_camera, _program_switch_timer_queued
 
     normalized = _normalize_stream_camera(active_camera) or PTZ_CAMERA
 
-    schedule_debounce = False
+    schedule_timer = False
     with _program_switch_lock:
         _program_switch_requested_camera = normalized
-        if not _program_switch_debounce_queued:
-            _program_switch_debounce_queued = True
-            schedule_debounce = True
+        if not _program_switch_timer_queued:
+            _program_switch_timer_queued = True
+            schedule_timer = True
 
-    if schedule_debounce:
-        GLib.idle_add(_queue_program_camera_switch_debounce)
+    if schedule_timer:
+        GLib.idle_add(_queue_program_camera_switch_timer)
 
 
-def _queue_program_camera_switch_debounce() -> bool:
-    GLib.timeout_add(PROGRAM_SWITCH_DEBOUNCE_MS, _drain_program_camera_switch_request)
+def _queue_program_camera_switch_timer() -> bool:
+    delay_ms = PROGRAM_SWITCH_DEBOUNCE_MS
+
+    with _program_switch_lock:
+        remaining_ms = max(
+            0,
+            int((_program_switch_settle_until_monotonic - time.monotonic()) * 1000),
+        )
+        if remaining_ms > delay_ms:
+            delay_ms = remaining_ms
+
+    GLib.timeout_add(delay_ms, _drain_program_camera_switch_request)
     return False
 
 
 def _drain_program_camera_switch_request() -> bool:
-    global _program_switch_requested_camera, _program_switch_debounce_queued
+    global _program_switch_requested_camera, _program_switch_timer_queued
+    global _program_switch_settle_until_monotonic
+
+    reschedule = False
 
     with _program_switch_lock:
-        requested_camera = _program_switch_requested_camera
-        _program_switch_requested_camera = None
-        _program_switch_debounce_queued = False
+        remaining_ms = max(
+            0,
+            int((_program_switch_settle_until_monotonic - time.monotonic()) * 1000),
+        )
+        if remaining_ms > 0:
+            reschedule = True
+        else:
+            requested_camera = _program_switch_requested_camera
+            _program_switch_requested_camera = None
+            _program_switch_timer_queued = False
+
+    if reschedule:
+        GLib.timeout_add(remaining_ms, _drain_program_camera_switch_request)
+        return False
 
     if requested_camera is not None:
+        previous_switch_seq = _program_switch_seq
         _switch_program_camera(requested_camera)
+        if _program_switch_seq != previous_switch_seq:
+            with _program_switch_lock:
+                _program_switch_settle_until_monotonic = (
+                    time.monotonic() + (PROGRAM_SWITCH_SETTLE_MS / 1000.0)
+                )
     return False
 
 
@@ -2037,7 +2069,8 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
 def build_pipeline() -> tuple:
     global _encoders, _program_selector, _program_enc, _last_program_cfg
     global _program_previous_camera, _program_switch_seq, _program_last_switch_at_ms
-    global _program_switch_requested_camera, _program_switch_debounce_queued
+    global _program_switch_requested_camera, _program_switch_timer_queued
+    global _program_switch_settle_until_monotonic
     _encoders = {}
     _program_selector = None
     _program_enc = None
@@ -2046,7 +2079,8 @@ def build_pipeline() -> tuple:
     _program_switch_seq = 0
     _program_last_switch_at_ms = 0
     _program_switch_requested_camera = None
-    _program_switch_debounce_queued = False
+    _program_switch_timer_queued = False
+    _program_switch_settle_until_monotonic = 0.0
 
     pipeline = Gst.Pipeline()
     if not pipeline:
