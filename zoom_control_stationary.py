@@ -16,8 +16,8 @@ FOCUS_SPEED    = 1200
 # BALL_MIN_PX: ball appears this small when at max distance → zoom in fully.
 # BALL_MAX_PX: ball appears this large when close → no zoom (1x).
 # Measure these by watching the stationary cam feed with the ball at each extreme.
-BALL_MIN_PX  = 20    # far ball  → ZOOM_MIN_STEPS (max optical zoom)
-BALL_MAX_PX  = 120   # near ball → ZOOM_MAX_STEPS (1x, widest FOV)
+BALL_MIN_PX  = 50    # far ball  → ZOOM_MIN_STEPS (max optical zoom)
+BALL_MAX_PX  = 200   # near ball → ZOOM_MAX_STEPS (1x, widest FOV)
 
 # Shape of the zoom curve. 1.0 = linear. >1 = more aggressive zoom for distant balls.
 ZOOM_CURVE   = 1.5
@@ -132,7 +132,7 @@ class ZoomController:
                                                         self.target_zoom_pos + zoom_steps))
         self._drive_motor()
 
-    def process_detection(self, detections):
+    def process_detection(self, detections, pan_error_x=0.0):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball or ball['width'] <= 0:
             self.last_ball_x     = None
@@ -158,10 +158,12 @@ class ZoomController:
         # Solve geometrically for the minimum zoom_pos (widest FOV) needed to keep
         # the predicted ball position inside the pan cam's safe FOV zone.
         #
-        # We need: zoom_ratio <= STATIONARY_CENTER_X * (1-EDGE_MARGIN) / predicted_offset
-        # Back-solve: zoom_ratio → t → zoom_pos.
-        # Clamping t to [0,1] handles ball near centre (no constraint) and beyond 1x (full wide).
-        offset_now       = abs(ball_x - STATIONARY_CENTER_X)
+        # pan_error_x is the pixel error the pan sent this frame (ball_x - STATIONARY_CENTER_X).
+        # Adding it back gives an estimate of where the pan is currently pointing.
+        # When tracking, pan_center_x ≈ ball_x → offset_now ≈ 0 → only high velocity
+        # (ball outrunning the pan) still forces zoom-out.
+        pan_center_x     = STATIONARY_CENTER_X + pan_error_x
+        offset_now       = abs(ball_x - pan_center_x)
         predicted_offset = offset_now + self.smooth_velocity * VELOCITY_HORIZON
 
         if predicted_offset > 0.0:
@@ -178,7 +180,7 @@ class ZoomController:
 
         if DEBUG:
             print(f"[ZOOM] ball_w={ball_width:.0f}  vel={self.smooth_velocity:.1f}  "
-                  f"offset={offset_now:.0f}  pred={predicted_offset:.0f}  "
+                  f"pan_err={pan_error_x:.0f}  offset={offset_now:.0f}  pred={predicted_offset:.0f}  "
                   f"edge_req={edge_required_pos:.0f}  "
                   f"base={base_zoom_pos:.0f}  desired={desired_zoom_pos:.0f}")
 

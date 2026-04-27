@@ -31,7 +31,8 @@ class PTZController:
         if self.pan:
             self.pan.process_detection(detections, speed_scale=speed_scale)
         if self.zoom:
-            self.zoom.process_detection(detections)
+            pan_error_x = self.pan.last_error_x if self.pan else 0.0
+            self.zoom.process_detection(detections, pan_error_x=pan_error_x)
 
     def process_manual_ptz(self, msg):
         pan  = msg.get("pan", 0)
@@ -40,7 +41,7 @@ class PTZController:
         if pan and self.pan:
             self.pan.send_command(pan)
         if zoom and self.zoom:
-            self.zoom.send_zoom(zoom, zoom_speed=1000)
+            self.zoom.send_zoom(zoom)
 
     def return_home(self):
         if self.pan:
