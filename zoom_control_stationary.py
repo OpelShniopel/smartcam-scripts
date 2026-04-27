@@ -45,7 +45,7 @@ STATIONARY_CENTER_Y = 360.0    # half of FRAME_H (not used for zoom logic direct
 # too late on the BOTTOM, lower this value.  If the opposite, raise it.
 # To calibrate: look at the pan cam feed and find the y-pixel in the stationary frame
 # that maps to the vertical centre of the pan cam's view.
-PAN_CENTER_Y = 315.0
+PAN_CENTER_Y = 300.0
 
 VELOCITY_HORIZON   = 6         # frames ahead to predict ball position
 EDGE_MARGIN        = 0.30      # fraction of FOV half-width inside which we consider safe (higher = more aggressive zoom-out)
