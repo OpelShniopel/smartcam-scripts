@@ -33,7 +33,7 @@
 // ============================================================
 #define STEPS_PER_DEG    125
 
-#define PAN_MAX_DEG       91
+#define PAN_MAX_DEG       95
 #define PAN_MIN_DEG      -35
 #define PAN_MAX_STEPS    (PAN_MAX_DEG * STEPS_PER_DEG)    //  11375
 #define PAN_MIN_STEPS    (PAN_MIN_DEG * STEPS_PER_DEG)    //  -4375
@@ -58,27 +58,27 @@
 // STEPS_PER_STATIONARY_PX = PAN_MAX_STEPS / STATIONARY_FRAME_HALF
 //                         = 11375 / 640 ≈ 17.77
 #define STATIONARY_FRAME_HALF     640.0f   // half-width of stationary cam (px)
-#define STEPS_PER_STATIONARY_PX   17.77f  // = PAN_MAX_STEPS / STATIONARY_FRAME_HALF
+#define STEPS_PER_STATIONARY_PX   10.0f  // = PAN_MAX_STEPS / STATIONARY_FRAME_HALF
 
 // ============================================================
 //  P CONTROLLER CONSTANTS  (tune these)
-// ============================================================
-#define MIN_DEADZONE_STEPS   60      // steps — no movement inside this window (~0.5°)
-#define MAX_DEADZONE_STEPS  400      // steps — used at minimum speed_scale
+// =========================================F===================
+#define MIN_DEADZONE_STEPS   100      // steps — no movement inside this window (~0.5°)
+#define MAX_DEADZONE_STEPS  200      // steps — used at minimum speed_scale
 
-#define SPEED_FACTOR        2.0f    // exponent of speed curve (higher = more aggressive)
-#define MIN_VEL_SPS         100     // steps/sec at minimum error outside deadzone
-#define MAX_VEL_SPS         8000    // steps/sec at full-range error
+#define SPEED_FACTOR        1.2f    // lower = more linear approach, less crawl near target
+#define MIN_VEL_SPS         400     // steps/sec — floor keeps the final approach decisive
+#define MAX_VEL_SPS         12000    // steps/sec at full-range error
 #define HOMING_VEL_SPS      3000
 
-#define BALL_BOOST_THR_STEPS  150   // step/frame delta — above this, apply velocity boost
-#define BALL_BOOST_GAIN        4.0f
-#define BALL_TIMEOUT_MS        300  // ms without X update before auto-stop
+#define BALL_BOOST_THR_STEPS  100   // step/frame delta — above this, apply velocity boost
+#define BALL_BOOST_GAIN        6.0f
+#define BALL_TIMEOUT_MS        1000  // ms without X update before auto-stop
 
 // ============================================================
 //  MOTION CONSTANTS
 // ============================================================
-#define ACCEL_PER_MS        250     // steps/sec per ms ramp rate
+#define ACCEL_PER_MS        700     // steps/sec per ms ramp rate
 
 // ============================================================
 //  SERIAL
@@ -197,16 +197,18 @@ int32_t computeVelocityFromSteps(int32_t target, float scale) {
 
     if (abs(step_error) <= (int32_t)dynamic_deadzone) return 0;
 
-    // Normalise against half the usable pan range
-    float half_range    = (float)(PAN_MAX_STEPS - PAN_MIN_STEPS) / 2.0f;
-    float normalized    = min(1.0f, (float)abs(step_error) / half_range);
-    float base_factor   = powf(normalized, SPEED_FACTOR);
+    // Normalise against max expected step error (full stationary cam coverage).
+    // Using the physical pan range would leave the speed curve in its slow tail
+    // for all typical tracking errors.
+    float full_range  = STEPS_PER_STATIONARY_PX * STATIONARY_FRAME_HALF;
+    float normalized  = min(1.0f, (float)abs(step_error) / full_range);
+    float base_factor = powf(normalized, SPEED_FACTOR);
 
-    // Velocity boost when target is moving quickly (ball moving fast)
+    // Velocity boost when target jumps quickly (ball moving fast across frame)
     int32_t target_delta = abs(target - lastTargetSteps);
     float multiplier = 1.0f;
     if (target_delta > BALL_BOOST_THR_STEPS)
-        multiplier += (target_delta / (float)half_range) * BALL_BOOST_GAIN;
+        multiplier += (target_delta / full_range) * BALL_BOOST_GAIN;
 
     float speed = MIN_VEL_SPS + (MAX_VEL_SPS - MIN_VEL_SPS) * base_factor;
     speed = min((float)MAX_VEL_SPS, speed * multiplier * scale);
@@ -332,7 +334,7 @@ void parseCommand(const String& cmd) {
         // error_px = 0  → target = 0  (pan camera centred at home)
         // error_px = ±STATIONARY_FRAME_HALF → target = ±(HALF * STEPS_PER_PX)
         int32_t newTarget = constrain(
-            (int32_t)(error_px * STEPS_PER_STATIONARY_PX * scale),
+            (int32_t)(error_px * STEPS_PER_STATIONARY_PX),
             PAN_MIN_STEPS,
             PAN_MAX_STEPS
         );

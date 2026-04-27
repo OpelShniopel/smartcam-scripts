@@ -13,7 +13,7 @@ TARGET_CAM = "CAM0"
 
 # --- ENABLE / DISABLE CONTROLLERS ---
 ENABLE_PAN  = True
-ENABLE_ZOOM = False
+ENABLE_ZOOM = True
 
 
 class PTZController:
