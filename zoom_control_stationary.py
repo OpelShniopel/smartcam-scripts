@@ -40,8 +40,9 @@ STATIONARY_CENTER_X = 640.0    # half of FRAME_W
 STATIONARY_CENTER_Y = 360.0    # half of FRAME_H
 
 VELOCITY_HORIZON   = 6         # frames ahead to predict ball position
-EDGE_MARGIN        = 0.20      # fraction of FOV half-width inside which we consider safe
+EDGE_MARGIN        = 0.30      # fraction of FOV half-width inside which we consider safe (higher = more aggressive zoom-out)
 VELOCITY_EMA_ALPHA = 0.35      # smoothing factor for ball velocity (0=frozen, 1=raw)
+ZOOM_IN_ALPHA      = 0.04      # low-pass factor for zoom-in (small = slow zoom-in, suppresses noise oscillation)
 
 FRAME_W = 1280   # stationary cam frame width (px)
 FRAME_H = 720
@@ -203,5 +204,11 @@ class ZoomController:
                   f"edge_h={edge_req_h:.0f}  edge_v={edge_req_v:.0f}  "
                   f"base={base_zoom_pos:.0f}  desired={desired_zoom_pos:.0f}")
 
-        self.target_zoom_pos = desired_zoom_pos
+        # Zoom-out: follow desired immediately (ball safety).
+        # Zoom-in: low-pass filter to absorb momentary velocity dips without reversing direction.
+        if desired_zoom_pos >= self.target_zoom_pos:
+            self.target_zoom_pos = desired_zoom_pos
+        else:
+            self.target_zoom_pos += ZOOM_IN_ALPHA * (desired_zoom_pos - self.target_zoom_pos)
+        self.target_zoom_pos = max(ZOOM_MIN_STEPS, min(ZOOM_MAX_STEPS, self.target_zoom_pos))
         self._drive_motor()
