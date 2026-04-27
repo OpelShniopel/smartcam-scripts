@@ -203,7 +203,7 @@ CLEAN_THREADS = 2
 CLEAN_PRESET = "ultrafast"
 CLEAN_TUNE = "zerolatency"
 PROGRAM_CLEAN_BITRATE = 5000
-PROGRAM_CLEAN_KEYINT = 60
+PROGRAM_CLEAN_KEYINT = 30
 PROGRAM_CLEAN_THREADS = 1
 PROGRAM_RTSP_PATH = "program_clean"
 
@@ -231,6 +231,9 @@ _program_selector: Gst.Element | None = None
 _program_selector_pads: dict[str, Gst.Pad] = {}
 _program_enc: Gst.Element | None = None
 _program_active_camera: str = PTZ_CAMERA
+_program_previous_camera: str = PTZ_CAMERA
+_program_switch_seq = 0
+_program_last_switch_at_ms = 0
 _last_program_cfg: dict | None = None
 
 # ---------------------------------------------------------------------------
@@ -720,6 +723,12 @@ def _push_state() -> None:
     internal_streams = {}
     program_clean_rtsp_url = f"rtsp://{JETSON_HOST}:8554/{PROGRAM_RTSP_PATH}"
     program_clean_webrtc_url = f"http://{JETSON_HOST}:8889/{PROGRAM_RTSP_PATH}"
+    switch_meta = {
+        "seq": _program_switch_seq,
+        "at_ms": _program_last_switch_at_ms,
+        "active_camera": active_camera,
+        "previous_camera": _program_previous_camera,
+    }
 
     webrtc["program_clean"] = program_clean_webrtc_url
     internal_streams["program_clean"] = program_clean_rtsp_url
@@ -749,6 +758,9 @@ def _push_state() -> None:
         "stream_configured": bool(url),
         "stream_worker_running": worker_running,
         "stream_active_camera": active_camera,
+        "stream_switch_seq": _program_switch_seq,
+        "stream_switch_at_ms": _program_last_switch_at_ms,
+        "stream_previous_camera": _program_previous_camera,
         "model": MODEL_NAME,
         "available_models": AVAILABLE_MODELS,
         "enabled_cameras": {
@@ -765,6 +777,7 @@ def _push_state() -> None:
         },
         "webrtc": webrtc,
         "internal_streams": internal_streams,
+        "program_switch": switch_meta,
     })
 
 
@@ -814,6 +827,9 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "stream_configured": bool(url),
                 "stream_worker_running": _is_stream_worker_running(),
                 "stream_active_camera": _program_active_camera,
+                "stream_switch_seq": _program_switch_seq,
+                "stream_switch_at_ms": _program_last_switch_at_ms,
+                "stream_previous_camera": _program_previous_camera,
                 "rtmp_url": url or "",
                 "score_overlay": score_visible,
                 "go_bridge_sock": GO_BRIDGE_SOCK,
@@ -825,6 +841,9 @@ class ControlHandler(BaseHTTPRequestHandler):
                     "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_RTSP_PATH}",
                     "webrtc_clean": f"http://{JETSON_HOST}:8889/{PROGRAM_RTSP_PATH}",
                     "active_camera": _program_active_camera,
+                    "switch_seq": _program_switch_seq,
+                    "switch_at_ms": _program_last_switch_at_ms,
+                    "previous_camera": _program_previous_camera,
                 },
                 "cameras": {
                     FIXED_CAMERA: {
@@ -1805,7 +1824,8 @@ def _link_tee_to_program_selector(
 
 
 def _switch_program_camera(active_camera: str, *, force_keyframe: bool = True) -> None:
-    global _program_active_camera
+    global _program_active_camera, _program_previous_camera
+    global _program_switch_seq, _program_last_switch_at_ms
 
     normalized = _normalize_stream_camera(active_camera) or PTZ_CAMERA
     available = set(_program_selector_pads)
@@ -1825,8 +1845,12 @@ def _switch_program_camera(active_camera: str, *, force_keyframe: bool = True) -
     if current == pad and _program_active_camera == normalized:
         return
 
+    previous_camera = _program_active_camera
     _program_selector.set_property("active-pad", pad)
+    _program_previous_camera = previous_camera
     _program_active_camera = normalized
+    _program_switch_seq += 1
+    _program_last_switch_at_ms = int(time.time() * 1000)
     print(f"[program] switched source -> {normalized}")
     if force_keyframe:
         _force_key_unit(_program_enc, PROGRAM_RTSP_PATH)
@@ -1974,10 +1998,14 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
 # ---------------------------------------------------------------------------
 def build_pipeline() -> tuple:
     global _encoders, _program_selector, _program_enc, _last_program_cfg
+    global _program_previous_camera, _program_switch_seq, _program_last_switch_at_ms
     _encoders = {}
     _program_selector = None
     _program_enc = None
     _last_program_cfg = None
+    _program_previous_camera = PTZ_CAMERA
+    _program_switch_seq = 0
+    _program_last_switch_at_ms = 0
 
     pipeline = Gst.Pipeline()
     if not pipeline:
