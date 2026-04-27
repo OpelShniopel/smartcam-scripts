@@ -38,6 +38,11 @@ TEXT_VALIGN_TOP = 2
 TEXT_VALIGN_POSITION = 3
 
 
+def _set_if_supported(el: Any, prop: str, value) -> None:
+    if el.find_property(prop) is not None:
+        el.set_property(prop, value)
+
+
 @dataclass
 class RtmpElements:
     osd_bg: Any
@@ -867,6 +872,10 @@ def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
     enc.set_property("speed-preset", RTMP_PRESET)
     enc.set_property("key-int-max", RTMP_KEYINT)
     enc.set_property("threads", RTMP_THREADS)
+    _set_if_supported(enc, "byte-stream", True)
+    _set_if_supported(enc, "bframes", 0)
+    _set_if_supported(enc, "ref", 1)
+    _set_if_supported(enc, "sliced-threads", True)
 
 
 def configure_rtmp_output(elements: RtmpElements, rtmp_url: str) -> None:
@@ -878,6 +887,7 @@ def configure_rtmp_output(elements: RtmpElements, rtmp_url: str) -> None:
     elements.rtmpsink.set_property("async", False)
     # Generates a simple audio source for the stream.
     elements.audiosrc.set_property("wave", 4)
+    _set_if_supported(elements.audiosrc, "is-live", True)
     # Sets the AAC audio bitrate.
     elements.aacenc.set_property("bitrate", 128000)
 

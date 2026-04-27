@@ -70,7 +70,8 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gst", "1.0")
-from gi.repository import GLib, Gst
+gi.require_version("GstVideo", "1.0")
+from gi.repository import GLib, Gst, GstVideo
 
 import pyds
 
@@ -201,6 +202,10 @@ CLEAN_KEYINT = 15
 CLEAN_THREADS = 2
 CLEAN_PRESET = "ultrafast"
 CLEAN_TUNE = "zerolatency"
+PROGRAM_CLEAN_BITRATE = 5000
+PROGRAM_CLEAN_KEYINT = 60
+PROGRAM_CLEAN_THREADS = 1
+PROGRAM_RTSP_PATH = "program_clean"
 
 # AI branch encoder settings
 AI_BITRATE = 3500
@@ -222,6 +227,11 @@ RTMP_BITRATE = 6800
 
 # Encoder references populated by build_pipeline() and reported by /status.
 _encoders: dict[str, Gst.Element] = {}
+_program_selector: Gst.Element | None = None
+_program_selector_pads: dict[str, Gst.Pad] = {}
+_program_enc: Gst.Element | None = None
+_program_active_camera: str = PTZ_CAMERA
+_last_program_cfg: dict | None = None
 
 # ---------------------------------------------------------------------------
 # RTMP stream status tracking
@@ -658,6 +668,7 @@ def _dispatch_cmd(msg: dict) -> None:
             _ack("switch_cam", False, err)
             return
         _persist_stream_worker_config(active_camera=normalized)
+        _switch_program_camera(normalized)
         running = _is_stream_worker_running()
         print(f"[cmd] switch_cam -> {normalized} (running={running})")
         _ack("switch_cam", True)
@@ -699,40 +710,45 @@ def _push_state() -> None:
     url = read_stream_url()
     worker_running = _is_stream_worker_running()
     worker_cfg = _read_stream_worker_config()
+    active_camera = (
+        _program_active_camera
+        if _program_selector is not None
+        else worker_cfg.get("activeCamera", PTZ_CAMERA)
+    )
 
     webrtc = {}
     internal_streams = {}
+    program_clean_rtsp_url = f"rtsp://{JETSON_HOST}:8554/{PROGRAM_RTSP_PATH}"
+    program_clean_webrtc_url = f"http://{JETSON_HOST}:8889/{PROGRAM_RTSP_PATH}"
+
+    webrtc["program_clean"] = program_clean_webrtc_url
+    internal_streams["program_clean"] = program_clean_rtsp_url
+    internal_streams["program_stream"] = program_clean_rtsp_url
 
     if ENABLE_FIXED_CAMERA:
         fixed_clean_url = f"http://{JETSON_HOST}:8889/camera0_clean"
-        fixed_stream_url = f"rtsp://{JETSON_HOST}:8554/camera0_stream"
         webrtc["fixed_clean"] = fixed_clean_url
         webrtc["cam0_clean"] = fixed_clean_url
         if _ai_enabled("CAM0"):
             fixed_ai_url = f"http://{JETSON_HOST}:8889/camera0_ai"
             webrtc["fixed_ai"] = fixed_ai_url
             webrtc["cam0_ai"] = fixed_ai_url
-        internal_streams["fixed_stream"] = fixed_stream_url
-        internal_streams["cam0_stream"] = fixed_stream_url
 
     if ENABLE_PTZ_CAMERA:
         ptz_clean_url = f"http://{JETSON_HOST}:8889/camera2_clean"
-        ptz_stream_url = f"rtsp://{JETSON_HOST}:8554/camera2_stream"
         webrtc["ptz_clean"] = ptz_clean_url
         webrtc["cam2_clean"] = ptz_clean_url
         if _ai_enabled("CAM2"):
             ptz_ai_url = f"http://{JETSON_HOST}:8889/camera2_ai"
             webrtc["ptz_ai"] = ptz_ai_url
             webrtc["cam2_ai"] = ptz_ai_url
-        internal_streams["ptz_stream"] = ptz_stream_url
-        internal_streams["cam2_stream"] = ptz_stream_url
 
     _go_bridge_out_q.put({
         "type": "state",
         "streaming": bool(url) and worker_running,
         "stream_configured": bool(url),
         "stream_worker_running": worker_running,
-        "stream_active_camera": worker_cfg.get("activeCamera", PTZ_CAMERA),
+        "stream_active_camera": active_camera,
         "model": MODEL_NAME,
         "available_models": AVAILABLE_MODELS,
         "enabled_cameras": {
@@ -797,7 +813,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "streaming": bool(url) and _is_stream_worker_running(),
                 "stream_configured": bool(url),
                 "stream_worker_running": _is_stream_worker_running(),
-                "stream_active_camera": _read_stream_worker_config().get("activeCamera", PTZ_CAMERA),
+                "stream_active_camera": _program_active_camera,
                 "rtmp_url": url or "",
                 "score_overlay": score_visible,
                 "go_bridge_sock": GO_BRIDGE_SOCK,
@@ -805,12 +821,16 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "unix_sock": GO_BRIDGE_SOCK,
                 "pycam_sock": PTZ_CONTROL_SOCK,
                 "encoders": list(_encoders.keys()),
+                "program": {
+                    "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_RTSP_PATH}",
+                    "webrtc_clean": f"http://{JETSON_HOST}:8889/{PROGRAM_RTSP_PATH}",
+                    "active_camera": _program_active_camera,
+                },
                 "cameras": {
                     FIXED_CAMERA: {
                         "device": FIXED_CAMERA_DEVICE,
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
-                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
@@ -818,7 +838,6 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "device": FIXED_CAMERA_DEVICE,
                         "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
-                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
@@ -828,7 +847,6 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
-                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera2_stream",
                     },
                     "cam2": {
                         "device": PTZ_CAMERA_DEVICE,
@@ -836,7 +854,6 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
                         "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
                         "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
-                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera2_stream",
                     },
                 },
             })
@@ -1001,6 +1018,26 @@ def _capsfilter(name: str, caps_str: str) -> Gst.Element:
     el = _make("capsfilter", name)
     el.set_property("caps", Gst.Caps.from_string(caps_str))
     return el
+
+
+def _set_if_supported(el: Gst.Element, prop: str, value) -> None:
+    if el.find_property(prop) is not None:
+        el.set_property(prop, value)
+
+
+def _force_key_unit(enc: Gst.Element | None, label: str) -> None:
+    if enc is None:
+        return
+    sink_pad = enc.get_static_pad("sink")
+    if sink_pad is None:
+        return
+    event = GstVideo.video_event_new_upstream_force_key_unit(
+        Gst.CLOCK_TIME_NONE,
+        True,
+        0,
+    )
+    if sink_pad.send_event(event):
+        print(f"[program] forced keyframe -> {label}")
 
 
 # ---------------------------------------------------------------------------
@@ -1545,6 +1582,7 @@ def _build_simple_rtsp_encode_branch(
     q.set_property("max-size-bytes", 0)
     q.set_property("max-size-time", 0)
     q.set_property("leaky", 2)
+    _set_if_supported(parse, "config-interval", 1)
     _configure_rtsp_sink(sink, rtsp_path)
 
     for el in (q, conv, caps, enc, parse, sink):
@@ -1724,6 +1762,155 @@ def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) ->
     return enc
 
 
+def _link_tee_to_program_selector(
+        pipeline: Gst.Pipeline,
+        tee: Gst.Element,
+        suffix: str,
+        selector: Gst.Element,
+        camera_name: str,
+) -> None:
+    q = _make("queue", f"q{suffix}_program_sel")
+    caps = _capsfilter(
+        f"caps{suffix}_program_sel",
+        "video/x-raw(memory:NVMM),format=NV12,width=1920,height=1080,framerate=30/1",
+    )
+
+    q.set_property("max-size-buffers", 2)
+    q.set_property("max-size-bytes", 0)
+    q.set_property("max-size-time", 0)
+    q.set_property("leaky", 2)
+
+    for el in (q, caps):
+        pipeline.add(el)
+
+    _tee_branch(tee, q)
+    _link(q, caps)
+
+    src_pad = _get_static_pad(caps, "src")
+    sel_pad = selector.request_pad_simple("sink_%u")
+    if sel_pad is None:
+        sys.stderr.write(f"ERROR: Unable to request selector sink pad for {camera_name}\n")
+        sys.exit(1)
+    if src_pad.link(sel_pad) != Gst.PadLinkReturn.OK:
+        sys.stderr.write(f"ERROR: Failed to link {camera_name} to program selector\n")
+        sys.exit(1)
+
+    _program_selector_pads[camera_name] = sel_pad
+
+
+def _switch_program_camera(active_camera: str, *, force_keyframe: bool = True) -> None:
+    global _program_active_camera
+
+    normalized = _normalize_stream_camera(active_camera) or PTZ_CAMERA
+    available = set(_program_selector_pads)
+    if normalized not in available:
+        if PTZ_CAMERA in available:
+            normalized = PTZ_CAMERA
+        elif FIXED_CAMERA in available:
+            normalized = FIXED_CAMERA
+        else:
+            return
+
+    pad = _program_selector_pads.get(normalized)
+    if _program_selector is None or pad is None:
+        return
+
+    current = _program_selector.get_property("active-pad")
+    if current == pad and _program_active_camera == normalized:
+        return
+
+    _program_selector.set_property("active-pad", pad)
+    _program_active_camera = normalized
+    print(f"[program] switched source -> {normalized}")
+    if force_keyframe:
+        _force_key_unit(_program_enc, PROGRAM_RTSP_PATH)
+    _push_state()
+
+
+def _poll_program_config() -> bool:
+    global _last_program_cfg
+
+    cfg = _read_stream_worker_config()
+    if cfg != _last_program_cfg:
+        previous = _last_program_cfg or {}
+        _last_program_cfg = dict(cfg)
+        if cfg.get("activeCamera") != previous.get("activeCamera"):
+            _switch_program_camera(cfg.get("activeCamera", PTZ_CAMERA))
+        else:
+            _push_state()
+    return True
+
+
+def _build_program_clean_branch(
+        pipeline: Gst.Pipeline,
+        camera_tees: dict[str, Gst.Element],
+) -> Gst.Element:
+    global _program_selector, _program_enc, _last_program_cfg
+
+    selector = _make("input-selector", "program_selector")
+    q = _make("queue", "q_program_clean")
+    conv = _make_nvconv("conv_program_clean")
+    caps = _capsfilter("caps_program_clean_i420", "video/x-raw,format=I420")
+    enc = _make("x264enc", "enc_program_clean")
+    parse = _make("h264parse", "parse_program_clean")
+    sink = _make("rtspclientsink", "sink_program_clean")
+
+    selector.set_property("sync-streams", True)
+    _set_if_supported(selector, "cache-buffers", True)
+    _set_if_supported(selector, "sync-mode", 1)
+    _set_if_supported(selector, "drop-backwards", True)
+
+    q.set_property("max-size-buffers", 2)
+    q.set_property("max-size-bytes", 0)
+    q.set_property("max-size-time", 0)
+    q.set_property("leaky", 2)
+
+    _configure_x264_encoder(
+        enc,
+        tune=CLEAN_TUNE,
+        preset=CLEAN_PRESET,
+        bitrate=PROGRAM_CLEAN_BITRATE,
+        keyint=PROGRAM_CLEAN_KEYINT,
+        threads=PROGRAM_CLEAN_THREADS,
+    )
+    _set_if_supported(parse, "config-interval", 1)
+    _configure_rtsp_sink(sink, PROGRAM_RTSP_PATH)
+
+    for el in (selector, q, conv, caps, enc, parse, sink):
+        pipeline.add(el)
+
+    _program_selector_pads.clear()
+
+    if FIXED_CAMERA in camera_tees:
+        _link_tee_to_program_selector(
+            pipeline,
+            camera_tees[FIXED_CAMERA],
+            "0",
+            selector,
+            FIXED_CAMERA,
+        )
+    if PTZ_CAMERA in camera_tees:
+        _link_tee_to_program_selector(
+            pipeline,
+            camera_tees[PTZ_CAMERA],
+            "2",
+            selector,
+            PTZ_CAMERA,
+        )
+
+    _link_many(selector, q, conv, caps, enc, parse, sink)
+
+    _program_selector = selector
+    _program_enc = enc
+    _last_program_cfg = _read_stream_worker_config()
+    _switch_program_camera(
+        _last_program_cfg.get("activeCamera", PTZ_CAMERA),
+        force_keyframe=False,
+    )
+
+    return enc
+
+
 # ---------------------------------------------------------------------------
 # Legacy embedded RTMP stream branch. The main runtime now uses stream_worker.py.
 # ---------------------------------------------------------------------------
@@ -1780,8 +1967,11 @@ def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | No
 # Main pipeline builder
 # ---------------------------------------------------------------------------
 def build_pipeline() -> tuple:
-    global _encoders
+    global _encoders, _program_selector, _program_enc, _last_program_cfg
     _encoders = {}
+    _program_selector = None
+    _program_enc = None
+    _last_program_cfg = None
 
     pipeline = Gst.Pipeline()
     if not pipeline:
@@ -1790,10 +1980,12 @@ def build_pipeline() -> tuple:
 
     pgie0 = None
     pgie2 = None
+    camera_tees: dict[str, Gst.Element] = {}
 
     if ENABLE_FIXED_CAMERA:
         print("Building fixed camera source ...")
         tee0 = _build_camera_source(pipeline, FIXED_CAMERA_DEVICE, "0")
+        camera_tees[FIXED_CAMERA] = tee0
 
         print("Building fixed camera clean RTSP branch (1080p high quality low latency) ...")
         enc0_clean = _build_clean_branch(pipeline, tee0, "0", "camera0_clean")
@@ -1807,16 +1999,13 @@ def build_pipeline() -> tuple:
             _encoders["enc0_ai"] = enc0_ai
         else:
             print("Fixed camera AI disabled — skipping AI RTSP branch")
-
-        print("Building fixed camera internal RTSP branch for stream worker ...")
-        enc0_streamsrc = _build_internal_stream_branch(pipeline, tee0, "0", "camera0_stream")
-        _encoders["enc0_streamsrc"] = enc0_streamsrc
     else:
         print("Fixed camera disabled — skipping source and all branches")
 
     if ENABLE_PTZ_CAMERA:
         print("Building PTZ camera source ...")
         tee2 = _build_camera_source(pipeline, PTZ_CAMERA_DEVICE, "2")
+        camera_tees[PTZ_CAMERA] = tee2
 
         print("Building PTZ camera clean RTSP branch (1080p high quality low latency) ...")
         enc2_clean = _build_clean_branch(pipeline, tee2, "2", "camera2_clean")
@@ -1830,16 +2019,16 @@ def build_pipeline() -> tuple:
             _encoders["enc2_ai"] = enc2_ai
         else:
             print("PTZ camera AI disabled — skipping AI RTSP branch")
-
-        print("Building PTZ camera internal RTSP branch for stream worker ...")
-        enc2_streamsrc = _build_internal_stream_branch(pipeline, tee2, "2", "camera2_stream")
-        _encoders["enc2_streamsrc"] = enc2_streamsrc
     else:
         print("PTZ camera disabled — skipping source and all branches")
 
     if not ENABLE_FIXED_CAMERA and not ENABLE_PTZ_CAMERA:
         sys.stderr.write("ERROR: All cameras are disabled\n")
         sys.exit(1)
+
+    print("Building switched program clean RTSP branch for stream worker/WebRTC ...")
+    enc_program_clean = _build_program_clean_branch(pipeline, camera_tees)
+    _encoders["enc_program_clean"] = enc_program_clean
 
     return pipeline, pgie0, pgie2
 
@@ -1897,6 +2086,7 @@ def main():
     if ENABLE_TERMINAL_FPS_METRICS and ENABLE_AI_FPS_METRICS:
         GLib.timeout_add_seconds(TERMINAL_FPS_INTERVAL_SEC, _fps_report)
     GLib.timeout_add_seconds(1, _poll_stream_worker_status)
+    GLib.timeout_add(200, _poll_program_config)
 
     print("Starting pipeline ...")
     pipeline.set_state(Gst.State.PLAYING)
