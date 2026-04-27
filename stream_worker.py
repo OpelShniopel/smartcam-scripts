@@ -441,16 +441,20 @@ def _build_rtsp_input_branch(pipeline: Gst.Pipeline, suffix: str, url: str) -> G
     q = _make("queue", f"src{suffix}_queue")
 
     src.set_property("location", url)
+    # Uses TCP for the RTSP connection.
     src.set_property("protocols", 4)
+    # Buffers 100 ms of RTSP data before decode.
     src.set_property("latency", 100)
 
     conv.set_property("gpu-id", 0)
     conv.set_property("copy-hw", 2)
     caps.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
 
+    # Keeps up to 2 frames in this queue.
     q.set_property("max-size-buffers", 2)
     q.set_property("max-size-bytes", 0)
     q.set_property("max-size-time", 0)
+    # Drops old frames if the queue falls behind.
     q.set_property("leaky", 2)
 
     for el in (src, depay, parse, dec, conv, caps, q):
