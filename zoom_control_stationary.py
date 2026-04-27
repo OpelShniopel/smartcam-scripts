@@ -41,7 +41,6 @@ STATIONARY_CENTER_X = 640.0    # half of FRAME_W — stationary cam optical cent
 VELOCITY_HORIZON = 6           # frames ahead to predict ball position
 EDGE_MARGIN      = 0.20        # fraction of pan FOV half-width — zoom-out starts here
 VELOCITY_EMA_ALPHA = 0.35      # smoothing factor for ball velocity (0=frozen, 1=raw)
-ZOOM_DEADBAND      = 150       # ignore desired-zoom changes smaller than this (steps)
 
 FRAME_W = 1280   # stationary cam frame width (px)
 FRAME_H = 720
@@ -109,45 +108,43 @@ class ZoomController:
         zoom_ratio = 1.0 + (MAX_OPTICAL_ZOOM - 1.0) * t
         return 1.0 / zoom_ratio
 
-    def send_zoom(self, zoom_steps):
+    def _drive_motor(self):
+        """Send one incremental step toward target_zoom_pos (rate-limited)."""
         if not self.ser_z:
             return
-
-        self.target_zoom_pos += zoom_steps
-        self.target_zoom_pos = max(ZOOM_MIN_STEPS, min(ZOOM_MAX_STEPS, self.target_zoom_pos))
-
         now = time.time()
         if now - self.last_cmd_time < self.cmd_interval:
             return
-
         diff = self.target_zoom_pos - self.current_zoom_pos
         if abs(diff) < 5:
             return
-
-        step_to_take = max(-MAX_SEGMENT, min(MAX_SEGMENT, diff * 0.5))
-        new_zoom_request = self.current_zoom_pos + step_to_take
-        new_focus_request = self.get_focus_for_zoom(new_zoom_request)
-
-        lens_helpers.send_command(self.ser_z, f"G0 A{int(new_zoom_request)} B{int(new_focus_request)}")
-        self.current_zoom_pos = new_zoom_request
+        step = max(-MAX_SEGMENT, min(MAX_SEGMENT, diff * 0.5))
+        new_pos = self.current_zoom_pos + step
+        new_focus = self.get_focus_for_zoom(new_pos)
+        lens_helpers.send_command(self.ser_z, f"G0 A{int(new_pos)} B{int(new_focus)}")
+        self.current_zoom_pos = new_pos
         self.last_cmd_time = now
+
+    def send_zoom(self, zoom_steps):
+        if not self.ser_z:
+            return
+        self.target_zoom_pos = max(ZOOM_MIN_STEPS, min(ZOOM_MAX_STEPS,
+                                                        self.target_zoom_pos + zoom_steps))
+        self._drive_motor()
 
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball or ball['width'] <= 0:
-            self.last_ball_x    = None
+            self.last_ball_x     = None
             self.smooth_velocity = 0.0
-            # Drift back to base zoom when ball is lost
-            zoom_delta = ZOOM_BASE_POS - self.target_zoom_pos
-            if abs(zoom_delta) > ZOOM_DEADBAND:
-                self.send_zoom(zoom_delta * 0.1)
+            self.target_zoom_pos = ZOOM_MAX_STEPS  # widen FOV when ball is lost
+            self._drive_motor()
             return
 
         ball_width = ball['width']
 
-        # Direct size → zoom position mapping.
-        # Small ball (far) → t near 0 → zoom in (low zoom_pos).
-        # Large ball (close) → t near 1 → zoom out (high zoom_pos / 1x).
+        # Small ball (far) → t near 0 → zoom in (low zoom_pos = 8x).
+        # Large ball (close) → t near 1 → zoom out (high zoom_pos = 1x).
         t = (ball_width - BALL_MIN_PX) / (BALL_MAX_PX - BALL_MIN_PX)
         t = max(0.0, min(1.0, t))
         t_curved = t ** (1.0 / ZOOM_CURVE)
@@ -158,24 +155,25 @@ class ZoomController:
         self.smooth_velocity = VELOCITY_EMA_ALPHA * raw_velocity + (1.0 - VELOCITY_EMA_ALPHA) * self.smooth_velocity
         self.last_ball_x = ball_x
 
-        # Solve geometrically for the zoom_pos that just fits the predicted ball position
-        # inside the pan cam's safe FOV zone.
+        # Solve geometrically for the minimum zoom_pos (widest FOV) needed to keep
+        # the predicted ball position inside the pan cam's safe FOV zone.
         #
-        # pan_fov_half = STATIONARY_CENTER_X / zoom_ratio
-        # safe condition: predicted_offset <= pan_fov_half * (1 - EDGE_MARGIN)
-        # rearranged:     zoom_ratio <= STATIONARY_CENTER_X * (1-EDGE_MARGIN) / predicted_offset
-        # then back-solve zoom_ratio → t → zoom_pos.
+        # We need: zoom_ratio <= STATIONARY_CENTER_X * (1-EDGE_MARGIN) / predicted_offset
+        # Back-solve: zoom_ratio → t → zoom_pos.
+        # Clamping t to [0,1] handles ball near centre (no constraint) and beyond 1x (full wide).
         offset_now       = abs(ball_x - STATIONARY_CENTER_X)
         predicted_offset = offset_now + self.smooth_velocity * VELOCITY_HORIZON
 
         if predicted_offset > 0.0:
-            max_zoom_ratio   = STATIONARY_CENTER_X * (1.0 - EDGE_MARGIN) / predicted_offset
-            required_t       = (max_zoom_ratio - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)
-            required_t       = max(0.0, min(1.0, required_t))
+            max_zoom_ratio    = STATIONARY_CENTER_X * (1.0 - EDGE_MARGIN) / predicted_offset
+            required_t        = (max_zoom_ratio - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)
+            required_t        = max(0.0, min(1.0, required_t))
             edge_required_pos = ZOOM_MAX_STEPS - required_t * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
         else:
             edge_required_pos = ZOOM_MIN_STEPS
 
+        # Take the more zoomed-out of ball-size target and edge requirement.
+        # Higher zoom_pos = more zoomed out (1x). Lower = more zoomed in (8x).
         desired_zoom_pos = min(ZOOM_MAX_STEPS, max(base_zoom_pos, edge_required_pos))
 
         if DEBUG:
@@ -184,6 +182,5 @@ class ZoomController:
                   f"edge_req={edge_required_pos:.0f}  "
                   f"base={base_zoom_pos:.0f}  desired={desired_zoom_pos:.0f}")
 
-        zoom_delta = desired_zoom_pos - self.target_zoom_pos
-        if abs(zoom_delta) > ZOOM_DEADBAND:
-            self.send_zoom(zoom_delta)
+        self.target_zoom_pos = desired_zoom_pos
+        self._drive_motor()
