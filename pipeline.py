@@ -95,7 +95,12 @@ from runtime_paths import (
 )
 from rtmp_elements import (
     configure_rtmp_branch,
+    foul_png_path,
     make_rtmp_elements,
+    populate_timeout_texts,
+    TIMEOUT_TEXT_KEYS,
+    update_blitzball_end_stats,
+    update_blitzball_overlay,
     update_milestone_overlays,
     update_quarter_overlay,
     update_score_clock_overlays,
@@ -313,51 +318,100 @@ def _update_osd_texts(state: dict) -> None:
     if not els:
         return
 
-    home = els.get("osd_home")
-    away = els.get("osd_away")
-    score = els.get("osd_score")
-    clock = els.get("osd_clock")
-    quarter = els.get("osd_quarter")
-    fouls = els.get("osd_fouls")
-    bg = els.get("osd_bg")
-    milestone_player = els.get("osd_milestone_player")
-    milestone_text = els.get("osd_milestone_text")
+    end_showing = update_blitzball_end_stats(state, els)
+    if end_showing:
+        return
+
     visible = state.get("visible", False)
 
-    update_quarter_overlay(quarter, visible, state)
-    if home:
-        home.set_property("silent", not visible)
-        if visible:
-            home.set_property(
-                "text",
-                truncate_team_name(
-                    "home_name",
-                    state.get("home_name", "HOME"),
-                    log_prefix="[score]",
-                ),
-            )
-    if away:
-        away.set_property("silent", not visible)
-        if visible:
-            away.set_property(
-                "text",
-                truncate_team_name(
-                    "away_name",
-                    state.get("away_name", "AWAY"),
-                    log_prefix="[score]",
-                ),
-            )
-    update_score_clock_overlays(score, clock, visible, state)
-    if fouls:
-        fouls.set_property("silent", not visible)
-        if visible:
-            fouls.set_property("text",
-                               f"F:{state.get('home_fouls', 0)} T:{state.get('home_timeouts', 3)}"
-                               f"          "
-                               f"F:{state.get('away_fouls', 0)} T:{state.get('away_timeouts', 3)}")
-    if bg:
-        bg.set_property("alpha", 1.0 if visible else 0.0)
-    update_milestone_overlays(milestone_player, milestone_text, state)
+    if state.get("sport_code", "") != "BLITZBALL":
+        home = els.get("osd_home")
+        away = els.get("osd_away")
+        home_score = els.get("osd_home_score")
+        away_score = els.get("osd_away_score")
+        clock = els.get("osd_clock")
+        quarter = els.get("osd_quarter")
+        home_fouls_bar = els.get("osd_home_fouls_bar")
+        away_fouls_bar = els.get("osd_away_fouls_bar")
+        bg = els.get("osd_bg")
+        milestone_player = els.get("osd_milestone_player")
+        milestone_text = els.get("osd_milestone_text")
+
+        update_quarter_overlay(quarter, visible, state)
+        if home:
+            home.set_property("silent", not visible)
+            if visible:
+                home.set_property(
+                    "text",
+                    truncate_team_name(
+                        "home_name",
+                        state.get("home_name", "HOME"),
+                        log_prefix="[score]",
+                    ),
+                )
+        if away:
+            away.set_property("silent", not visible)
+            if visible:
+                away.set_property(
+                    "text",
+                    truncate_team_name(
+                        "away_name",
+                        state.get("away_name", "AWAY"),
+                        log_prefix="[score]",
+                    ),
+                )
+        update_score_clock_overlays(home_score, away_score, clock, visible, state)
+        if home_fouls_bar:
+            path = foul_png_path("home", state.get("home_fouls", 0))
+            if path is None:
+                home_fouls_bar.set_property("alpha", 0.0)
+            else:
+                home_fouls_bar.set_property("location", path)
+                home_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
+        if away_fouls_bar:
+            path = foul_png_path("away", state.get("away_fouls", 0))
+            if path is None:
+                away_fouls_bar.set_property("alpha", 0.0)
+            else:
+                away_fouls_bar.set_property("location", path)
+                away_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
+        if bg:
+            bg.set_property("alpha", 1.0 if visible else 0.0)
+        update_milestone_overlays(milestone_player, milestone_text, state)
+
+    update_blitzball_overlay(state, els)
+
+    timeout_stats = state.get("timeout_stats")
+    now_ms = int(time.time() * 1000)
+    timeout_active = (
+        isinstance(timeout_stats, dict)
+        and timeout_stats.get("show_until", 0) > now_ms
+    )
+    timeout_bg = els.get("osd_timeout_bg")
+    if timeout_active:
+        for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
+            el = els.get(key)
+            if el:
+                el.set_property("alpha", 0.0)
+        for key in ("osd_quarter", "osd_home", "osd_away", "osd_home_score",
+                    "osd_away_score", "osd_clock", "osd_milestone_player", "osd_milestone_text"):
+            el = els.get(key)
+            if el:
+                el.set_property("silent", True)
+        populate_timeout_texts(timeout_stats, state, els)
+        if timeout_bg:
+            timeout_bg.set_property("alpha", 1.0)
+        for key in TIMEOUT_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("silent", False)
+    else:
+        if timeout_bg:
+            timeout_bg.set_property("alpha", 0.0)
+        for key in TIMEOUT_TEXT_KEYS:
+            el = els.get(key)
+            if el:
+                el.set_property("silent", True)
 
 
 def _apply_score_patch(data: dict) -> None:

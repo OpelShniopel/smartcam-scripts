@@ -10,6 +10,7 @@ RTMP failures do not tear down the local camera/AI service.
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import socket as _socket
@@ -38,9 +39,15 @@ from runtime_paths import (
     STREAM_WORKER_STATUS,
 )
 from rtmp_elements import (
+    _milestone_show_until,
     RtmpElements,
     configure_rtmp_branch,
+    foul_png_path,
     make_rtmp_elements,
+    populate_timeout_texts,
+    TIMEOUT_TEXT_KEYS,
+    update_blitzball_end_stats,
+    update_blitzball_overlay,
     update_milestone_overlays,
     update_quarter_overlay,
     update_score_clock_overlays,
@@ -80,6 +87,43 @@ _rtmp_fps_frames = 0
 _stall_triggered = False
 _exit_code = 0
 _last_score_state: dict | None = None
+_milestone_display_until: int = 0
+_last_milestone_show_until: float = 0.0
+_milestone_alpha: float = 0.0
+_milestone_fading_in: bool = False
+_milestone_fading_out: bool = False
+_milestone_fade_active: bool = False
+_timeout_alpha: float = 0.0
+_timeout_fade_in: bool = False
+_timeout_fade_out: bool = False
+_timeout_fade_active: bool = False
+_pre_timeout_bg_alpha: float = 0.0
+_pre_timeout_home_foul_alpha: float = 0.0
+_pre_timeout_away_foul_alpha: float = 0.0
+_sb_timeout_alpha: float = 1.0   # scoreboard alpha during timeout transition
+_timeout_pause_ticks: int = 0    # countdown ticks for pause between phases
+TIMEOUT_TRANSITION_PAUSE_TICKS = 20  # 20 × 100 ms = 2 s
+
+_blitz_pulse_active: bool = False
+_blitz_pulse_alpha: float = 0.6
+_blitz_pulse_phase: float = 0.0
+
+_end_stats_show_until: int = 0
+
+_SCOREBOARD_TEXT_KEYS: tuple[str, ...] = (
+    "osd_quarter", "osd_home", "osd_away",
+    "osd_home_score", "osd_away_score", "osd_clock",
+    "osd_milestone_player", "osd_milestone_text",
+)
+_SCOREBOARD_PIXEL_KEYS: tuple[str, ...] = (
+    "osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar",
+)
+# Scoreboard text keys that participate in the timeout cross-fade (milestone has its own fade).
+_SCOREBOARD_CROSS_FADE_KEYS: tuple[str, ...] = (
+    "osd_quarter", "osd_home", "osd_away",
+    "osd_home_score", "osd_away_score", "osd_clock",
+)
+
 _last_config: dict | None = None
 _enc_stream: Gst.Element | None = None
 _selector: Gst.Element | None = None
@@ -241,65 +285,494 @@ def _get_static_pad(el: Gst.Element, pad_name: str) -> Gst.Pad:
     return pad
 
 
+def _blitz_pulse_step() -> bool:
+    global _blitz_pulse_active, _blitz_pulse_alpha, _blitz_pulse_phase
+
+    if not _blitz_pulse_active:
+        return False
+
+    state = _last_score_state
+    if not (state and state.get("blitz_active", False) and state.get("sport_code") == "BLITZBALL"):
+        _blitz_pulse_active = False
+        els = dict(_osd_elements)
+        el = els.get("osd_blitz_active")
+        if el:
+            el.set_property("alpha", 0.0)
+        return False
+
+    _blitz_pulse_phase += 0.15
+    alpha = 0.5 + 0.4 * math.sin(_blitz_pulse_phase)
+    _blitz_pulse_alpha = alpha
+    els = dict(_osd_elements)
+    el = els.get("osd_blitz_active")
+    if el:
+        el.set_property("alpha", alpha)
+    return True
+
+
+def _timeout_fade_step() -> bool:
+    global _timeout_alpha, _timeout_fade_in, _timeout_fade_out, _timeout_fade_active
+    global _sb_timeout_alpha, _timeout_pause_ticks
+
+    els = dict(_osd_elements)
+    timeout_bg = els.get("osd_timeout_bg")
+    visible = _last_score_state.get("visible", False) if _last_score_state else False
+
+    if _timeout_fade_in:
+        # Phase 1 — scoreboard fades out
+        if _sb_timeout_alpha > 0.0:
+            _sb_timeout_alpha = max(0.0, _sb_timeout_alpha - 0.05)
+            bg_el = els.get("osd_bg")
+            if bg_el:
+                bg_el.set_property("alpha", _pre_timeout_bg_alpha * _sb_timeout_alpha)
+            home_foul_el = els.get("osd_home_fouls_bar")
+            if home_foul_el:
+                home_foul_el.set_property("alpha", _pre_timeout_home_foul_alpha * _sb_timeout_alpha)
+            away_foul_el = els.get("osd_away_fouls_bar")
+            if away_foul_el:
+                away_foul_el.set_property("alpha", _pre_timeout_away_foul_alpha * _sb_timeout_alpha)
+            if visible:
+                sb_a = int(_sb_timeout_alpha * 255)
+                sb_fg = (sb_a << 24) | 0x00FFFFFF
+                sb_outline = (sb_a << 24) | 0x00000000
+                for key in _SCOREBOARD_CROSS_FADE_KEYS:
+                    el = els.get(key)
+                    if el:
+                        el.set_property("color", sb_fg)
+                        el.set_property("outline-color", sb_outline)
+            if _sb_timeout_alpha <= 0.0:
+                if visible:
+                    for key in _SCOREBOARD_CROSS_FADE_KEYS:
+                        el = els.get(key)
+                        if el:
+                            el.set_property("silent", True)
+                _timeout_pause_ticks = TIMEOUT_TRANSITION_PAUSE_TICKS
+
+        # Phase 2 — pause between scoreboard out and timeout in
+        elif _timeout_pause_ticks > 0:
+            _timeout_pause_ticks -= 1
+
+        # Phase 3 — timeout fades in
+        else:
+            _timeout_alpha = min(1.0, _timeout_alpha + 0.05)
+            if timeout_bg:
+                timeout_bg.set_property("alpha", _timeout_alpha)
+            t_a = int(_timeout_alpha * 255)
+            t_fg = (t_a << 24) | 0x00FFFFFF
+            t_outline = (t_a << 24) | 0x00000000
+            for key in TIMEOUT_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("color", t_fg)
+                    el.set_property("outline-color", t_outline)
+            if _timeout_alpha >= 1.0:
+                _timeout_fade_in = False
+                for key in TIMEOUT_TEXT_KEYS:
+                    el = els.get(key)
+                    if el:
+                        el.set_property("draw-shadow", True)
+
+    elif _timeout_fade_out:
+        # Phase 1 — timeout fades out
+        if _timeout_alpha > 0.0:
+            _timeout_alpha = max(0.0, _timeout_alpha - 0.05)
+            if timeout_bg:
+                timeout_bg.set_property("alpha", _timeout_alpha)
+            t_a = int(_timeout_alpha * 255)
+            t_fg = (t_a << 24) | 0x00FFFFFF
+            t_outline = (t_a << 24) | 0x00000000
+            for key in TIMEOUT_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("color", t_fg)
+                    el.set_property("outline-color", t_outline)
+            if _timeout_alpha <= 0.0:
+                for key in TIMEOUT_TEXT_KEYS:
+                    el = els.get(key)
+                    if el:
+                        el.set_property("silent", True)
+                if timeout_bg:
+                    timeout_bg.set_property("alpha", 0.0)
+                if visible:
+                    for key in _SCOREBOARD_CROSS_FADE_KEYS:
+                        el = els.get(key)
+                        if el:
+                            el.set_property("draw-shadow", False)
+                            el.set_property("color", 0x00FFFFFF)
+                            el.set_property("outline-color", 0x00000000)
+                            el.set_property("silent", False)
+                _timeout_pause_ticks = TIMEOUT_TRANSITION_PAUSE_TICKS
+
+        # Phase 2 — pause between timeout out and scoreboard in
+        elif _timeout_pause_ticks > 0:
+            _timeout_pause_ticks -= 1
+
+        # Phase 3 — scoreboard fades in
+        else:
+            _sb_timeout_alpha = min(1.0, _sb_timeout_alpha + 0.05)
+            bg_el = els.get("osd_bg")
+            if bg_el:
+                bg_el.set_property("alpha", _pre_timeout_bg_alpha * _sb_timeout_alpha)
+            home_foul_el = els.get("osd_home_fouls_bar")
+            if home_foul_el:
+                home_foul_el.set_property("alpha", _pre_timeout_home_foul_alpha * _sb_timeout_alpha)
+            away_foul_el = els.get("osd_away_fouls_bar")
+            if away_foul_el:
+                away_foul_el.set_property("alpha", _pre_timeout_away_foul_alpha * _sb_timeout_alpha)
+            if visible:
+                sb_a = int(_sb_timeout_alpha * 255)
+                sb_fg = (sb_a << 24) | 0x00FFFFFF
+                sb_outline = (sb_a << 24) | 0x00000000
+                for key in _SCOREBOARD_CROSS_FADE_KEYS:
+                    el = els.get(key)
+                    if el:
+                        el.set_property("color", sb_fg)
+                        el.set_property("outline-color", sb_outline)
+            if _sb_timeout_alpha >= 1.0:
+                if visible:
+                    for key in _SCOREBOARD_CROSS_FADE_KEYS:
+                        el = els.get(key)
+                        if el:
+                            el.set_property("color", 0xFFFFFFFF)
+                            el.set_property("outline-color", 0xFF000000)
+                            el.set_property("draw-shadow", True)
+                _timeout_fade_out = False
+                _timeout_fade_active = False
+                if _last_score_state:
+                    _update_overlay(_last_score_state)
+                return False
+
+    return True
+
+
+def update_timeout_overlay(state: dict, els: dict) -> None:
+    global _timeout_fade_in, _timeout_fade_out, _timeout_fade_active, _timeout_alpha
+    global _pre_timeout_bg_alpha, _pre_timeout_home_foul_alpha, _pre_timeout_away_foul_alpha
+
+    timeout_stats = state.get("timeout_stats")
+    now_ms = int(time.time() * 1000)
+    timeout_active = (
+        isinstance(timeout_stats, dict)
+        and timeout_stats.get("show_until", 0) > now_ms
+    )
+
+    if timeout_active:
+        if not _timeout_fade_active:
+            _timeout_fade_in = True
+            _timeout_fade_out = False
+            _timeout_fade_active = True
+            _timeout_alpha = 0.0
+            _sb_timeout_alpha = 1.0
+            _timeout_pause_ticks = 0
+
+            # Capture current scoreboard pixel alphas for sequential fade
+            bg_el = els.get("osd_bg")
+            _pre_timeout_bg_alpha = bg_el.get_property("alpha") if bg_el else 0.0
+            home_foul_el = els.get("osd_home_fouls_bar")
+            _pre_timeout_home_foul_alpha = home_foul_el.get_property("alpha") if home_foul_el else 0.0
+            away_foul_el = els.get("osd_away_fouls_bar")
+            _pre_timeout_away_foul_alpha = away_foul_el.get_property("alpha") if away_foul_el else 0.0
+
+            # Prepare scoreboard text for fade-out (disable shadow before alpha fade)
+            visible = state.get("visible", False)
+            if visible:
+                for key in _SCOREBOARD_CROSS_FADE_KEYS:
+                    el = els.get(key)
+                    if el:
+                        el.set_property("draw-shadow", False)
+
+            # Silence milestone during timeout (has its own fade)
+            for key in ("osd_milestone_player", "osd_milestone_text"):
+                el = els.get(key)
+                if el:
+                    el.set_property("silent", True)
+
+            populate_timeout_texts(timeout_stats, state, els)
+            for key in TIMEOUT_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("draw-shadow", False)
+                    el.set_property("color", 0x00FFFFFF)
+                    el.set_property("outline-color", 0x00000000)
+                    el.set_property("silent", False)
+            GLib.timeout_add(100, _timeout_fade_step)
+    else:
+        if _timeout_fade_active and not _timeout_fade_out:
+            _timeout_fade_in = False
+            _timeout_fade_out = True
+            _timeout_pause_ticks = 0
+            for key in TIMEOUT_TEXT_KEYS:
+                el = els.get(key)
+                if el:
+                    el.set_property("draw-shadow", False)
+
+
+def _milestone_fade_step() -> bool:
+    global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
+
+    els = dict(_osd_elements)
+    player_el = els.get("osd_milestone_player")
+    text_el = els.get("osd_milestone_text")
+
+    if _milestone_fading_in:
+        _milestone_alpha = min(1.0, _milestone_alpha + 0.1)
+        if _milestone_alpha >= 1.0:
+            _milestone_fading_in = False
+            for el in (player_el, text_el):
+                if el:
+                    el.set_property("draw-shadow", True)
+    elif _milestone_fading_out:
+        _milestone_alpha = max(0.0, _milestone_alpha - 0.05)
+        if _milestone_alpha <= 0.0:
+            _milestone_fading_out = False
+            _milestone_fade_active = False
+            for el in (player_el, text_el):
+                if el:
+                    el.set_property("silent", True)
+            return False
+
+    a = int(_milestone_alpha * 255)
+    fg = (a << 24) | 0x00FFFFFF
+    outline = (a << 24) | 0x00000000
+    for el in (player_el, text_el):
+        if el:
+            el.set_property("color", fg)
+            el.set_property("outline-color", outline)
+
+    return True
+
+
+def _show_blitzball_end_stats(state: dict, els: dict) -> None:
+    # Step 1 — hide regular scoreboard pixel elements (gdkpixbufoverlay → alpha only)
+    for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
+        el = els.get(key)
+        if el:
+            el.set_property("alpha", 0.0)
+    # Hide regular scoreboard text elements (textoverlay → silent only)
+    for key in ("osd_quarter", "osd_home", "osd_away",
+                "osd_home_score", "osd_away_score", "osd_clock",
+                "osd_milestone_player", "osd_milestone_text"):
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
+
+    # Step 2 — hide blitz pixel elements (gdkpixbufoverlay → alpha only)
+    for key in ("osd_blitz_bg", "osd_blitz_active"):
+        el = els.get(key)
+        if el:
+            el.set_property("alpha", 0.0)
+    # Hide blitz text elements (textoverlay → silent only)
+    for key in ("osd_blitz_home_name", "osd_blitz_away_name",
+                "osd_blitz_home_pts", "osd_blitz_home_blitz",
+                "osd_blitz_away_pts", "osd_blitz_away_blitz",
+                "osd_blitz_quarter", "osd_blitz_clock",
+                "osd_blitz_home_streak", "osd_blitz_away_streak"):
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
+
+    # Step 3 — show dark background
+    end_bg = els.get("osd_end_bg")
+    if end_bg:
+        end_bg.set_property("alpha", 0.85)
+
+    # Step 4 — populate stats text
+    winner = state.get("winner", "")
+    home_name = state.get("home_name", "HOME")
+    away_name = state.get("away_name", "AWAY")
+    home_pts = state.get("home_points", 0)
+    away_pts = state.get("away_points", 0)
+    home_blitz = state.get("home_blitz_score", 0)
+    away_blitz = state.get("away_blitz_score", 0)
+
+    if winner == "home":
+        winner_text = f"{home_name} WINS!"
+    elif winner == "away":
+        winner_text = f"{away_name} WINS!"
+    else:
+        winner_text = "DRAW!"
+
+    def show_el(key: str, text: str, color: int | None = None) -> None:
+        el = els.get(key)
+        if not el:
+            return
+        el.set_property("text", text)
+        el.set_property("silent", False)
+        if color is not None:
+            el.set_property("color", color)
+
+    show_el("osd_end_winner",      winner_text,                          0xFFFFD700)
+    show_el("osd_end_header_home", home_name)
+    show_el("osd_end_header_away", away_name)
+    show_el("osd_end_home_pts",    f"TOTAL  {home_pts} PTS")
+    show_el("osd_end_home_blitz",  f"BLITZ  {home_blitz}",              0xFFFFD700)
+    show_el("osd_end_home_inner",     f"INNER   {state.get('home_inner_scores', 0)}")
+    show_el("osd_end_home_middle",    f"MIDDLE  {state.get('home_middle_scores', 0)}")
+    show_el("osd_end_home_outer",     f"OUTER   {state.get('home_outer_scores', 0)}")
+    show_el("osd_end_home_intercept", f"INTERCEPTS  {state.get('home_interceptions', 0)}")
+    show_el("osd_end_away_pts",       f"TOTAL  {away_pts} PTS")
+    show_el("osd_end_away_blitz",     f"BLITZ  {away_blitz}",              0xFFFFD700)
+    show_el("osd_end_away_inner",     f"INNER   {state.get('away_inner_scores', 0)}")
+    show_el("osd_end_away_middle",    f"MIDDLE  {state.get('away_middle_scores', 0)}")
+    show_el("osd_end_away_outer",     f"OUTER   {state.get('away_outer_scores', 0)}")
+    show_el("osd_end_away_intercept", f"INTERCEPTS  {state.get('away_interceptions', 0)}")
+    for key in ("osd_end_home_blitz_rate", "osd_end_away_blitz_rate"):
+        el = els.get(key)
+        if el:
+            el.set_property("silent", True)
+
+
 def _update_overlay(state: dict) -> None:
-    global _last_score_state
+    global _last_score_state, _end_stats_show_until
     _last_score_state = dict(state)
     els = dict(_osd_elements)
     if not els:
         return
 
-    visible = state.get("visible", False)
-    quarter = els.get("osd_quarter")
-    home = els.get("osd_home")
-    away = els.get("osd_away")
-    score = els.get("osd_score")
-    clock = els.get("osd_clock")
-    fouls = els.get("osd_fouls")
-    bg = els.get("osd_bg")
-    milestone_player = els.get("osd_milestone_player")
-    milestone_text = els.get("osd_milestone_text")
+    game_finished = state.get("game_finished", False)
+    sport_code = state.get("sport_code", "")
+    now_ms = int(time.time() * 1000)
 
-    update_quarter_overlay(quarter, visible, state)
-    if home:
-        home.set_property("silent", not visible)
-        if visible:
-            home.set_property(
-                "text",
-                truncate_team_name(
-                    "home_name",
-                    state.get("home_name", "HOME"),
-                    log_prefix="[worker]",
-                ),
-            )
-    if away:
-        away.set_property("silent", not visible)
-        if visible:
-            away.set_property(
-                "text",
-                truncate_team_name(
-                    "away_name",
-                    state.get("away_name", "AWAY"),
-                    log_prefix="[worker]",
-                ),
-            )
-    update_score_clock_overlays(score, clock, visible, state)
-    if fouls:
-        fouls.set_property("silent", not visible)
-        if visible:
-            fouls.set_property(
-                "text",
-                f"F:{state.get('home_fouls', 0)} T:{state.get('home_timeouts', 3)}"
-                f"          "
-                f"F:{state.get('away_fouls', 0)} T:{state.get('away_timeouts', 3)}",
-            )
-    if bg:
-        bg.set_property("alpha", 1.0 if visible else 0.0)
-    update_milestone_overlays(milestone_player, milestone_text, state)
+    if not game_finished:
+        _end_stats_show_until = 0
+
+    if game_finished and sport_code == "BLITZBALL":
+        if _end_stats_show_until == 0:
+            _end_stats_show_until = now_ms + 20000
+        if now_ms < _end_stats_show_until:
+            _show_blitzball_end_stats(state, els)
+            return
+        else:
+            _end_stats_show_until = 0
+
+    end_showing = update_blitzball_end_stats(state, els)
+    if end_showing:
+        return
+
+    if not _timeout_fade_active and sport_code != "BLITZBALL":
+        visible = state.get("visible", False)
+        quarter = els.get("osd_quarter")
+        home = els.get("osd_home")
+        away = els.get("osd_away")
+        home_score = els.get("osd_home_score")
+        away_score = els.get("osd_away_score")
+        clock = els.get("osd_clock")
+        home_fouls_bar = els.get("osd_home_fouls_bar")
+        away_fouls_bar = els.get("osd_away_fouls_bar")
+        bg = els.get("osd_bg")
+        milestone_player = els.get("osd_milestone_player")
+        milestone_text = els.get("osd_milestone_text")
+
+        update_quarter_overlay(quarter, visible, state)
+        if home:
+            home.set_property("silent", not visible)
+            if visible:
+                home.set_property(
+                    "text",
+                    truncate_team_name(
+                        "home_name",
+                        state.get("home_name", "HOME"),
+                        log_prefix="[worker]",
+                    ),
+                )
+        if away:
+            away.set_property("silent", not visible)
+            if visible:
+                away.set_property(
+                    "text",
+                    truncate_team_name(
+                        "away_name",
+                        state.get("away_name", "AWAY"),
+                        log_prefix="[worker]",
+                    ),
+                )
+        update_score_clock_overlays(home_score, away_score, clock, visible, state)
+        if home_fouls_bar:
+            path = foul_png_path("home", state.get("home_fouls", 0))
+            if path is None:
+                home_fouls_bar.set_property("alpha", 0.0)
+            else:
+                home_fouls_bar.set_property("location", path)
+                home_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
+        if away_fouls_bar:
+            path = foul_png_path("away", state.get("away_fouls", 0))
+            if path is None:
+                away_fouls_bar.set_property("alpha", 0.0)
+            else:
+                away_fouls_bar.set_property("location", path)
+                away_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
+        if bg:
+            bg.set_property("alpha", 1.0 if visible else 0.0)
+
+        global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
+        milestone_active = int(time.time() * 1000) < _milestone_display_until
+
+        if milestone_active:
+            if not _milestone_fade_active:
+                _milestone_fading_in = True
+                _milestone_fading_out = False
+                _milestone_fade_active = True
+                _milestone_alpha = 0.0
+                update_milestone_overlays(milestone_player, milestone_text, state, force_visible=True)
+                for el in (milestone_player, milestone_text):
+                    if el:
+                        el.set_property("draw-shadow", False)
+                        el.set_property("color", 0x00FFFFFF)
+                        el.set_property("outline-color", 0x00000000)
+                GLib.timeout_add(100, _milestone_fade_step)
+            elif _milestone_fading_out:
+                _milestone_fading_in = True
+                _milestone_fading_out = False
+                for el in (milestone_player, milestone_text):
+                    if el:
+                        el.set_property("draw-shadow", False)
+                update_milestone_overlays(milestone_player, milestone_text, state, force_visible=True)
+        elif _milestone_fade_active and not _milestone_fading_out:
+            _milestone_fading_in = False
+            _milestone_fading_out = True
+        elif not _milestone_fade_active:
+            update_milestone_overlays(milestone_player, milestone_text, state)
+
+    global _blitz_pulse_active, _blitz_pulse_alpha
+    blitz_pulse_needed = update_blitzball_overlay(state, els)
+    if blitz_pulse_needed and not _blitz_pulse_active:
+        _blitz_pulse_active = True
+        _blitz_pulse_alpha = 0.6
+        GLib.timeout_add(50, _blitz_pulse_step)
+    elif not blitz_pulse_needed:
+        _blitz_pulse_active = False
+
+    update_timeout_overlay(state, els)
 
 
 def _poll_score_state() -> bool:
+    global _milestone_display_until, _last_milestone_show_until
     state = read_score_state()
-    if state != _last_score_state:
+    milestone = state.get("milestone")
+    now_ms = int(time.time() * 1000)
+
+    if isinstance(milestone, dict):
+        show_until = _milestone_show_until(milestone)
+        if show_until > 0 and show_until != _last_milestone_show_until:
+            _last_milestone_show_until = show_until
+            _milestone_display_until = now_ms + 10000
+        milestone_active = now_ms < _milestone_display_until
+    else:
+        _last_milestone_show_until = 0.0
+        _milestone_display_until = 0
+        milestone_active = False
+
+    timeout_stats = state.get("timeout_stats")
+    timeout_active = (
+        isinstance(timeout_stats, dict)
+        and timeout_stats.get("show_until", 0) > now_ms
+    )
+
+    end_active = (
+        state.get("game_finished", False)
+        and _end_stats_show_until > int(time.time() * 1000)
+    )
+    if state != _last_score_state or milestone_active or timeout_active or _timeout_fade_active or end_active:
         _update_overlay(state)
     return True
 
@@ -637,8 +1110,23 @@ def bus_call(_bus, message, loop: GLib.MainLoop):
     return True
 
 
+def create_dark_bg_png() -> None:
+    from PIL import Image
+    from runtime_paths import END_STATS_BG_PNG
+    if os.path.exists(END_STATS_BG_PNG):
+        return
+    try:
+        img = Image.new("RGBA", (1920, 1080), (26, 26, 26, 230))
+        img.save(END_STATS_BG_PNG)
+        print(f"[worker] created dark bg: {END_STATS_BG_PNG}")
+    except Exception as e:
+        print(f"[worker] failed to create dark bg: {e}")
+
+
 def main() -> None:
     global _loop
+
+    create_dark_bg_png()
 
     rtmp_url = read_stream_url()
     if not rtmp_url:

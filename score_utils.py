@@ -13,11 +13,25 @@ DEFAULT_SCORE_STATE = {
     "game_id": 0,
     "updated_at": 0,
     "milestone": None,
+    "timeout_stats": None,
+    "blitz_active": False,
+    "home_blitz_score": 0,
+    "away_blitz_score": 0,
+    "home_hot_streak": False,
+    "away_hot_streak": False,
+    "sport_code": "",
+    "game_finished": False,
+    "winner": "",
+    "end_stats": None,
+    "home_inner_scores": 0,
+    "home_middle_scores": 0,
+    "home_outer_scores": 0,
+    "home_interceptions": 0,
+    "away_inner_scores": 0,
+    "away_middle_scores": 0,
+    "away_outer_scores": 0,
+    "away_interceptions": 0,
 }
-
-TEAM_NAME_MAX_LEN = 8
-_warned_team_name_truncations: set[tuple[str, str, str]] = set()
-
 
 def default_score_state() -> dict:
     return DEFAULT_SCORE_STATE.copy()
@@ -25,15 +39,5 @@ def default_score_state() -> dict:
 
 def truncate_team_name(field: str, value, *, log_prefix: str) -> str:
     text = str(value)
-    if len(text) <= TEAM_NAME_MAX_LEN:
-        return text
-
-    truncated = text[:TEAM_NAME_MAX_LEN]
-    warning_key = (log_prefix, field, text)
-    if warning_key not in _warned_team_name_truncations:
-        _warned_team_name_truncations.add(warning_key)
-        print(
-            f"{log_prefix} WARNING: {field} truncated to {TEAM_NAME_MAX_LEN} chars: "
-            f"{text!r} -> {truncated!r}"
-        )
-    return truncated
+    first_word = text.split()[0] if text.strip() else text
+    return first_word

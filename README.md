@@ -120,26 +120,22 @@ switch_cam uuid2 - ptz
 For manual debugging only, replacing `stream.conf` with `# disabled` prevents
 RTMP streaming on the next worker/pipeline start.
 
-## Files to edit
+## For OSD/scoreboard graphics work
 
-- `run_pipeline.py`: crash-proof wrapper for the main DeepStream process.
-- `pipeline.py`: main cameras, inference, RTSP outputs, sockets, HTTP API, score
-  state, and worker startup logic.
-- `run_stream_worker.py`: crash-proof wrapper for the RTMP worker.
-- `stream_worker.py`: active RTMP pipeline and scoreboard overlay rendering.
-
-For OSD/scoreboard graphics work, start with `stream_worker.py`:
-
-- `SCOREBOARD_PNG`: expected background asset path, currently `scoreboard.png`
-  next to these scripts.
-- `SCOREBOARD_W`, `SCOREBOARD_H`: rendered scoreboard background size.
-- `SCOREBOARD_OFFSET_X`, `SCOREBOARD_OFFSET_Y`: background placement in the
-  1080p stream.
-- `configure_scoreboard_texts(...)` in `rtmp_elements.py`: text positions,
-  fonts, and colors for quarter, team names, score, clock, fouls/timeouts, and
-  milestone banners.
-- `_update_overlay(...)`: maps `score_state.json` fields to overlay text and
-  visibility.
+- `scoreboard.png`: the background image placed behind all text overlays.
+  Replace this file to change the scoreboard design.
+- `rtmp_elements.py`: text positions, fonts, colors, and scoreboard PNG
+  coordinates. All static overlay configuration is in
+  `configure_scoreboard_texts()` and `configure_scoreboard_background()`.
+  Also contains `update_score_clock_overlays()`, `update_quarter_overlay()`,
+  and `update_milestone_overlays()` which control what text is shown.
+- `stream_worker.py`: `_update_overlay()` builds the fouls/timeouts text string
+  and controls per-element visibility. Edit here to change how those stats are
+  formatted or displayed.
+- `pipeline.py`: `_update_osd_texts()` mirrors the fouls/timeouts formatting
+  from `stream_worker.py` — keep both in sync when changing display format.
+- `score_utils.py`: `truncate_team_name()` extracts the first word of the team
+  name before display. Edit here to change how team names are shortened.
 
 For terminal FPS logs:
 
