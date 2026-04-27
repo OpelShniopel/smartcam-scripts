@@ -9,7 +9,7 @@ from zoom_control_stationary import ZoomController
 
 # --- CONFIGURATION ---
 UNIX_SOCK  = "/tmp/ptz_control.sock"
-TARGET_CAM = "CAM0"
+TARGET_CAM = "fixed"
 
 DEBUG = True   # print every raw line received from the socket
 

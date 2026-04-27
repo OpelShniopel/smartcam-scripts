@@ -22,23 +22,26 @@ BALL_MAX_PX  = 120   # near ball → ZOOM_MAX_STEPS (1x, widest FOV)
 # Shape of the zoom curve. 1.0 = linear. >1 = more aggressive zoom for distant balls.
 ZOOM_CURVE   = 1.5
 
-# --- BIAS CONSTANTS ---
-# Velocity: fast horizontal movement in stationary cam → zoom out to keep ball in pan frame.
-VELOCITY_ZOOM_THRESHOLD = 50    # px/frame in stationary cam space
-VELOCITY_ZOOM_GAIN      = 5.0   # zoom-out steps added per px/frame above threshold
-MAX_VELOCITY_BIAS       = 600   # cap on velocity zoom-out steps
+# --- ZOOM-OUT BIAS ---
+# Combines position and velocity into one zoom-aware signal.
+#
+# pan_fov_half = STATIONARY_FRAME_HALF / zoom_ratio
+#   = how many stationary-cam pixels the pan cam can see on each side of its centre.
+#   At 1x zoom: 640 px.  At 8x zoom: 80 px.
+#
+# We predict where the ball will be in VELOCITY_HORIZON frames and check whether
+# that lands outside (1 - EDGE_MARGIN) of the pan cam's FOV half-width.
+# At high zoom this triggers for much smaller offsets from centre, which is correct.
+#
+# Assumes the pan camera is pointing at the stationary cam centre (step 0).
+# This over-triggers when the pan has already rotated, but that only causes
+# extra zoom-out which is the safe failure mode.
+STATIONARY_CENTER_X = 640.0    # half of FRAME_W — stationary cam optical centre
 
-# Edge: ball near edge of pan camera's frame → zoom out.
-# Computed in pan-cam coordinates using an EMA estimate of where the pan camera is pointing.
-# PAN_TRACKING_ALPHA: EMA smoothing for pan-pointing estimate (lower = more lag = more conservative).
-# Represents roughly how fast the pan camera catches up — 0.15 ≈ ~6 frame lag.
-EDGE_MARGIN          = 0.20     # fraction of pan cam half-frame that triggers zoom-out
-EDGE_ZOOM_GAIN       = 800.0    # zoom-out steps per unit of normalised pan error above margin
-MAX_EDGE_BIAS        = 600
-PAN_TRACKING_ALPHA   = 0.15     # EMA alpha for pan-pointing estimate
-
-# Stationary cam half-width used to normalise pan error (must match pan_control config)
-STATIONARY_FRAME_HALF = 640.0
+VELOCITY_HORIZON = 6           # frames ahead to predict ball position
+EDGE_MARGIN      = 0.20        # fraction of pan FOV half-width — zoom-out starts here
+EDGE_ZOOM_GAIN   = 15.0        # zoom-out steps per stationary-px of overshoot
+MAX_EDGE_BIAS    = 5000        # hard cap (~45% of full zoom range)
 
 FRAME_W = 1280   # stationary cam frame width (px)
 FRAME_H = 720
@@ -61,7 +64,6 @@ class ZoomController:
         self.current_zoom_pos  = ZOOM_BASE_POS
         self.target_zoom_pos   = ZOOM_BASE_POS
         self.last_ball_x       = None
-        self.pan_pointing_px   = None   # EMA estimate of pan cam pointing in stationary px
         self.last_cmd_time     = 0
         self.cmd_interval      = 0.05
 
@@ -132,8 +134,7 @@ class ZoomController:
     def process_detection(self, detections):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball or ball['width'] <= 0:
-            self.last_ball_x     = None
-            self.pan_pointing_px = None   # reset so first reacquire doesn't use stale estimate
+            self.last_ball_x = None
             return
 
         ball_width = ball['width']
@@ -146,49 +147,37 @@ class ZoomController:
         t_curved = t ** (1.0 / ZOOM_CURVE)   # invert curve: more zoom for distant balls
         base_zoom_pos = ZOOM_MIN_STEPS + t_curved * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
 
-        ball_x = ball['center_x']
-
-        # Velocity bias: fast horizontal movement → zoom out to keep ball in pan cam frame
+        ball_x          = ball['center_x']
         ball_velocity_x = abs(ball_x - self.last_ball_x) if self.last_ball_x is not None else 0.0
         self.last_ball_x = ball_x
 
-        velocity_bias = 0.0
-        if ball_velocity_x > VELOCITY_ZOOM_THRESHOLD:
-            excess = ball_velocity_x - VELOCITY_ZOOM_THRESHOLD
-            velocity_bias = min(MAX_VELOCITY_BIAS, excess * VELOCITY_ZOOM_GAIN)
-            DEBUG and print(f"[ZOOM] velocity={ball_velocity_x:.0f}px/f  bias=+{velocity_bias:.0f}")
-
-        # Edge bias in pan-camera coordinates.
+        # Zoom-out bias — zoom-aware, combines position and velocity.
         #
-        # We don't have pan cam detections, so we estimate where the pan camera is
-        # currently pointing using an EMA of the ball's stationary cam position.
-        # A well-tuned pan controller converges to the ball position over several frames,
-        # so the EMA (with appropriate lag) approximates the pan camera's current centre.
+        # pan_fov_half: how many stationary-cam pixels the pan cam sees on each side.
+        #   1x zoom → 640 px,  8x zoom → 80 px.
         #
-        # ball_x - pan_pointing_px = ball's offset from pan centre, in stationary cam pixels.
-        # Dividing by (STATIONARY_FRAME_HALF / zoom_ratio) normalises to pan cam coordinates
-        # (-1..+1), because at zoom_ratio×, only 1/zoom_ratio of the stationary frame is visible.
-        if self.pan_pointing_px is None:
-            self.pan_pointing_px = ball_x
-        else:
-            self.pan_pointing_px = (PAN_TRACKING_ALPHA * ball_x
-                                    + (1.0 - PAN_TRACKING_ALPHA) * self.pan_pointing_px)
+        # Predict where the ball will be in VELOCITY_HORIZON frames and measure
+        # how far that lands outside the safe fraction of the pan cam's FOV.
+        # At high zoom the safe zone shrinks, so even small offsets trigger zoom-out.
+        zoom_ratio   = 1.0 / self.get_pan_speed_factor()
+        pan_fov_half = (FRAME_W / 2.0) / zoom_ratio
 
-        zoom_ratio     = 1.0 / self.get_pan_speed_factor()   # 1x at wide, 8x at max zoom
-        pan_fov_half   = STATIONARY_FRAME_HALF / zoom_ratio  # stationary px visible either side
-        ball_norm      = (ball_x - self.pan_pointing_px) / pan_fov_half if pan_fov_half > 0 else 0.0
+        offset_now       = abs(ball_x - STATIONARY_CENTER_X)
+        predicted_offset = offset_now + ball_velocity_x * VELOCITY_HORIZON
+        safe_zone        = pan_fov_half * (1.0 - EDGE_MARGIN)
 
         edge_bias = 0.0
-        excess_norm = abs(ball_norm) - (1.0 - EDGE_MARGIN)
-        if excess_norm > 0:
-            edge_bias = min(MAX_EDGE_BIAS, excess_norm * EDGE_ZOOM_GAIN)
-            DEBUG and print(f"[ZOOM] pan_norm={ball_norm:.2f}  edge_bias=+{edge_bias:.0f}")
+        if predicted_offset > safe_zone:
+            overshoot = predicted_offset - safe_zone
+            edge_bias = min(MAX_EDGE_BIAS, overshoot * EDGE_ZOOM_GAIN)
 
-        # Biases push toward wider FOV (zoom out = higher position value)
-        desired_zoom_pos = min(ZOOM_MAX_STEPS, base_zoom_pos + velocity_bias + edge_bias)
+        desired_zoom_pos = min(ZOOM_MAX_STEPS, base_zoom_pos + edge_bias)
 
         if DEBUG:
-            print(f"[ZOOM] ball_w={ball_width:.0f}px  t={t:.2f}  base={base_zoom_pos:.0f}  desired={desired_zoom_pos:.0f}  current={self.current_zoom_pos:.0f}")
+            print(f"[ZOOM] ball_w={ball_width:.0f}  vel={ball_velocity_x:.1f}  "
+                  f"offset={offset_now:.0f}  pred={predicted_offset:.0f}  "
+                  f"safe={safe_zone:.0f}  edge_bias={edge_bias:.0f}  "
+                  f"base={base_zoom_pos:.0f}  desired={desired_zoom_pos:.0f}")
 
         # Send delta from current target so send_zoom's rate limiter works normally
         zoom_delta = desired_zoom_pos - self.target_zoom_pos
