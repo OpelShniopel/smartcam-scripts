@@ -124,7 +124,7 @@ def _get_local_ip() -> str:
 
 JETSON_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
 GO_BRIDGE_SOCK = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
-PTZ_CONTROL_SOCK = "/tmp/pycam.sock"
+PTZ_CONTROL_SOCK = "/tmp/ptz_control.sock"
 HTTP_PORT = 9101
 
 CLASS_ID_RIM = 0
