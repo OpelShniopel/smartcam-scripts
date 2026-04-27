@@ -139,6 +139,8 @@ ENABLE_PTZ_CAMERA = True
 ENABLE_AI_GLOBAL = True
 ENABLE_FIXED_CAMERA_AI = True
 ENABLE_PTZ_CAMERA_AI = False
+ENABLE_FIXED_CAMERA_AI_STREAM = True
+ENABLE_PTZ_CAMERA_AI_STREAM = True
 
 # Terminal FPS metrics. Disable the global flag to silence all main-pipeline
 # FPS logs, or disable the AI flag to keep other future FPS metrics available.
@@ -189,6 +191,17 @@ def _ai_enabled(cam_label: str) -> bool:
         return ENABLE_FIXED_CAMERA and ENABLE_FIXED_CAMERA_AI
     if cam == "CAM2":
         return ENABLE_PTZ_CAMERA and ENABLE_PTZ_CAMERA_AI
+    return False
+
+
+def _ai_stream_enabled(cam_label: str) -> bool:
+    if not _ai_enabled(cam_label):
+        return False
+    cam = _pipeline_camera_label(cam_label)
+    if cam == "CAM0":
+        return ENABLE_FIXED_CAMERA_AI_STREAM
+    if cam == "CAM2":
+        return ENABLE_PTZ_CAMERA_AI_STREAM
     return False
 
 
@@ -733,12 +746,12 @@ def _push_state() -> None:
     internal_streams["program_clean"] = program_clean_rtsp_url
     internal_streams["program_stream"] = program_clean_rtsp_url
 
-    if ENABLE_FIXED_CAMERA and _ai_enabled("CAM0"):
+    if ENABLE_FIXED_CAMERA and _ai_stream_enabled("CAM0"):
         fixed_ai_url = f"http://{JETSON_HOST}:8889/camera0_ai"
         webrtc["fixed_ai"] = fixed_ai_url
         webrtc["cam0_ai"] = fixed_ai_url
 
-    if ENABLE_PTZ_CAMERA and _ai_enabled("CAM2"):
+    if ENABLE_PTZ_CAMERA and _ai_stream_enabled("CAM2"):
         ptz_ai_url = f"http://{JETSON_HOST}:8889/camera2_ai"
         webrtc["ptz_ai"] = ptz_ai_url
         webrtc["cam2_ai"] = ptz_ai_url
@@ -765,6 +778,12 @@ def _push_state() -> None:
             PTZ_CAMERA: _ai_enabled("CAM2"),
             "cam0": _ai_enabled("CAM0"),
             "cam2": _ai_enabled("CAM2"),
+        },
+        "enabled_ai_streams": {
+            FIXED_CAMERA: _ai_stream_enabled("CAM0"),
+            PTZ_CAMERA: _ai_stream_enabled("CAM2"),
+            "cam0": _ai_stream_enabled("CAM0"),
+            "cam2": _ai_stream_enabled("CAM2"),
         },
         "webrtc": webrtc,
         "internal_streams": internal_streams,
@@ -811,7 +830,7 @@ class ControlHandler(BaseHTTPRequestHandler):
             url = read_stream_url()
             with score_lock:
                 score_visible = score_state["visible"]
-            self._json(200, {
+            payload = {
                 "alive": True,
                 "pid": os.getpid(),
                 "streaming": bool(url) and _is_stream_worker_running(),
@@ -839,26 +858,33 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "cameras": {
                     FIXED_CAMERA: {
                         "device": FIXED_CAMERA_DEVICE,
-                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
-                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
                     "cam0": {
                         "device": FIXED_CAMERA_DEVICE,
-                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
-                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
                     PTZ_CAMERA: {
                         "device": PTZ_CAMERA_DEVICE,
-                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
-                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
                     },
                     "cam2": {
                         "device": PTZ_CAMERA_DEVICE,
-                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
-                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
                     },
                 },
-            })
+            }
+            if _ai_stream_enabled("CAM0"):
+                ai_urls = {
+                    "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
+                    "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
+                }
+                payload["cameras"][FIXED_CAMERA].update(ai_urls)
+                payload["cameras"]["cam0"].update(ai_urls)
+            if _ai_stream_enabled("CAM2"):
+                ai_urls = {
+                    "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
+                    "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
+                }
+                payload["cameras"][PTZ_CAMERA].update(ai_urls)
+                payload["cameras"]["cam2"].update(ai_urls)
+            self._json(200, payload)
         else:
             self._json(404, {"error": "not found"})
 
@@ -1657,23 +1683,41 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     mux = _make("nvstreammux", f"mux{suffix}")
     pgie = _make("nvinfer", f"pgie{suffix}")
     tracker = _make("nvtracker", f"tracker{suffix}")
-    conv_pre = _make_nvconv(f"conv{suffix}_pre")
-    nvosd = _make("nvdsosd", f"nvosd{suffix}")
-    conv_post = _make_nvconv(f"conv{suffix}_post")
-    caps_post = _capsfilter(f"caps{suffix}_post", "video/x-raw,format=I420")
-    q_post = _make("queue", f"q{suffix}_post")
-    enc = _make("x264enc", f"enc{suffix}_ai")
-    parse = _make("h264parse", f"parse{suffix}_ai")
-    parse_tee = _make("tee", f"tee{suffix}_ai_parse")
-    q_rtsp = _make("queue", f"q{suffix}_ai_rtsp")
-    sink = _make("rtspclientsink", f"sink{suffix}_ai")
+    stream_enabled = _ai_stream_enabled(cam_label)
+    recording_enabled = _recording_enabled(cam_label)
+    debug_video_enabled = stream_enabled or recording_enabled
+
+    conv_pre = None
+    nvosd = None
+    conv_post = None
+    caps_post = None
+    q_post = None
+    enc = None
+    parse = None
+    parse_tee = None
+    q_rtsp = None
+    sink = None
+    drain = None
 
     q_rec = None
     rec = None
-    recording_enabled = _recording_enabled(cam_label)
     if recording_enabled:
         q_rec = _make("queue", f"q{suffix}_ai_record")
         rec = _make("splitmuxsink", f"rec{suffix}_ai")
+    if debug_video_enabled:
+        conv_pre = _make_nvconv(f"conv{suffix}_pre")
+        nvosd = _make("nvdsosd", f"nvosd{suffix}")
+        conv_post = _make_nvconv(f"conv{suffix}_post")
+        caps_post = _capsfilter(f"caps{suffix}_post", "video/x-raw,format=I420")
+        q_post = _make("queue", f"q{suffix}_post")
+        enc = _make("x264enc", f"enc{suffix}_ai")
+        parse = _make("h264parse", f"parse{suffix}_ai")
+        parse_tee = _make("tee", f"tee{suffix}_ai_parse")
+        if stream_enabled:
+            q_rtsp = _make("queue", f"q{suffix}_ai_rtsp")
+            sink = _make("rtspclientsink", f"sink{suffix}_ai")
+    else:
+        drain = _make("fakesink", f"sink{suffix}_ai_process")
 
     mux.set_property("width", 1280)
     mux.set_property("height", 720)
@@ -1693,22 +1737,25 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     tracker.set_property("gpu-id", 0)
     tracker.set_property("display-tracking-id", 1)
 
-    nvosd.set_property("process-mode", 1)
+    if nvosd is not None:
+        nvosd.set_property("process-mode", 1)
 
     q_ai.set_property("max-size-buffers", 2)
     q_ai.set_property("max-size-bytes", 0)
     q_ai.set_property("max-size-time", 0)
     q_ai.set_property("leaky", 2)
 
-    q_post.set_property("max-size-buffers", 2)
-    q_post.set_property("max-size-bytes", 0)
-    q_post.set_property("max-size-time", 0)
-    q_post.set_property("leaky", 2)
+    if q_post is not None:
+        q_post.set_property("max-size-buffers", 2)
+        q_post.set_property("max-size-bytes", 0)
+        q_post.set_property("max-size-time", 0)
+        q_post.set_property("leaky", 2)
 
-    q_rtsp.set_property("max-size-buffers", 2)
-    q_rtsp.set_property("max-size-bytes", 0)
-    q_rtsp.set_property("max-size-time", 0)
-    q_rtsp.set_property("leaky", 2)
+    if q_rtsp is not None:
+        q_rtsp.set_property("max-size-buffers", 2)
+        q_rtsp.set_property("max-size-bytes", 0)
+        q_rtsp.set_property("max-size-time", 0)
+        q_rtsp.set_property("leaky", 2)
 
     if q_rec is not None:
         q_rec.set_property("max-size-buffers", RECORD_QUEUE_BUFFERS)
@@ -1716,15 +1763,21 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         q_rec.set_property("max-size-time", 0)
         q_rec.set_property("leaky", 2)
 
-    _configure_x264_encoder(
-        enc,
-        tune=AI_TUNE,
-        preset=AI_PRESET,
-        bitrate=AI_BITRATE,
-        keyint=AI_KEYINT,
-        threads=AI_THREADS,
-    )
-    _configure_rtsp_sink(sink, rtsp_path)
+    if enc is not None:
+        _configure_x264_encoder(
+            enc,
+            tune=AI_TUNE,
+            preset=AI_PRESET,
+            bitrate=AI_BITRATE,
+            keyint=AI_KEYINT,
+            threads=AI_THREADS,
+        )
+    if sink is not None:
+        _configure_rtsp_sink(sink, rtsp_path)
+    if drain is not None:
+        _set_if_supported(drain, "sync", False)
+        _set_if_supported(drain, "async", False)
+        _set_if_supported(drain, "enable-last-sample", False)
 
     if rec is not None:
         rec.set_property("location", _recording_location_pattern(cam_label))
@@ -1733,9 +1786,17 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         rec.set_property("send-keyframe-requests", True)
         rec.set_property("async-finalize", True)
 
-    elements = [q_ai, conv_ai, caps_ai, mux, pgie, tracker,
-                conv_pre, nvosd, conv_post, caps_post, q_post,
-                enc, parse, parse_tee, q_rtsp, sink]
+    elements = [q_ai, conv_ai, caps_ai, mux, pgie, tracker]
+    if debug_video_enabled:
+        elements.extend([
+            conv_pre, nvosd, conv_post, caps_post, q_post,
+            enc, parse, parse_tee,
+        ])
+        if q_rtsp is not None and sink is not None:
+            elements.extend([q_rtsp, sink])
+    elif drain is not None:
+        elements.append(drain)
+
     if q_rec is not None and rec is not None:
         elements.extend([q_rec, rec])
 
@@ -1752,25 +1813,30 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         sys.stderr.write(f"ERROR: Failed to link caps{suffix}_ai -> mux{suffix}.sink_0\n")
         sys.exit(1)
 
-    _link_many(
-        mux, pgie, tracker, conv_pre, nvosd, conv_post,
-        caps_post, q_post, enc, parse, parse_tee,
-    )
-
-    _tee_branch(parse_tee, q_rtsp)
-    _link(q_rtsp, sink)
-
-    if q_rec is not None and rec is not None:
-        _tee_branch(parse_tee, q_rec)
-        _link_src_to_request_pad(q_rec, rec, "video", f"{_stream_camera_name(cam_label)} recording")
-        print(
-            f"{_stream_camera_name(cam_label)} AI recording enabled -> {RECORDINGS_DIR} "
-            f"({RECORD_SEGMENT_SECONDS}s segments, .{RECORD_FILE_EXTENSION})"
+    if debug_video_enabled:
+        _link_many(
+            mux, pgie, tracker, conv_pre, nvosd, conv_post,
+            caps_post, q_post, enc, parse, parse_tee,
         )
-    else:
-        print(f"{_stream_camera_name(cam_label)} AI recording disabled")
 
-    return pgie, enc
+        if q_rtsp is not None and sink is not None:
+            _tee_branch(parse_tee, q_rtsp)
+            _link(q_rtsp, sink)
+
+        if q_rec is not None and rec is not None:
+            _tee_branch(parse_tee, q_rec)
+            _link_src_to_request_pad(q_rec, rec, "video", f"{_stream_camera_name(cam_label)} recording")
+            print(
+                f"{_stream_camera_name(cam_label)} AI recording enabled -> {RECORDINGS_DIR} "
+                f"({RECORD_SEGMENT_SECONDS}s segments, .{RECORD_FILE_EXTENSION})"
+            )
+        else:
+            print(f"{_stream_camera_name(cam_label)} AI recording disabled")
+    else:
+        _link_many(mux, pgie, tracker, drain)
+        print(f"{_stream_camera_name(cam_label)} AI debug stream disabled")
+
+    return pgie, enc if stream_enabled else None
 
 
 def _link_tee_to_program_selector(
@@ -1961,13 +2027,17 @@ def build_pipeline() -> tuple:
         camera_tees[FIXED_CAMERA] = tee0
 
         if _ai_enabled("CAM0"):
-            print("Building fixed camera AI RTSP branch (720p debug) ...")
+            if _ai_stream_enabled("CAM0"):
+                print("Building fixed camera AI RTSP branch (720p debug) ...")
+            else:
+                print("Building fixed camera AI processing branch (debug RTSP disabled) ...")
             pgie0, enc0_ai = _build_ai_branch(
                 pipeline, tee0, "0", "camera0_ai",
                 "config_infer_primary_yoloV8_cam0.txt", "CAM0")
-            _encoders["enc0_ai"] = enc0_ai
+            if enc0_ai is not None:
+                _encoders["enc0_ai"] = enc0_ai
         else:
-            print("Fixed camera AI disabled — skipping AI RTSP branch")
+            print("Fixed camera AI disabled — skipping AI branch")
     else:
         print("Fixed camera disabled — skipping source and all branches")
 
@@ -1977,13 +2047,17 @@ def build_pipeline() -> tuple:
         camera_tees[PTZ_CAMERA] = tee2
 
         if _ai_enabled("CAM2"):
-            print("Building PTZ camera AI RTSP branch (720p debug) ...")
+            if _ai_stream_enabled("CAM2"):
+                print("Building PTZ camera AI RTSP branch (720p debug) ...")
+            else:
+                print("Building PTZ camera AI processing branch (debug RTSP disabled) ...")
             pgie2, enc2_ai = _build_ai_branch(
                 pipeline, tee2, "2", "camera2_ai",
                 "config_infer_primary_yoloV8_cam2.txt", "CAM2")
-            _encoders["enc2_ai"] = enc2_ai
+            if enc2_ai is not None:
+                _encoders["enc2_ai"] = enc2_ai
         else:
-            print("PTZ camera AI disabled — skipping AI RTSP branch")
+            print("PTZ camera AI disabled — skipping AI branch")
     else:
         print("PTZ camera disabled — skipping source and all branches")
 
