@@ -22,8 +22,7 @@ from typing import Any
 import gi
 
 gi.require_version("Gst", "1.0")
-gi.require_version("GstVideo", "1.0")
-from gi.repository import GLib, Gst, GstVideo
+from gi.repository import GLib, Gst
 
 from camera_config import (
     CAMERA_DEVICE_ALIASES,
@@ -32,6 +31,7 @@ from camera_config import (
     PTZ_CAMERA,
 )
 from exit_codes import ProcessExitCode
+from gst_utils import force_key_unit
 from runtime_paths import (
     SCOREBOARD_PNG,
     SCORE_STATE_FILE,
@@ -235,25 +235,6 @@ def _make(factory: str, name: str) -> Gst.Element:
     if not el:
         raise RuntimeError(f"Unable to create element {factory!r} ({name!r})")
     return el
-
-
-def _force_key_unit(enc: Gst.Element | None, label: str) -> None:
-    if enc is None:
-        return
-    sink_pad = enc.get_static_pad("sink")
-    if sink_pad is None:
-        return
-    event = GstVideo.video_event_new_downstream_force_key_unit(
-        Gst.CLOCK_TIME_NONE,
-        Gst.CLOCK_TIME_NONE,
-        Gst.CLOCK_TIME_NONE,
-        True,
-        0,
-    )
-    if sink_pad.send_event(event):
-        print(f"[worker] forced keyframe -> {label}")
-
-
 def _link(src: Gst.Element, dst: Gst.Element) -> None:
     if not src.link(dst):
         raise RuntimeError(f"Failed to link {src.get_name()} -> {dst.get_name()}")
@@ -778,7 +759,7 @@ def _switch_active_camera(active_camera: str) -> None:
         return
     _current_active_camera = normalized
     print(f"[worker] updated active camera -> {normalized}")
-    _force_key_unit(_enc_stream, "rtmp")
+    force_key_unit(_enc_stream, "rtmp", "worker")
     _set_status(active_camera=normalized)
 
 

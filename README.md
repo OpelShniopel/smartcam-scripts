@@ -40,11 +40,9 @@ restart exit codes.
 
 The main process publishes:
 
-- Clean streams:
-    - Fixed camera: `http://<jetson-ip>:8889/camera0_clean`
-    - PTZ camera: `http://<jetson-ip>:8889/camera2_clean`
-    - Fixed camera: `rtsp://<jetson-ip>:8554/camera0_clean`
-    - PTZ camera: `rtsp://<jetson-ip>:8554/camera2_clean`
+- Switched program clean feed:
+    - `http://<jetson-ip>:8889/program_clean`
+    - `rtsp://<jetson-ip>:8554/program_clean`
 - AI/debug streams:
     - Fixed camera: `http://<jetson-ip>:8889/camera0_ai`
     - PTZ camera: `http://<jetson-ip>:8889/camera2_ai` when
@@ -52,9 +50,6 @@ The main process publishes:
     - Fixed camera: `rtsp://<jetson-ip>:8554/camera0_ai`
     - PTZ camera: `rtsp://<jetson-ip>:8554/camera2_ai` when
       `ENABLE_PTZ_CAMERA_AI` is enabled.
-- Switched program feed for RTMP worker / stable preview:
-    - `http://<jetson-ip>:8889/program_clean`
-    - `rtsp://<jetson-ip>:8554/program_clean`
 - Local HTTP debug API:
     - `GET http://127.0.0.1:9101/status`
     - `POST http://127.0.0.1:9101/score`
