@@ -240,15 +240,15 @@ def _make(factory: str, name: str) -> Gst.Element:
 def _force_key_unit(enc: Gst.Element | None, label: str) -> None:
     if enc is None:
         return
-    sink_pad = enc.get_static_pad("sink")
-    if sink_pad is None:
+    src_pad = enc.get_static_pad("src")
+    if src_pad is None:
         return
     event = GstVideo.video_event_new_upstream_force_key_unit(
         Gst.CLOCK_TIME_NONE,
         True,
         0,
     )
-    if sink_pad.send_event(event):
+    if src_pad.send_event(event):
         print(f"[worker] forced keyframe -> {label}")
 
 
@@ -784,9 +784,10 @@ def _poll_worker_config() -> bool:
     global _last_config
     cfg = read_worker_config()
     if cfg != _last_config:
+        previous = _last_config or {}
         _last_config = dict(cfg)
         bitrate = cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)
-        if _enc_stream is not None:
+        if _enc_stream is not None and bitrate != previous.get("bitrateKbps", RTMP_BITRATE_DEFAULT):
             _enc_stream.set_property("bitrate", int(bitrate))
             print(f"[worker] updated stream bitrate -> {bitrate} kbps")
         _switch_active_camera(cfg.get("activeCamera", PTZ_CAMERA))

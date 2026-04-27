@@ -1028,15 +1028,15 @@ def _set_if_supported(el: Gst.Element, prop: str, value) -> None:
 def _force_key_unit(enc: Gst.Element | None, label: str) -> None:
     if enc is None:
         return
-    sink_pad = enc.get_static_pad("sink")
-    if sink_pad is None:
+    src_pad = enc.get_static_pad("src")
+    if src_pad is None:
         return
     event = GstVideo.video_event_new_upstream_force_key_unit(
         Gst.CLOCK_TIME_NONE,
         True,
         0,
     )
-    if sink_pad.send_event(event):
+    if src_pad.send_event(event):
         print(f"[program] forced keyframe -> {label}")
 
 
