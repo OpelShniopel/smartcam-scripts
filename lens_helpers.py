@@ -125,18 +125,24 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
 
     # REFRESH STATUS: Again, just refreshing the state. No speed changes.
     status = parse_status(ser)
+    print(f"  [CAL] B PI state before re-approach: {status[4]}")
 
-    # 3. Re-approach
     send_command(ser, "G91")
     send_command(ser, "M231 B")
-    send_command(ser, "G0 B+100") 
+    send_command(ser, "G0 B+100")
     wait_homing(ser, status[CHB_PI], CHB_PI)
+
+    status = parse_status(ser)
+    print(f"  [CAL] B PI state after re-approach: {status[4]}")
+    print(f"  [CAL] B position at home: {status[1]}")
 
     send_command(ser, "G92 B32000")
     send_command(ser, "M230 B")
     send_command(ser, "G90")
 
-    # Restore operational speeds now that homing is done
+    status = parse_status(ser)
+    print(f"  [CAL] B position after G92: {status[1]}")
+
     send_command(ser, f"M240 A{zoom_speed} B{focus_speed} C600")
     print("--- Calibration Complete ---")
 
