@@ -94,16 +94,14 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
     send_command(ser, "G0 A+200")
     wait_homing(ser, 1, CHA_MOVE)
 
-    # >>> FIX: REFRESH STATUS HERE <<<
+    # REFRESH STATUS to fix the offset bug
     status = parse_status(ser)
 
     # 3. Slow Re-approach
-    # Drop speed for the final precise touch
     send_command(ser, "M240 A200 B200") 
     send_command(ser, "G91")
     send_command(ser, "M231 A")
-    # Ensure direction is correct based on the fresh status
-    send_command(ser, "G0 A-100" if status[CHA_PI] == 1 else "G0 A+100") 
+    send_command(ser, "G0 A-100") # RESTORED TO YOUR ORIGINAL CODE
     wait_homing(ser, status[CHA_PI], CHA_PI)
 
     send_command(ser, "G92 A32000")
@@ -127,15 +125,14 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
     send_command(ser, "G0 B-200")
     wait_homing(ser, 1, CHB_MOVE)
 
-    # >>> FIX: REFRESH STATUS HERE <<<
+    # REFRESH STATUS to fix the offset bug
     status = parse_status(ser)
 
     # 3. Slow Re-approach
-    # Drop speed for the final precise touch
     send_command(ser, "M240 A200 B200") 
     send_command(ser, "G91")
     send_command(ser, "M231 B")
-    send_command(ser, "G0 B+100" if status[CHB_PI] == 0 else "G0 B-100")
+    send_command(ser, "G0 B+100") # RESTORED TO YOUR ORIGINAL CODE
     wait_homing(ser, status[CHB_PI], CHB_PI)
 
     send_command(ser, "G92 B32000")
