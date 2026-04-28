@@ -111,6 +111,9 @@ class ZoomController:
         if self.ser_z:
             print("Moving to base position...")
             focus_base = self.get_focus_for_zoom(ZOOM_BASE_POS)
+            print(f"  [DIAG] focus at base ({ZOOM_BASE_POS}): {focus_base}")
+            print(f"  [DIAG] focus at min zoom ({ZOOM_MIN_STEPS}): {self.get_focus_for_zoom(ZOOM_MIN_STEPS)}")
+            print(f"  [DIAG] focus at max zoom ({ZOOM_MAX_STEPS}): {self.get_focus_for_zoom(ZOOM_MAX_STEPS)}")
             lens_helpers.send_command(self.ser_z, f"G0 A{ZOOM_BASE_POS}")
             lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHA_MOVE)
             lens_helpers.send_command(self.ser_z, f"G0 B{focus_base}")
@@ -125,7 +128,8 @@ class ZoomController:
         lens_helpers.calibrate_lens(self.ser_z, ZOOM_SPEED, FOCUS_SPEED)
 
     def get_focus_for_zoom(self, zoom_pos):
-        return int(self.focus_interp(zoom_pos)) + FOCUS_BIAS
+        result = int(self.focus_interp(zoom_pos)) + FOCUS_BIAS
+        return result
 
     def get_pan_speed_factor(self):
         """Returns 1/optical_zoom_ratio: 1.0 at 1x, lower when zoomed in."""
