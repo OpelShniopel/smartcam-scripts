@@ -47,10 +47,10 @@ STATIONARY_CENTER_Y = 360.0    # half of FRAME_H (not used for zoom logic direct
 # that maps to the vertical centre of the pan cam's view.
 PAN_CENTER_Y = 300.0
 
-VELOCITY_HORIZON   = 6         # frames ahead to predict ball position
-EDGE_MARGIN        = 0.30      # fraction of FOV half-width inside which we consider safe (higher = more aggressive zoom-out)
-VELOCITY_EMA_ALPHA = 0.35      # smoothing factor for ball velocity (0=frozen, 1=raw)
-ZOOM_IN_ALPHA      = 0.04      # low-pass factor for zoom-in (small = slow zoom-in, suppresses noise oscillation)
+VELOCITY_HORIZON   = 8         # frames ahead to predict ball position
+EDGE_MARGIN        = 0.40      # fraction of FOV half-width inside which we consider safe (higher = more aggressive zoom-out)
+VELOCITY_EMA_ALPHA = 0.40      # smoothing factor for ball velocity (0=frozen, 1=raw)
+ZOOM_IN_ALPHA      = 0.05      # low-pass factor for zoom-in (small = slow zoom-in, suppresses noise oscillation)
 
 FRAME_W = 1280   # stationary cam frame width (px)
 FRAME_H = 720
