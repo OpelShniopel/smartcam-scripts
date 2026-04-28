@@ -92,7 +92,7 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
     send_command(ser, "G91")            # Relative mode
     
     # Fast homing speed — strictly staying at 600 as you documented
-    send_command(ser, "M240 A600 B600") 
+    send_command(ser, "M240 A300 B300") 
 
     # ── Axis A (Zoom) ──────────────────────────────
     print("Homing Axis A (zoom)")
