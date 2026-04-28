@@ -21,6 +21,21 @@ def parse_status(ser):
     raw = send_command(ser, "!1")
     return [int(v.strip()) for v in raw.split(",")]
 
+def wait_homing_and_stop(ser, initial_val, axis_idx, axis_letter, timeout_sec=5.0):
+    """Poll until PI triggers, then immediately send stop to minimize overshoot."""
+    start = time.time()
+    while time.time() - start < timeout_sec:
+        status = parse_status(ser)
+        if status[axis_idx] != initial_val:
+            # PI just triggered — stop the motor immediately
+            send_command(ser, f"M230 {axis_letter}")
+            send_command(ser, "G0 {axis_letter}0".format(axis_letter=axis_letter))
+            break
+        time.sleep(0.005)  # tighter poll: 5ms instead of 10ms
+    else:
+        print(f"TIMEOUT: status index {axis_idx} did not change within {timeout_sec}s")
+    time.sleep(0.05)
+
 def wait_homing(ser, initial_val, axis_idx, timeout_sec=10.0):
     """Poll until status[axis_idx] differs from initial_val."""
     start = time.time()
@@ -101,8 +116,8 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
     # 3. Re-approach
     send_command(ser, "G91")
     send_command(ser, "M231 A")
-    send_command(ser, "G0 A-100") 
-    wait_homing(ser, status[CHA_PI], CHA_PI)
+    send_command(ser, "G0 A-100")
+    wait_homing_and_stop(ser, status[CHA_PI], CHA_PI, "A")
 
     send_command(ser, "G92 A32000")
     send_command(ser, "M230 A")
@@ -130,7 +145,7 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
     send_command(ser, "G91")
     send_command(ser, "M231 B")
     send_command(ser, "G0 B+100")
-    wait_homing(ser, status[CHB_PI], CHB_PI)
+    wait_homing_and_stop(ser, status[CHB_PI], CHB_PI, "B")
 
     status = parse_status(ser)
     print(f"  [CAL] B PI state after re-approach: {status[4]}")
