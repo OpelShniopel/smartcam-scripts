@@ -46,6 +46,7 @@ class PTZController:
             self.pan.return_home()
 
     def cleanup(self):
+        print("Running cleanup...")
         global _cleanup_done
         with _cleanup_lock:
             if _cleanup_done:
@@ -54,8 +55,10 @@ class PTZController:
 
         if self.pan:
             try:
+                print("Returning home...")
                 self.pan.return_home()
                 time.sleep(3) 
+                print("Done. Exiting...")
             except:
                 pass
 
