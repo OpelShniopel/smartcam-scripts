@@ -1,23 +1,3 @@
-// tmc_control_stationary.ino
-// ESP32 + TMC2209 Pan Camera Controller — stationary-camera detection source.
-//
-// Python sends the ball's pixel offset from the stationary camera's centre.
-// The ESP32 maps that to an absolute target step position and runs a P controller
-// on (target - current). The motor decelerates and stops naturally once it reaches
-// the target — no serial round-trips needed.
-//
-// Protocol (921600 baud):
-//   X<error_px>[,<scale_pct>]\n  — ball offset from stationary-cam centre (signed px).
-//                                   ESP32 converts to target step position internally.
-//   L\n          — ball lost; hold current position (target = stepPos)
-//   ?\n          — query position → "P<steps>\n"
-//   H\n          — homing → "OK\n" or "ERR:<reason>\n"
-//   S\n          — immediate hard stop; target = stepPos
-//   G<steps>\n   — go to absolute position (blocking)
-//   Z\n          — zero position counter and target
-//   V<±sps>\n    — manual velocity override (bypass position control)
-//   E\n / D\n    — enable / disable driver
-
 #include <Arduino.h>
 
 // ============================================================
@@ -46,23 +26,12 @@
 // ============================================================
 //  STATIONARY-CAM MAPPING
 // ============================================================
-// The stationary cam's full width (±640 px from centre) maps linearly to the
-// pan camera's full symmetric range of ±91° (±PAN_MAX_STEPS).
-// Left-side motion beyond -35° (PAN_MIN_STEPS) is clamped — the pan simply
-// holds at its physical left limit rather than trying to go further.
-//
-//   error_px = +640  →  target = +11375 steps (+91°)
-//   error_px =    0  →  target =      0 steps (home/centre)
-//   error_px = -640  →  target = -11375 steps → clamped to -4375 (-35°)
-//
-// STEPS_PER_STATIONARY_PX = PAN_MAX_STEPS / STATIONARY_FRAME_HALF
-//                         = 11375 / 640 ≈ 17.77
 #define STATIONARY_FRAME_HALF     640.0f   // half-width of stationary cam (px)
-#define STEPS_PER_STATIONARY_PX   10.0f  // = PAN_MAX_STEPS / STATIONARY_FRAME_HALF
+#define STEPS_PER_STATIONARY_PX   10.0f  // Mapping pixels to steps
 
 // ============================================================
-//  P CONTROLLER CONSTANTS  (tune these)
-// =========================================F===================
+//  P CONTROLLER CONSTANTS
+// ============================================================
 #define MIN_DEADZONE_STEPS   100      // steps — no movement inside this window (~0.5°)
 #define MAX_DEADZONE_STEPS  200      // steps — used at minimum speed_scale
 
@@ -78,12 +47,12 @@
 // ============================================================
 //  MOTION CONSTANTS
 // ============================================================
-#define ACCEL_PER_MS        700     // steps/sec per ms ramp rate
+#define ACCEL_PER_MS         700     // steps/sec per ms ramp rate
 
 // ============================================================
 //  SERIAL
 // ============================================================
-#define CMD_BAUD            921600
+#define CMD_BAUD            460800
 
 // ============================================================
 //  GLOBALS
@@ -100,6 +69,9 @@ int32_t  lastTargetSteps = 0; // previous target for boost detection
 uint32_t lastRampMs   = 0;
 uint32_t lastXMs      = 0;
 bool     ballActive   = false;
+
+char cmdBuf[32];
+uint8_t bufIdx = 0;
 
 // ============================================================
 //  STEP ISR
@@ -144,6 +116,33 @@ void hardStop() {
 }
 
 // ============================================================
+//  POSITION P CONTROLLER
+//  Computes velocity from (targetSteps - stepPos).
+// ============================================================
+int32_t computeVelocityFromSteps(int32_t target, float scale) {
+    int32_t step_error = target - stepPos;
+
+    float dynamic_deadzone = MIN_DEADZONE_STEPS + (MAX_DEADZONE_STEPS - MIN_DEADZONE_STEPS) * (1.0f - scale);
+
+    if (abs(step_error) <= (int32_t)dynamic_deadzone) return 0;
+
+    float full_range  = STEPS_PER_STATIONARY_PX * STATIONARY_FRAME_HALF;
+    float normalized  = min(1.0f, (float)abs(step_error) / full_range);
+    float base_factor = normalized;//powf(normalized, SPEED_FACTOR);
+
+    // Velocity boost when target jumps quickly
+    int32_t target_delta = abs(target - lastTargetSteps);
+    float multiplier = 1.0f;
+    if (target_delta > BALL_BOOST_THR_STEPS)
+        multiplier += (target_delta / full_range) * BALL_BOOST_GAIN;
+
+    float speed = MIN_VEL_SPS + (MAX_VEL_SPS - MIN_VEL_SPS) * base_factor;
+    speed = min((float)MAX_VEL_SPS, speed * multiplier * scale);
+
+    return (step_error > 0) ? (int32_t)speed : -(int32_t)speed;
+}
+
+// ============================================================
 //  VELOCITY RAMP  — 1ms tick
 // ============================================================
 void updateVelocity() {
@@ -157,7 +156,6 @@ void updateVelocity() {
         targetVel   = 0;
     }
 
-    // Recompute target velocity from position error every tick
     if (ballActive) {
         targetVel = computeVelocityFromSteps(targetSteps, 1.0f);
     }
@@ -185,39 +183,7 @@ void updateVelocity() {
 }
 
 // ============================================================
-//  POSITION P CONTROLLER
-//  Computes velocity from (targetSteps - stepPos).
-//  Called every ramp tick so the motor naturally decelerates
-//  as it approaches the target.
-// ============================================================
-int32_t computeVelocityFromSteps(int32_t target, float scale) {
-    int32_t step_error = target - stepPos;
-
-    float dynamic_deadzone = MIN_DEADZONE_STEPS + (MAX_DEADZONE_STEPS - MIN_DEADZONE_STEPS) * (1.0f - scale);
-
-    if (abs(step_error) <= (int32_t)dynamic_deadzone) return 0;
-
-    // Normalise against max expected step error (full stationary cam coverage).
-    // Using the physical pan range would leave the speed curve in its slow tail
-    // for all typical tracking errors.
-    float full_range  = STEPS_PER_STATIONARY_PX * STATIONARY_FRAME_HALF;
-    float normalized  = min(1.0f, (float)abs(step_error) / full_range);
-    float base_factor = powf(normalized, SPEED_FACTOR);
-
-    // Velocity boost when target jumps quickly (ball moving fast across frame)
-    int32_t target_delta = abs(target - lastTargetSteps);
-    float multiplier = 1.0f;
-    if (target_delta > BALL_BOOST_THR_STEPS)
-        multiplier += (target_delta / full_range) * BALL_BOOST_GAIN;
-
-    float speed = MIN_VEL_SPS + (MAX_VEL_SPS - MIN_VEL_SPS) * base_factor;
-    speed = min((float)MAX_VEL_SPS, speed * multiplier * scale);
-
-    return (step_error > 0) ? (int32_t)speed : -(int32_t)speed;
-}
-
-// ============================================================
-//  HOMING  (unchanged from v2)
+//  HOMING
 // ============================================================
 void doHoming() {
     Serial.println("HOMING");
@@ -276,14 +242,13 @@ void doHoming() {
 }
 
 // ============================================================
-//  GO TO ABSOLUTE POSITION  (unchanged from v2)
+//  GO TO ABSOLUTE POSITION
 // ============================================================
 void gotoPos(int32_t target) {
     target = constrain(target, PAN_MIN_STEPS, PAN_MAX_STEPS);
     targetSteps = target;
     int32_t moveVel  = (target > stepPos) ? MAX_VEL_SPS / 2 : -(MAX_VEL_SPS / 2);
-    int32_t slowZone = STEPS_PER_DEG * 5;
-
+    
     if (moveVel > 0) gpio_set_level((gpio_num_t)DIR_PIN, DIR_FWD);
     else             gpio_set_level((gpio_num_t)DIR_PIN, DIR_REV);
     runningVel = moveVel;
@@ -293,12 +258,6 @@ void gotoPos(int32_t target) {
     while (millis() < timeout) {
         int32_t remaining = abs(stepPos - target);
         if (remaining <= 3) break;
-        if (remaining < slowZone) {
-            int32_t sv = max((int32_t)(MIN_VEL_SPS * 2),
-                             (int32_t)(abs(moveVel) * remaining / slowZone));
-            int32_t sv_signed = (moveVel > 0) ? sv : -sv;
-            if (runningVel != sv_signed) { runningVel = sv_signed; setStepFreq(sv_signed); }
-        }
         delay(1);
     }
     hardStop();
@@ -307,89 +266,81 @@ void gotoPos(int32_t target) {
 }
 
 // ============================================================
-//  SERIAL COMMAND PARSER
+//  COMMAND HANDLER (Switch-based for speed)
 // ============================================================
-String cmdBuf = "";
+void handleCommand(char* cmd) {
+    if (strlen(cmd) == 0) return;
+    char c = cmd[0];
 
-void parseCommand(const String& cmd) {
-    if (cmd.length() == 0) return;
-    char c = cmd.charAt(0);
+    switch (c) {
+        case 'X': {
+            // X<error_px>[,<scale_pct>]
+            char* commaPos = strchr(cmd, ',');
+            int32_t error_px;
+            float scale = 1.0f;
 
-    if (c == 'X') {
-        // X<error_px>  or  X<error_px>,<scale_pct>
-        // error_px = ball offset from stationary-cam centre (signed pixels)
-        int32_t error_px = 0;
-        float   scale    = 1.0f;
+            if (commaPos) {
+                *commaPos = '\0'; // Split the string
+                error_px = atoi(cmd + 1);
+                scale = constrain(atoi(commaPos + 1), 1, 100) / 100.0f;
+            } else {
+                error_px = atoi(cmd + 1);
+            }
 
-        int comma = cmd.indexOf(',');
-        if (comma > 0) {
-            error_px = (int32_t)cmd.substring(1, comma).toInt();
-            int32_t pct = cmd.substring(comma + 1).toInt();
-            scale = constrain(pct, 1, 100) / 100.0f;
-        } else {
-            error_px = (int32_t)cmd.substring(1).toInt();
+            lastTargetSteps = targetSteps;
+            targetSteps = constrain((int32_t)(error_px * STEPS_PER_STATIONARY_PX), PAN_MIN_STEPS, PAN_MAX_STEPS);
+            lastXMs = millis();
+            ballActive = true;
+            targetVel = computeVelocityFromSteps(targetSteps, scale);
+            break;
         }
 
-        // Map pixel error → absolute target step position.
-        // error_px = 0  → target = 0  (pan camera centred at home)
-        // error_px = ±STATIONARY_FRAME_HALF → target = ±(HALF * STEPS_PER_PX)
-        int32_t newTarget = constrain(
-            (int32_t)(error_px * STEPS_PER_STATIONARY_PX),
-            PAN_MIN_STEPS,
-            PAN_MAX_STEPS
-        );
+        case 'L': // Ball Lost
+            ballActive = false;
+            targetSteps = stepPos;
+            targetVel = 0;
+            break;
 
-        lastTargetSteps = targetSteps;
-        targetSteps     = newTarget;
-        lastXMs         = millis();
-        ballActive      = true;
+        case 'V': // Manual Velocity Override
+            ballActive = false;
+            targetVel = constrain(atoi(cmd + 1), -MAX_VEL_SPS, MAX_VEL_SPS);
+            break;
 
-        // Immediately compute and apply target velocity
-        targetVel = computeVelocityFromSteps(targetSteps, scale);
+        case '?': // Query Position
+            Serial.print('P');
+            Serial.println(stepPos);
+            break;
 
-    } else if (c == 'L') {
-        // Ball lost — hold current position
-        ballActive  = false;
-        targetSteps = stepPos;
-        targetVel   = 0;
+        case 'H': // Homing
+            doHoming();
+            break;
 
-    } else if (c == 'V') {
-        // Manual velocity override
-        ballActive = false;
-        int32_t vel = (int32_t)cmd.substring(1).toInt();
-        vel = constrain(vel, -MAX_VEL_SPS, MAX_VEL_SPS);
-        if (vel > 0 && stepPos >= PAN_MAX_STEPS) vel = 0;
-        if (vel < 0 && stepPos <= PAN_MIN_STEPS) vel = 0;
-        targetVel = vel;
+        case 'S': // Hard Stop
+            ballActive = false;
+            targetSteps = stepPos;
+            hardStop();
+            break;
 
-    } else if (c == '?') {
-        Serial.print('P');
-        Serial.println(stepPos);
+        case 'G': // Goto Position
+            ballActive = false;
+            gotoPos(atoi(cmd + 1));
+            break;
 
-    } else if (c == 'H') {
-        doHoming();
+        case 'Z': // Zero
+            stepPos = 0;
+            targetSteps = 0;
+            break;
 
-    } else if (c == 'S') {
-        ballActive  = false;
-        targetSteps = stepPos;
-        hardStop();
+        case 'E': // Enable
+            gpio_set_level((gpio_num_t)EN_PIN, LOW);
+            break;
 
-    } else if (c == 'G') {
-        ballActive = false;
-        gotoPos((int32_t)cmd.substring(1).toInt());
-
-    } else if (c == 'Z') {
-        stepPos     = 0;
-        targetSteps = 0;
-
-    } else if (c == 'E') {
-        gpio_set_level((gpio_num_t)EN_PIN, LOW);
-
-    } else if (c == 'D') {
-        hardStop();
-        ballActive = false;
-        delay(50);
-        gpio_set_level((gpio_num_t)EN_PIN, HIGH);
+        case 'D': // Disable
+            hardStop();
+            ballActive = false;
+            delay(50);
+            gpio_set_level((gpio_num_t)EN_PIN, HIGH);
+            break;
     }
 }
 
@@ -423,19 +374,17 @@ void setup() {
 void loop() {
     updateVelocity();
 
-    if (stepPos >= PAN_MAX_STEPS && targetVel > 0) targetVel = 0;
-    if (stepPos <= PAN_MIN_STEPS && targetVel < 0) targetVel = 0;
-
+    // Fast serial character ingestion
     while (Serial.available()) {
         char ch = (char)Serial.read();
         if (ch == '\n' || ch == '\r') {
-            cmdBuf.trim();
-            if (cmdBuf.length() > 0) {
-                parseCommand(cmdBuf);
-                cmdBuf = "";
+            if (bufIdx > 0) {
+                cmdBuf[bufIdx] = '\0';
+                handleCommand(cmdBuf);
+                bufIdx = 0;
             }
-        } else {
-            if (cmdBuf.length() < 32) cmdBuf += ch;
+        } else if (bufIdx < 31) {
+            cmdBuf[bufIdx++] = ch;
         }
     }
 }
