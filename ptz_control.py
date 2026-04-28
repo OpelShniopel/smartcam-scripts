@@ -46,43 +46,31 @@ class PTZController:
             self.pan.return_home()
 
     def cleanup(self):
-        # Guard against double-call (atexit + signal both fire)
         global _cleanup_done
         with _cleanup_lock:
             if _cleanup_done:
                 return
             _cleanup_done = True
 
-        print("\nInitiating clean shutdown...")
-        try:
-            self.return_home()
-            time.sleep(0.3)
-        except Exception:
-            pass
+        if self.pan:
+            try:
+                self.pan.return_home()
+                time.sleep(3) 
+            except:
+                pass
 
-        for name, obj, attr in [
-            ("Pan",  self.pan,  ['ser_p', 'ser']),
-            ("Zoom", self.zoom, ['ser_z', 'ser']),
-        ]:
-            for a in attr:
-                port = getattr(obj, a, None) if obj else None
-                if port and port.is_open:
-                    try:
-                        port.reset_input_buffer()
-                        port.reset_output_buffer()
-                        port.flush()
-                    except Exception:
-                        pass
-                    try:
-                        port.close()
-                        print(f"{name} serial closed.")
-                    except Exception:
-                        pass
-                    break  # found the right attr, stop
-
-        # Give the OS time to actually release the file descriptor
-        # before the process exits. 300ms is enough on most kernels.
-        time.sleep(0.3)
+        for name, obj, attr in [("Pan", self.pan, ['ser_p']), ("Zoom", self.zoom, ['ser_z'])]:
+            if obj:
+                for a in attr:
+                    port = getattr(obj, a, None)
+                    if port and port.is_open:
+                        try:
+                            port.reset_input_buffer()
+                            port.reset_output_buffer()
+                            port.close()
+                        except:
+                            pass
+        time.sleep(0.5)
 
 def socket_listener(controller):
     while True:
