@@ -53,14 +53,20 @@ class PTZController:
                 return
             _cleanup_done = True
 
+        if self.zoom:
+            try:
+                self.zoom.return_home()
+            except Exception as e:
+                print(f"Zoom home failed: {e}")
+
         if self.pan:
             try:
                 print("Returning home...")
                 self.pan.return_home()
-                time.sleep(3) 
+                time.sleep(3)
                 print("Done. Exiting...")
-            except:
-                pass
+            except Exception as e:
+                print(f"Pan home failed: {e}")
 
         for name, obj, attr in [("Pan", self.pan, ['ser_p']), ("Zoom", self.zoom, ['ser_z'])]:
             if obj:
