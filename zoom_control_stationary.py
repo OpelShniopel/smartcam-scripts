@@ -63,7 +63,7 @@ MAX_OPTICAL_ZOOM = 8
 
 FOCUS_MAX_STEPS = 37000
 FOCUS_MIN_STEPS = 32000
-FOCUS_BIAS      = -1040
+FOCUS_BIAS      = 0
 
 MAX_SEGMENT = 250   # max zoom step per serial command
 
