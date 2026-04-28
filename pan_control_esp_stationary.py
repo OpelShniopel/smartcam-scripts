@@ -5,7 +5,7 @@ DEBUG = False
 
 # --- CONFIGURATION ---
 SERIAL_PORT_P = "/dev/pan_control_esp32"
-BAUD_RATE     = 921600
+BAUD_RATE     = 460800
 
 ENABLE_HOMING = True
 
@@ -25,6 +25,7 @@ def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     for attempt in range(retries):
         try:
             s = serial.Serial(port_path, baud, timeout=1)
+            s.set_buffer_size(rx=8192, tx=8192)
             time.sleep(0.1)
             s.reset_input_buffer()
             return s

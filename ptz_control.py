@@ -79,39 +79,61 @@ def socket_listener(controller):
     while True:
         try:
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            client.settimeout(1.0)
             client.connect(UNIX_SOCK)
+            client.setblocking(False) # Non-blocking for "drain" logic
             print("Connected to socket.")
 
-            buf = ""
+            buf = b"" # Use bytes, not strings, for raw socket data
             while True:
                 try:
-                    chunk = client.recv(4096).decode()
-                    if not chunk:
-                        break
-                    buf += chunk
-
-                    latest_msg = None
-                    while "\n" in buf:
-                        line, buf = buf.split("\n", 1)
-                        if DEBUG:
-                            print(f"[SOCKET] {line}")
+                    # 1. Read everything currently available in the OS buffer
+                    while True:
                         try:
-                            latest_msg = json.loads(line)
+                            chunk = client.recv(8192)
+                            if not chunk:
+                                raise ConnectionResetError
+                            buf += chunk
+                        except BlockingIOError:
+                            break # No more data to read right now
+
+                    if not buf:
+                        time.sleep(0.001) # Nano-sleep to prevent 100% CPU
+                        continue
+
+                    # 2. Extract all complete lines
+                    lines = buf.split(b"\n")
+                    
+                    # 3. The last element is either empty or a partial line
+                    buf = lines.pop() 
+
+                    if not lines:
+                        continue
+
+                    # 4. CRITICAL: Only process the LATEST message for the TARGET_CAM
+                    # This prevents the "lagging behind" effect
+                    latest_valid_msg = None
+                    for line in reversed(lines):
+                        try:
+                            msg = json.loads(line)
+                            if msg.get("camera") == TARGET_CAM:
+                                latest_valid_msg = msg
+                                break # Found the newest one, ignore the rest
                         except json.JSONDecodeError:
                             continue
 
-                    if latest_msg:
-                        if latest_msg.get("camera") == TARGET_CAM:
-                            controller.process_detection(latest_msg.get("detections", []))
-                except socket.timeout:
-                    continue
+                    if latest_valid_msg:
+                        controller.process_detection(latest_valid_msg.get("detections", []))
+
+                except (socket.error, ConnectionResetError):
+                    print("Socket connection lost.")
+                    break
+                
+                # Small sleep to yield to other threads (Pan/Zoom)
+                time.sleep(0.005)
 
         except (ConnectionRefusedError, FileNotFoundError):
-            time.sleep(2)
+            time.sleep(1)
         except Exception as e:
-            if isinstance(e, KeyboardInterrupt):
-                raise e
             print(f"Socket Error: {e}")
             time.sleep(1)
 
