@@ -57,6 +57,7 @@ FRAME_H = 720
 
 # --- LIMITS ---
 ZOOM_BASE_POS  = 40000
+ZOOM_RTH_POS   = 38000
 ZOOM_MAX_STEPS = 41000   # 1x (widest FOV)
 ZOOM_MIN_STEPS = 30000   # max optical zoom (~8x)
 MAX_OPTICAL_ZOOM = 8
@@ -157,13 +158,13 @@ class ZoomController:
     def return_home(self):
         if not self.ser_z:
             return
-        home_focus = self.get_focus_for_zoom(ZOOM_BASE_POS)
-        print(f"Zoom returning home: pos={ZOOM_BASE_POS}, focus={home_focus}")
-        lens_helpers.send_command(self.ser_z, f"G0 A{ZOOM_BASE_POS} B{home_focus}")
+        home_focus = self.get_focus_for_zoom(ZOOM_RTH_POS)
+        print(f"Zoom returning home: pos={ZOOM_RTH_POS}, focus={home_focus}")
+        lens_helpers.send_command(self.ser_z, f"G0 A{ZOOM_RTH_POS} B{home_focus}")
         lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHA_MOVE)
         lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHB_MOVE)
-        self.current_zoom_pos = ZOOM_BASE_POS
-        self.target_zoom_pos  = ZOOM_BASE_POS
+        self.current_zoom_pos = ZOOM_RTH_POS
+        self.target_zoom_pos  = ZOOM_RTH_POS
         print("Zoom home reached.")
 
     def send_zoom(self, zoom_steps):
