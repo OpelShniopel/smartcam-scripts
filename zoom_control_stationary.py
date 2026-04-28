@@ -67,6 +67,19 @@ FOCUS_BIAS      = -1040
 
 MAX_SEGMENT = 250   # max zoom step per serial command
 
+def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            s = serial.Serial(port_path, baud, timeout=1)
+            time.sleep(0.1)
+            s.reset_input_buffer()
+            return s
+        except serial.SerialException as e:
+            last_exc = e
+            print(f"Port {port_path} not ready (attempt {attempt+1}/{retries}): {e}")
+            time.sleep(delay * (attempt + 1))
+    raise last_exc
 
 class ZoomController:
     def __init__(self):
@@ -80,7 +93,7 @@ class ZoomController:
         self.cmd_interval      = 0.05
 
         try:
-            self.ser_z = serial.Serial(SERIAL_PORT_Z, 115200, timeout=1)
+            self.ser_z = open_serial_with_retry(SERIAL_PORT_Z, 115200)
             time.sleep(1.5)
             print("Initializing Kurokesu Lens Board...")
             lens_helpers.init_lens_board(self.ser_z, ZOOM_SPEED, FOCUS_SPEED)

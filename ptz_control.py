@@ -6,7 +6,10 @@ import atexit
 import signal
 from pan_control_esp_stationary import PanController
 from zoom_control_stationary import ZoomController
+import threading
 
+_cleanup_done = False
+_cleanup_lock = threading.Lock()
 UNIX_SOCK  = "/tmp/ptz_control.sock"
 TARGET_CAM = "fixed"
 DEBUG = False 
@@ -43,26 +46,43 @@ class PTZController:
             self.pan.return_home()
 
     def cleanup(self):
+        # Guard against double-call (atexit + signal both fire)
+        global _cleanup_done
+        with _cleanup_lock:
+            if _cleanup_done:
+                return
+            _cleanup_done = True
+
         print("\nInitiating clean shutdown...")
         try:
             self.return_home()
-            time.sleep(0.5) 
-        except:
+            time.sleep(0.3)
+        except Exception:
             pass
 
-        if self.pan and hasattr(self.pan, 'ser_p') and self.pan.ser_p:
-            self.pan.ser_p.close()
-            print("Pan serial closed.")
-        elif self.pan and hasattr(self.pan, 'ser') and self.pan.ser:
-            self.pan.ser.close()
-            print("Pan serial closed.")
+        for name, obj, attr in [
+            ("Pan",  self.pan,  ['ser_p', 'ser']),
+            ("Zoom", self.zoom, ['ser_z', 'ser']),
+        ]:
+            for a in attr:
+                port = getattr(obj, a, None) if obj else None
+                if port and port.is_open:
+                    try:
+                        port.reset_input_buffer()
+                        port.reset_output_buffer()
+                        port.flush()
+                    except Exception:
+                        pass
+                    try:
+                        port.close()
+                        print(f"{name} serial closed.")
+                    except Exception:
+                        pass
+                    break  # found the right attr, stop
 
-        if self.zoom and hasattr(self.zoom, 'ser_z') and self.zoom.ser_z:
-            self.zoom.ser_z.close()
-            print("Zoom serial closed.")
-        elif self.zoom and hasattr(self.zoom, 'ser') and self.zoom.ser:
-            self.zoom.ser.close()
-            print("Zoom serial closed.")
+        # Give the OS time to actually release the file descriptor
+        # before the process exits. 300ms is enough on most kernels.
+        time.sleep(0.3)
 
 def socket_listener(controller):
     while True:

@@ -20,6 +20,19 @@ MAX_ERROR_JUMP = 200
 MAX_COAST_FRAMES = 30
 COAST_ERROR_PX   = 60   # px — ghost error to keep gentle momentum during coast
 
+def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            s = serial.Serial(port_path, baud, timeout=1)
+            time.sleep(0.1)
+            s.reset_input_buffer()
+            return s
+        except serial.SerialException as e:
+            last_exc = e
+            print(f"Port {port_path} not ready (attempt {attempt+1}/{retries}): {e}")
+            time.sleep(delay * (attempt + 1))
+    raise last_exc
 
 class PanController:
     def __init__(self):
@@ -30,7 +43,7 @@ class PanController:
         self.rogue_patience = 0
 
         try:
-            self.ser_p = serial.Serial(SERIAL_PORT_P, BAUD_RATE, timeout=0.05)
+            self.ser_p = open_serial_with_retry(SERIAL_PORT_P, BAUD_RATE)
             time.sleep(0.8)
             self.ser_p.reset_input_buffer()
             print(f"SUCCESS: Connected to Pan Motor on {SERIAL_PORT_P}")
