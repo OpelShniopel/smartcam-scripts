@@ -24,12 +24,7 @@ def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     last_exc = None
     for attempt in range(retries):
         try:
-            s = serial.Serial()
-            s.port     = port_path
-            s.baudrate = baud
-            s.timeout  = 1
-            s.dtr      = False   # prevent ESP32 USB CDC reset on open
-            s.open()
+            s = serial.Serial(port_path, baud, timeout=1)
             time.sleep(0.1)
             s.reset_input_buffer()
             return s
