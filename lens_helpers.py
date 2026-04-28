@@ -72,36 +72,36 @@ def init_lens_board(ser, zoom_speed, focus_speed):
 # ── Homing / calibration ───────────────────────────────────────────────────────
 
 def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
+    """
+    3-step homing for Zoom (A) and Focus (B):
+      1. Find the PI sensor (direction-aware)
+      2. Back off
+      3. Re-approach for a precise reference, then set G92 {axis}32000
+    zoom_speed / focus_speed are the operational speeds restored after homing.
+    Homing itself always runs at 600 to match the calibration script and
+    ensure reproducible PI trigger overshoot.
+    """
     print("--- Starting Lens Calibration ---")
     send_command(ser, "M238")           # Energize PI LEDs
     send_command(ser, "G91")            # Relative mode
-    
-    # Fast homing speed
-    send_command(ser, "M240 A600 B600") 
+    send_command(ser, "M240 A600 B600") # Slow homing speed — must match focus_zoom_mapping.py
 
     # ── Axis A (Zoom) ──────────────────────────────
     print("Homing Axis A (zoom)")
     status = parse_status(ser)
 
-    # 1. Fast Seek
     send_command(ser, "G91")
     send_command(ser, "M231 A")
     send_command(ser, "G0 A-100" if status[CHA_PI] == 1 else "G0 A+100")
     wait_homing(ser, status[CHA_PI], CHA_PI)
 
-    # 2. Back off
     send_command(ser, "M230 A")
     send_command(ser, "G0 A+200")
     wait_homing(ser, 1, CHA_MOVE)
 
-    # REFRESH STATUS to fix the offset bug
-    status = parse_status(ser)
-
-    # 3. Slow Re-approach
-    send_command(ser, "M240 A200 B200") 
     send_command(ser, "G91")
     send_command(ser, "M231 A")
-    send_command(ser, "G0 A-100") # RESTORED TO YOUR ORIGINAL CODE
+    send_command(ser, "G0 A-100")
     wait_homing(ser, status[CHA_PI], CHA_PI)
 
     send_command(ser, "G92 A32000")
@@ -110,36 +110,27 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
 
     # ── Axis B (Focus) ─────────────────────────────
     print("Homing Axis B (focus)")
-    # Reset back to fast homing speed for the first pass of Focus
-    send_command(ser, "M240 A600 B600") 
     status = parse_status(ser)
 
-    # 1. Fast Seek
     send_command(ser, "G91")
     send_command(ser, "M231 B")
     send_command(ser, "G0 B+100" if status[CHB_PI] == 0 else "G0 B-100")
     wait_homing(ser, status[CHB_PI], CHB_PI)
 
-    # 2. Back off
     send_command(ser, "M230 B")
     send_command(ser, "G0 B-200")
     wait_homing(ser, 1, CHB_MOVE)
 
-    # REFRESH STATUS to fix the offset bug
-    status = parse_status(ser)
-
-    # 3. Slow Re-approach
-    send_command(ser, "M240 A200 B200") 
     send_command(ser, "G91")
     send_command(ser, "M231 B")
-    send_command(ser, "G0 B+100") # RESTORED TO YOUR ORIGINAL CODE
+    send_command(ser, "G0 B+100")
     wait_homing(ser, status[CHB_PI], CHB_PI)
 
     send_command(ser, "G92 B32000")
     send_command(ser, "M230 B")
     send_command(ser, "G90")
 
-    # Restore operational speeds
+    # Restore operational speeds now that homing is done
     send_command(ser, f"M240 A{zoom_speed} B{focus_speed} C600")
     print("--- Calibration Complete ---")
 
