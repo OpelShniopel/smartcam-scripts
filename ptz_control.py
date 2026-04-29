@@ -52,8 +52,10 @@ class PTZController:
                 pass
 
     def manual_pan_step(self, direction, steps=1):
+        if not self._manual_mode:
+            print("[ptz] pan_step ignored: not in manual mode")
+            return
         with self._manual_lock:
-            self._manual_mode = True
             if not self.pan or not self.pan.ser_p:
                 return
             ser = self.pan.ser_p
@@ -76,8 +78,10 @@ class PTZController:
                     break
 
     def manual_move_start(self, direction, steps_per_second=10):
+        if not self._manual_mode:
+            print("[ptz] move_start ignored: not in manual mode")
+            return
         with self._manual_lock:
-            self._manual_mode = True
             if not self.pan or not self.pan.ser_p:
                 return
             sign = 1 if direction == "right" else -1
@@ -85,20 +89,27 @@ class PTZController:
             self.pan.ser_p.write(f"V{sign * vel}\n".encode())
 
     def manual_move_stop(self):
+        if not self._manual_mode:
+            return
         with self._manual_lock:
             self._send_stop()
-            self._manual_mode = False
+            # mode stays manual — only set_mode changes the mode
 
     def set_mode(self, mode):
-        with self._manual_lock:
-            if mode == "manual":
-                self._manual_mode = True
+        if mode == "manual":
+            self._manual_mode = True   # set FIRST — detection thread sees this immediately
+            with self._manual_lock:
+                if self.pan and self.pan.ser_p:
+                    try:
+                        self.pan.ser_p.write(b"S\n")  # hard stop
+                    except OSError:
+                        pass
+            print("[ptz] mode -> manual")
+        else:
+            with self._manual_lock:
                 self._send_stop()
-                print("[ptz] mode -> manual")
-            else:
-                self._send_stop()
-                self._manual_mode = False
-                print("[ptz] mode -> automatic")
+            self._manual_mode = False  # clear AFTER — detection resumes on next frame
+            print("[ptz] mode -> automatic")
 
     def process_manual_command(self, msg):
         cmd = msg.get("type")
