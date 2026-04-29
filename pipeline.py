@@ -123,9 +123,20 @@ def _get_local_ip() -> str:
 
 
 JETSON_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
-GO_BRIDGE_SOCK = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
+GO_BRIDGE_SOCK   = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
 PTZ_CONTROL_SOCK = "/tmp/ptz_control.sock"
-HTTP_PORT = 9101
+PTZ_MANUAL_SOCK  = "/tmp/ptz_manual.sock"
+HTTP_PORT        = 9101
+
+# Degrees added to the estimated pan position per manual step (tune per rig)
+PAN_DEG_PER_STEP = 1.0
+
+_PTZ_CMD_TYPES = frozenset({
+    "cmd.cam_pan_step",
+    "cmd.cam_tilt_step",
+    "cmd.cam_move_start",
+    "cmd.cam_move_stop",
+})
 
 CLASS_ID_RIM = 0
 CLASS_ID_BALL = 1
@@ -455,6 +466,87 @@ def _apply_score_patch(data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# PTZ manual command relay (pipeline -> ptz_control manual socket)
+# ---------------------------------------------------------------------------
+_ptz_manual_q: queue.SimpleQueue = queue.SimpleQueue()
+_pan_deg      = 0.0
+_pan_deg_lock = threading.Lock()
+
+
+def start_ptz_manual_relay() -> None:
+    def _relay():
+        while True:
+            conn = None
+            try:
+                conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                conn.connect(PTZ_MANUAL_SOCK)
+                print("[ptz-manual] relay connected")
+                while True:
+                    msg = _ptz_manual_q.get()
+                    conn.sendall((json.dumps(msg) + "\n").encode())
+            except (ConnectionRefusedError, FileNotFoundError):
+                time.sleep(1)
+            except OSError:
+                time.sleep(1)
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except OSError:
+                        pass
+
+    threading.Thread(target=_relay, daemon=True, name="ptz-manual-relay").start()
+
+
+def _dispatch_ptz_manual_cmd(msg: dict) -> None:
+    global _pan_deg
+    msg_type = msg.get("type", "")
+    msg_id   = msg.get("id", "")
+    payload  = msg.get("payload") or {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    def _ack(ok: bool, resp: dict | None = None, error: str = "") -> None:
+        ack: dict = {"type": "ack", "action": msg_type, "id": msg_id, "ok": ok}
+        if resp is not None:
+            ack["payload"] = resp
+        if error:
+            ack["error"] = error
+        _go_bridge_out_q.put(ack)
+
+    if msg_type == "cmd.cam_pan_step":
+        direction = payload.get("direction")
+        if direction not in ("left", "right"):
+            _ack(False, error=f"direction must be left|right, got {direction!r}")
+            return
+        steps = payload.get("steps", 1)
+        if not isinstance(steps, int) or isinstance(steps, bool) or steps < 1:
+            steps = 1
+        sign = 1 if direction == "right" else -1
+        with _pan_deg_lock:
+            _pan_deg += sign * steps * PAN_DEG_PER_STEP
+            pan_deg = _pan_deg
+        _ptz_manual_q.put({"type": "pan_step", "direction": direction, "steps": steps})
+        _ack(True, {"panDeg": round(pan_deg, 2)})
+
+    elif msg_type == "cmd.cam_move_start":
+        direction = payload.get("direction")
+        if direction not in ("left", "right"):
+            _ack(False, error=f"direction must be left|right, got {direction!r}")
+            return
+        sps = payload.get("stepsPerSecond", 10)
+        if not isinstance(sps, (int, float)) or isinstance(sps, bool) or sps <= 0:
+            sps = 10
+        _ptz_manual_q.put({"type": "move_start", "direction": direction,
+                            "steps_per_second": int(sps)})
+        _ack(True, {})
+
+    elif msg_type == "cmd.cam_move_stop":
+        _ptz_manual_q.put({"type": "move_stop"})
+        _ack(True, {})
+
+
+# ---------------------------------------------------------------------------
 # PTZ control socket server
 # ---------------------------------------------------------------------------
 _ptz_control_clients: list[socket.socket] = []
@@ -569,6 +661,8 @@ def _handle_go_connection(conn: socket.socket) -> None:
                     _dispatch_cmd(msg)
                 elif msg.get("type") == "ping":
                     _go_bridge_out_q.put({"type": "pong"})
+                elif msg.get("type") in _PTZ_CMD_TYPES:
+                    _dispatch_ptz_manual_cmd(msg)
     except OSError:
         pass
     finally:
@@ -1866,6 +1960,7 @@ def main():
     start_go_bridge_server()
     start_http_server()
     start_ptz_control_server()
+    start_ptz_manual_relay()
 
     _persist_score_state()
     _persist_stream_worker_config()
