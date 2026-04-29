@@ -218,9 +218,6 @@ PROGRAM_STREAM_RTSP_PATH = "program_stream"
 PROGRAM_WEBRTC_WIDTH = 1280
 PROGRAM_WEBRTC_HEIGHT = 720
 PROGRAM_WEBRTC_VP8_BITRATE = 4_000_000
-PROGRAM_WEBRTC_VP8_THREADS = 4
-PROGRAM_WEBRTC_VP8_CPU_USED = 8
-PROGRAM_WEBRTC_VP8_KEYFRAME_MAX_DIST = 15
 PROGRAM_SWITCH_DEBOUNCE_MS = 150
 PROGRAM_SWITCH_SETTLE_MS = 700
 
@@ -1657,12 +1654,6 @@ def _configure_x264_encoder(
 def _configure_vp8_encoder(enc: Gst.Element) -> None:
     _set_if_supported(enc, "target-bitrate", PROGRAM_WEBRTC_VP8_BITRATE)
     _set_if_supported(enc, "deadline", 1)
-    _set_if_supported(enc, "cpu-used", PROGRAM_WEBRTC_VP8_CPU_USED)
-    _set_if_supported(enc, "threads", PROGRAM_WEBRTC_VP8_THREADS)
-    _set_if_supported(enc, "keyframe-max-dist", PROGRAM_WEBRTC_VP8_KEYFRAME_MAX_DIST)
-    _set_if_supported(enc, "lag-in-frames", 0)
-    _set_if_supported(enc, "auto-alt-ref", False)
-    _set_if_supported(enc, "end-usage", "cbr")
 
 
 def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
@@ -1994,6 +1985,7 @@ def _build_program_clean_branch(
         ),
     )
     enc_preview = _make("vp8enc", "enc_program_clean_vp8")
+    vp8_caps = _capsfilter("caps_program_clean_vp8_profile", "video/x-vp8,profile=(string)0")
     sink_preview = _make("rtspclientsink", "sink_program_clean_vp8")
 
     selector.set_property("sync-streams", True)
@@ -2026,7 +2018,7 @@ def _build_program_clean_branch(
             q_stream, conv_stream, caps_stream, enc_stream, h264_stream_caps,
             parse_stream, sink_stream,
             q_preview, conv_preview_nv, caps_preview_rgba, conv_preview_cpu,
-            caps_preview, enc_preview, sink_preview,
+            caps_preview, enc_preview, vp8_caps, sink_preview,
     ):
         pipeline.add(el)
 
@@ -2060,7 +2052,7 @@ def _build_program_clean_branch(
     _tee_branch(tee, q_preview)
     _link_many(
         q_preview, conv_preview_nv, caps_preview_rgba, conv_preview_cpu,
-        caps_preview, enc_preview, sink_preview,
+        caps_preview, enc_preview, vp8_caps, sink_preview,
     )
 
     _program_selector = selector
