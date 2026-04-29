@@ -11,21 +11,17 @@ import threading
 
 _cleanup_done = False
 _cleanup_lock = threading.Lock()
-UNIX_SOCK      = "/tmp/ptz_control.sock"
-MANUAL_SOCK    = "/tmp/ptz_manual.sock"
-TARGET_CAM     = "fixed"
-DEBUG          = False
-ENABLE_PAN     = True
-ENABLE_ZOOM    = True
+UNIX_SOCK   = "/tmp/ptz_control.sock"
+MANUAL_SOCK = "/tmp/ptz_manual.sock"
+TARGET_CAM  = "fixed"
+DEBUG       = False
+ENABLE_PAN  = True
+ENABLE_ZOOM = True
 
-# Manual pan constants — must match ESP32 defines
-STEPS_PER_DEG     = 125    # ESP32: STEPS_PER_DEG
-STEP_SIZE_STEPS   = 62     # 0.5° per Go "step" (125 * 0.5)
-PAN_MAX_STEPS     = 11875  # ESP32: PAN_MAX_DEG(95) * STEPS_PER_DEG(125)
-PAN_MIN_STEPS     = -4375  # ESP32: PAN_MIN_DEG(-35) * STEPS_PER_DEG(125)
-MAX_JOG_VEL       = 12000  # ESP32: MAX_VEL_SPS
-JOG_STEPS_PER_SPS = 62     # motor steps/sec per Go stepsPerSecond unit (0.5°/step * 125 steps/°)
-STEP_TIMEOUT_S    = 5.0    # max wait for G command to complete
+STEP_SIZE_STEPS   = 62    # motor steps per Go "step" (0.5° at 125 steps/°)
+JOG_STEPS_PER_SPS = 62    # motor steps/sec per Go stepsPerSecond unit
+STEP_TIMEOUT_S    = 5.0   # max seconds to wait for G command OK response
+
 
 class PTZController:
     def __init__(self):
@@ -61,7 +57,6 @@ class PTZController:
             if not self.pan or not self.pan.ser_p:
                 return
             ser = self.pan.ser_p
-            # Hard stop, then query current position
             ser.write(b"S\n")
             time.sleep(0.05)
             ser.reset_input_buffer()
@@ -71,9 +66,8 @@ class PTZController:
                 current = int(raw[1:]) if raw.startswith("P") else 0
             except ValueError:
                 current = 0
-            sign = 1 if direction == "right" else -1
-            target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS,
-                         current + sign * steps * STEP_SIZE_STEPS))
+            sign   = 1 if direction == "right" else -1
+            target = current + sign * steps * STEP_SIZE_STEPS
             ser.write(f"G{target}\n".encode())
             deadline = time.time() + STEP_TIMEOUT_S
             while time.time() < deadline:
@@ -87,13 +81,24 @@ class PTZController:
             if not self.pan or not self.pan.ser_p:
                 return
             sign = 1 if direction == "right" else -1
-            vel  = min(MAX_JOG_VEL, steps_per_second * JOG_STEPS_PER_SPS)
+            vel  = steps_per_second * JOG_STEPS_PER_SPS
             self.pan.ser_p.write(f"V{sign * vel}\n".encode())
 
     def manual_move_stop(self):
         with self._manual_lock:
             self._send_stop()
             self._manual_mode = False
+
+    def set_mode(self, mode):
+        with self._manual_lock:
+            if mode == "manual":
+                self._manual_mode = True
+                self._send_stop()
+                print("[ptz] mode -> manual")
+            else:
+                self._send_stop()
+                self._manual_mode = False
+                print("[ptz] mode -> automatic")
 
     def process_manual_command(self, msg):
         cmd = msg.get("type")
@@ -107,6 +112,8 @@ class PTZController:
             self.manual_move_start(direction, sps)
         elif cmd == "move_stop":
             self.manual_move_stop()
+        elif cmd == "set_mode":
+            self.set_mode(msg.get("mode", "automatic"))
 
     def return_home(self):
         self._send_stop()
@@ -153,6 +160,7 @@ class PTZController:
             os.unlink(MANUAL_SOCK)
         except FileNotFoundError:
             pass
+
 
 def manual_socket_server(controller):
     try:
@@ -231,9 +239,9 @@ def socket_listener(controller):
 
                     # 2. Extract all complete lines
                     lines = buf.split(b"\n")
-                    
+
                     # 3. The last element is either empty or a partial line
-                    buf = lines.pop() 
+                    buf = lines.pop()
 
                     if not lines:
                         continue
@@ -256,7 +264,7 @@ def socket_listener(controller):
                 except (socket.error, ConnectionResetError):
                     print("Socket connection lost.")
                     break
-                
+
                 # Small sleep to yield to other threads (Pan/Zoom)
                 time.sleep(0.005)
 
@@ -265,6 +273,7 @@ def socket_listener(controller):
         except Exception as e:
             print(f"Socket Error: {e}")
             time.sleep(1)
+
 
 if __name__ == "__main__":
     motor_ctrl = PTZController()

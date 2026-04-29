@@ -133,9 +133,9 @@ PAN_DEG_PER_STEP = 0.5
 
 _PTZ_CMD_TYPES = frozenset({
     "cmd.cam_pan_step",
-    "cmd.cam_tilt_step",
     "cmd.cam_move_start",
     "cmd.cam_move_stop",
+    "cmd.set_cam_mode",
 })
 
 CLASS_ID_RIM = 0
@@ -544,6 +544,14 @@ def _dispatch_ptz_manual_cmd(msg: dict) -> None:
     elif msg_type == "cmd.cam_move_stop":
         _ptz_manual_q.put({"type": "move_stop"})
         _ack(True, {})
+
+    elif msg_type == "cmd.set_cam_mode":
+        mode = payload.get("mode")
+        if mode not in ("manual", "automatic"):
+            _ack(False, error=f"mode must be manual|automatic, got {mode!r}")
+            return
+        _ptz_manual_q.put({"type": "set_mode", "mode": mode})
+        _ack(True)
 
 
 # ---------------------------------------------------------------------------
