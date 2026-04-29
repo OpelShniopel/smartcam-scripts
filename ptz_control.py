@@ -18,10 +18,14 @@ DEBUG          = False
 ENABLE_PAN     = True
 ENABLE_ZOOM    = True
 
-# Manual pan constants — tune these for your rig
-MANUAL_STEP_PX       = 350    # pixel error magnitude sent per discrete step
-MANUAL_STEP_DURATION = 0.15   # seconds to drive for one step
-MANUAL_JOG_PX        = 250    # pixel error magnitude for continuous jog
+# Manual pan constants — must match ESP32 defines
+STEPS_PER_DEG     = 125    # ESP32: STEPS_PER_DEG
+STEP_SIZE_STEPS   = 62     # 0.5° per Go "step" (125 * 0.5)
+PAN_MAX_STEPS     = 11875  # ESP32: PAN_MAX_DEG(95) * STEPS_PER_DEG(125)
+PAN_MIN_STEPS     = -4375  # ESP32: PAN_MIN_DEG(-35) * STEPS_PER_DEG(125)
+MAX_JOG_VEL       = 12000  # ESP32: MAX_VEL_SPS
+JOG_STEPS_PER_SPS = 62     # motor steps/sec per Go stepsPerSecond unit (0.5°/step * 125 steps/°)
+STEP_TIMEOUT_S    = 5.0    # max wait for G command to complete
 
 class PTZController:
     def __init__(self):
@@ -31,10 +35,8 @@ class PTZController:
         if not self.pan and not self.zoom:
             print("WARNING: Both pan and zoom are disabled.")
 
-        self._manual_mode      = False
-        self._jog_stop_event   = threading.Event()
-        self._jog_thread       = None
-        self._manual_lock      = threading.Lock()
+        self._manual_mode = False
+        self._manual_lock = threading.Lock()
 
     def process_detection(self, detections):
         if self._manual_mode:
@@ -46,49 +48,51 @@ class PTZController:
             pan_error_x = self.pan.last_error_x if self.pan else 0.0
             self.zoom.process_detection(detections, pan_error_x=pan_error_x)
 
-    def _stop_jog(self):
-        self._jog_stop_event.set()
-        if self._jog_thread and self._jog_thread.is_alive():
-            self._jog_thread.join(timeout=0.5)
-        self._jog_thread = None
-        self._jog_stop_event.clear()
-        if self.pan:
-            self.pan._stop_jog()
+    def _send_stop(self):
+        if self.pan and self.pan.ser_p:
+            try:
+                self.pan.ser_p.write(b"L\n")
+            except OSError:
+                pass
 
     def manual_pan_step(self, direction, steps=1):
         with self._manual_lock:
-            self._stop_jog()
             self._manual_mode = True
-            if not self.pan:
+            if not self.pan or not self.pan.ser_p:
                 return
+            ser = self.pan.ser_p
+            # Hard stop, then query current position
+            ser.write(b"S\n")
+            time.sleep(0.05)
+            ser.reset_input_buffer()
+            ser.write(b"?\n")
+            raw = ser.readline().decode("utf-8", errors="ignore").strip()
+            try:
+                current = int(raw[1:]) if raw.startswith("P") else 0
+            except ValueError:
+                current = 0
             sign = 1 if direction == "right" else -1
-            self.pan.send_command(MANUAL_STEP_PX * sign)
-            time.sleep(MANUAL_STEP_DURATION * steps)
-            self.pan._stop_jog()
+            target = max(PAN_MIN_STEPS, min(PAN_MAX_STEPS,
+                         current + sign * steps * STEP_SIZE_STEPS))
+            ser.write(f"G{target}\n".encode())
+            deadline = time.time() + STEP_TIMEOUT_S
+            while time.time() < deadline:
+                resp = ser.readline().decode("utf-8", errors="ignore").strip()
+                if resp == "OK":
+                    break
 
     def manual_move_start(self, direction, steps_per_second=10):
-        if direction in ("up", "down"):
-            return
         with self._manual_lock:
-            self._stop_jog()
             self._manual_mode = True
-            if not self.pan:
+            if not self.pan or not self.pan.ser_p:
                 return
             sign = 1 if direction == "right" else -1
-            interval = max(0.033, 1.0 / max(1, steps_per_second))
-            self._jog_stop_event.clear()
-
-        def _jog():
-            while not self._jog_stop_event.is_set():
-                self.pan.send_command(MANUAL_JOG_PX * sign)
-                time.sleep(interval)
-
-        self._jog_thread = threading.Thread(target=_jog, daemon=True, name="ptz-manual-jog")
-        self._jog_thread.start()
+            vel  = min(MAX_JOG_VEL, steps_per_second * JOG_STEPS_PER_SPS)
+            self.pan.ser_p.write(f"V{sign * vel}\n".encode())
 
     def manual_move_stop(self):
         with self._manual_lock:
-            self._stop_jog()
+            self._send_stop()
             self._manual_mode = False
 
     def process_manual_command(self, msg):
@@ -105,7 +109,7 @@ class PTZController:
             self.manual_move_stop()
 
     def return_home(self):
-        self._stop_jog()
+        self._send_stop()
         self._manual_mode = False
         if self.pan:
             self.pan.return_home()

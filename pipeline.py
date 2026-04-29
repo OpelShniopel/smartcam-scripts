@@ -128,8 +128,8 @@ PTZ_CONTROL_SOCK = "/tmp/ptz_control.sock"
 PTZ_MANUAL_SOCK  = "/tmp/ptz_manual.sock"
 HTTP_PORT        = 9101
 
-# Degrees added to the estimated pan position per manual step (tune per rig)
-PAN_DEG_PER_STEP = 1.0
+# Degrees per Go "step" — matches ESP32: STEP_SIZE_STEPS(62) / STEPS_PER_DEG(125)
+PAN_DEG_PER_STEP = 0.5
 
 _PTZ_CMD_TYPES = frozenset({
     "cmd.cam_pan_step",
