@@ -1,0 +1,43 @@
+DEFAULT_SCORE_STATE = {
+    "home_name": "HOME",
+    "away_name": "AWAY",
+    "home_points": 0,
+    "away_points": 0,
+    "home_fouls": 0,
+    "away_fouls": 0,
+    "home_timeouts": 3,
+    "away_timeouts": 3,
+    "quarter": 1,
+    "clock": "10:00",
+    "visible": False,
+    "game_id": 0,
+    "updated_at": 0,
+    "milestone": None,
+    "timeout_stats": None,
+    "blitz_active": False,
+    "home_blitz_score": 0,
+    "away_blitz_score": 0,
+    "home_hot_streak": False,
+    "away_hot_streak": False,
+    "sport_code": "",
+    "game_finished": False,
+    "winner": "",
+    "end_stats": None,
+    "home_inner_scores": 0,
+    "home_middle_scores": 0,
+    "home_outer_scores": 0,
+    "home_interceptions": 0,
+    "away_inner_scores": 0,
+    "away_middle_scores": 0,
+    "away_outer_scores": 0,
+    "away_interceptions": 0,
+}
+
+def default_score_state() -> dict:
+    return DEFAULT_SCORE_STATE.copy()
+
+
+def truncate_team_name(field: str, value, *, log_prefix: str) -> str:
+    text = str(value)
+    first_word = text.split()[0] if text.strip() else text
+    return first_word
