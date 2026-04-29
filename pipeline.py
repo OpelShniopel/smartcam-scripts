@@ -2,10 +2,9 @@
 """
 DeepStream Basketball Detection Pipeline
 ==========================================
-Fixed and PTZ cameras with clean RTSP streams and optional AI RTSP streams via
-MediaMTX.
-Optional live-streaming to YouTube/Twitch/Kick is handled by a separate RTMP
-worker with scoreboard overlay.
+Fixed and PTZ cameras with a switched clean RTSP stream and optional AI RTSP
+streams via MediaMTX. Optional live-streaming to YouTube/Twitch/Kick is
+handled by a separate RTMP worker with scoreboard overlay.
 
 KNOWN ISSUES / HISTORY:
   - JetPack 6.2 + DeepStream 7.1 bug: cudaErrorIllegalAddress (700) in
@@ -24,9 +23,8 @@ KNOWN ISSUES / HISTORY:
 
 STREAM DESIGN:
   Fixed camera + PTZ camera:
-    - clean branch: 1080p high quality low latency → WebRTC tablet viewing
-    - AI branch:    720p with bounding boxes when enabled → debug only
-    - stream branch: 1080p internal RTSP feed for the external RTMP worker
+    - program branch: switched 1080p clean feed → WebRTC tablet viewing + RTMP worker input
+    - AI branch:      720p with bounding boxes when enabled → debug only
 
 SERVICES (for Go backend):
   Unix socket  /tmp/smartcam.sock  — Go bridge, bidirectional newline-delimited JSON
@@ -82,6 +80,7 @@ from camera_config import (
     PTZ_CAMERA_DEVICE,
 )
 from exit_codes import ProcessExitCode
+from gst_utils import force_key_unit
 from runtime_paths import (
     SCOREBOARD_PNG,
     SCORE_STATE_FILE,
@@ -94,9 +93,7 @@ from runtime_paths import (
     STREAM_WORKER_WRAPPER,
 )
 from rtmp_elements import (
-    configure_rtmp_branch,
     foul_png_path,
-    make_rtmp_elements,
     populate_timeout_texts,
     TIMEOUT_TEXT_KEYS,
     update_blitzball_end_stats,
@@ -142,6 +139,8 @@ ENABLE_PTZ_CAMERA = True
 ENABLE_AI_GLOBAL = True
 ENABLE_FIXED_CAMERA_AI = True
 ENABLE_PTZ_CAMERA_AI = False
+ENABLE_FIXED_CAMERA_AI_STREAM = True
+ENABLE_PTZ_CAMERA_AI_STREAM = True
 
 # Terminal FPS metrics. Disable the global flag to silence all main-pipeline
 # FPS logs, or disable the AI flag to keep other future FPS metrics available.
@@ -195,12 +194,35 @@ def _ai_enabled(cam_label: str) -> bool:
     return False
 
 
-# Clean branch encoder settings — tuned for low latency local WebRTC viewing
-CLEAN_BITRATE = 8000
-CLEAN_KEYINT = 15
-CLEAN_THREADS = 2
-CLEAN_PRESET = "ultrafast"
-CLEAN_TUNE = "zerolatency"
+def _ai_stream_enabled(cam_label: str) -> bool:
+    if not _ai_enabled(cam_label):
+        return False
+    cam = _pipeline_camera_label(cam_label)
+    if cam == "CAM0":
+        return ENABLE_FIXED_CAMERA_AI_STREAM
+    if cam == "CAM2":
+        return ENABLE_PTZ_CAMERA_AI_STREAM
+    return False
+
+
+# Program outputs:
+# - program_clean: H264 preview for browser WebRTC with restamped timestamps.
+# - program_stream: H264 source for the RTMP worker.
+PROGRAM_CLEAN_BITRATE = 6000
+PROGRAM_CLEAN_KEYINT = 15
+PROGRAM_CLEAN_THREADS = 1
+PROGRAM_CLEAN_PRESET = "ultrafast"
+PROGRAM_CLEAN_TUNE = "zerolatency"
+PROGRAM_WEBRTC_RTSP_PATH = "program_clean"
+PROGRAM_STREAM_RTSP_PATH = "program_stream"
+PROGRAM_WEBRTC_WIDTH = 1920
+PROGRAM_WEBRTC_HEIGHT = 1080
+PROGRAM_WEBRTC_BITRATE = 6000
+PROGRAM_WEBRTC_KEYINT = 6
+PROGRAM_WEBRTC_THREADS = 1
+PROGRAM_PREVIEW_FRAME_DURATION_NS = Gst.SECOND // 30
+PROGRAM_SWITCH_DEBOUNCE_MS = 50
+PROGRAM_SWITCH_SETTLE_MS = 250
 
 # AI branch encoder settings
 AI_BITRATE = 3500
@@ -222,6 +244,20 @@ RTMP_BITRATE = 6800
 
 # Encoder references populated by build_pipeline() and reported by /status.
 _encoders: dict[str, Gst.Element] = {}
+_program_selector: Gst.Element | None = None
+_program_selector_pads: dict[str, Gst.Pad] = {}
+_program_enc: Gst.Element | None = None
+_program_preview_enc: Gst.Element | None = None
+_program_active_camera: str = PTZ_CAMERA
+_program_previous_camera: str = PTZ_CAMERA
+_program_switch_seq = 0
+_program_last_switch_at_ms = 0
+_last_program_cfg: dict | None = None
+_program_switch_lock = threading.Lock()
+_program_switch_requested_camera: str | None = None
+_program_switch_timer_queued = False
+_program_switch_settle_until_monotonic = 0.0
+_program_preview_frame_index = 0
 
 # ---------------------------------------------------------------------------
 # RTMP stream status tracking
@@ -384,8 +420,8 @@ def _update_osd_texts(state: dict) -> None:
     timeout_stats = state.get("timeout_stats")
     now_ms = int(time.time() * 1000)
     timeout_active = (
-        isinstance(timeout_stats, dict)
-        and timeout_stats.get("show_until", 0) > now_ms
+            isinstance(timeout_stats, dict)
+            and timeout_stats.get("show_until", 0) > now_ms
     )
     timeout_bg = els.get("osd_timeout_bg")
     if timeout_active:
@@ -658,6 +694,7 @@ def _dispatch_cmd(msg: dict) -> None:
             _ack("switch_cam", False, err)
             return
         _persist_stream_worker_config(active_camera=normalized)
+        _request_program_camera_switch(normalized)
         running = _is_stream_worker_running()
         print(f"[cmd] switch_cam -> {normalized} (running={running})")
         _ack("switch_cam", True)
@@ -699,40 +736,47 @@ def _push_state() -> None:
     url = read_stream_url()
     worker_running = _is_stream_worker_running()
     worker_cfg = _read_stream_worker_config()
+    active_camera = (
+        _program_active_camera
+        if _program_selector is not None
+        else worker_cfg.get("activeCamera", PTZ_CAMERA)
+    )
 
     webrtc = {}
     internal_streams = {}
+    program_clean_rtsp_url = f"rtsp://{JETSON_HOST}:8554/{PROGRAM_WEBRTC_RTSP_PATH}"
+    program_clean_webrtc_url = f"http://{JETSON_HOST}:8889/{PROGRAM_WEBRTC_RTSP_PATH}"
+    program_stream_rtsp_url = f"rtsp://{JETSON_HOST}:8554/{PROGRAM_STREAM_RTSP_PATH}"
+    switch_meta = {
+        "seq": _program_switch_seq,
+        "at_ms": _program_last_switch_at_ms,
+        "active_camera": active_camera,
+        "previous_camera": _program_previous_camera,
+    }
 
-    if ENABLE_FIXED_CAMERA:
-        fixed_clean_url = f"http://{JETSON_HOST}:8889/camera0_clean"
-        fixed_stream_url = f"rtsp://{JETSON_HOST}:8554/camera0_stream"
-        webrtc["fixed_clean"] = fixed_clean_url
-        webrtc["cam0_clean"] = fixed_clean_url
-        if _ai_enabled("CAM0"):
-            fixed_ai_url = f"http://{JETSON_HOST}:8889/camera0_ai"
-            webrtc["fixed_ai"] = fixed_ai_url
-            webrtc["cam0_ai"] = fixed_ai_url
-        internal_streams["fixed_stream"] = fixed_stream_url
-        internal_streams["cam0_stream"] = fixed_stream_url
+    webrtc["program_clean"] = program_clean_webrtc_url
+    internal_streams["program_clean"] = program_clean_rtsp_url
+    internal_streams["program_stream"] = program_stream_rtsp_url
 
-    if ENABLE_PTZ_CAMERA:
-        ptz_clean_url = f"http://{JETSON_HOST}:8889/camera2_clean"
-        ptz_stream_url = f"rtsp://{JETSON_HOST}:8554/camera2_stream"
-        webrtc["ptz_clean"] = ptz_clean_url
-        webrtc["cam2_clean"] = ptz_clean_url
-        if _ai_enabled("CAM2"):
-            ptz_ai_url = f"http://{JETSON_HOST}:8889/camera2_ai"
-            webrtc["ptz_ai"] = ptz_ai_url
-            webrtc["cam2_ai"] = ptz_ai_url
-        internal_streams["ptz_stream"] = ptz_stream_url
-        internal_streams["cam2_stream"] = ptz_stream_url
+    if ENABLE_FIXED_CAMERA and _ai_stream_enabled("CAM0"):
+        fixed_ai_url = f"http://{JETSON_HOST}:8889/camera0_ai"
+        webrtc["fixed_ai"] = fixed_ai_url
+        webrtc["cam0_ai"] = fixed_ai_url
+
+    if ENABLE_PTZ_CAMERA and _ai_stream_enabled("CAM2"):
+        ptz_ai_url = f"http://{JETSON_HOST}:8889/camera2_ai"
+        webrtc["ptz_ai"] = ptz_ai_url
+        webrtc["cam2_ai"] = ptz_ai_url
 
     _go_bridge_out_q.put({
         "type": "state",
         "streaming": bool(url) and worker_running,
         "stream_configured": bool(url),
         "stream_worker_running": worker_running,
-        "stream_active_camera": worker_cfg.get("activeCamera", PTZ_CAMERA),
+        "stream_active_camera": active_camera,
+        "stream_switch_seq": _program_switch_seq,
+        "stream_switch_at_ms": _program_last_switch_at_ms,
+        "stream_previous_camera": _program_previous_camera,
         "model": MODEL_NAME,
         "available_models": AVAILABLE_MODELS,
         "enabled_cameras": {
@@ -747,8 +791,15 @@ def _push_state() -> None:
             "cam0": _ai_enabled("CAM0"),
             "cam2": _ai_enabled("CAM2"),
         },
+        "enabled_ai_streams": {
+            FIXED_CAMERA: _ai_stream_enabled("CAM0"),
+            PTZ_CAMERA: _ai_stream_enabled("CAM2"),
+            "cam0": _ai_stream_enabled("CAM0"),
+            "cam2": _ai_stream_enabled("CAM2"),
+        },
         "webrtc": webrtc,
         "internal_streams": internal_streams,
+        "program_switch": switch_meta,
     })
 
 
@@ -791,13 +842,16 @@ class ControlHandler(BaseHTTPRequestHandler):
             url = read_stream_url()
             with score_lock:
                 score_visible = score_state["visible"]
-            self._json(200, {
+            payload = {
                 "alive": True,
                 "pid": os.getpid(),
                 "streaming": bool(url) and _is_stream_worker_running(),
                 "stream_configured": bool(url),
                 "stream_worker_running": _is_stream_worker_running(),
-                "stream_active_camera": _read_stream_worker_config().get("activeCamera", PTZ_CAMERA),
+                "stream_active_camera": _program_active_camera,
+                "stream_switch_seq": _program_switch_seq,
+                "stream_switch_at_ms": _program_last_switch_at_ms,
+                "stream_previous_camera": _program_previous_camera,
                 "rtmp_url": url or "",
                 "score_overlay": score_visible,
                 "go_bridge_sock": GO_BRIDGE_SOCK,
@@ -805,41 +859,45 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "unix_sock": GO_BRIDGE_SOCK,
                 "pycam_sock": PTZ_CONTROL_SOCK,
                 "encoders": list(_encoders.keys()),
+                "program": {
+                    "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_WEBRTC_RTSP_PATH}",
+                    "webrtc_clean": f"http://{JETSON_HOST}:8889/{PROGRAM_WEBRTC_RTSP_PATH}",
+                    "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_STREAM_RTSP_PATH}",
+                    "active_camera": _program_active_camera,
+                    "switch_seq": _program_switch_seq,
+                    "switch_at_ms": _program_last_switch_at_ms,
+                    "previous_camera": _program_previous_camera,
+                },
                 "cameras": {
                     FIXED_CAMERA: {
                         "device": FIXED_CAMERA_DEVICE,
-                        "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
-                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
-                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
-                        "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
-                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
                     "cam0": {
                         "device": FIXED_CAMERA_DEVICE,
-                        "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera0_clean",
-                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
-                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera0_stream",
-                        "webrtc_clean": f"http://{JETSON_HOST}:8889/camera0_clean",
-                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                     },
                     PTZ_CAMERA: {
                         "device": PTZ_CAMERA_DEVICE,
-                        "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera2_clean",
-                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
-                        "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
-                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
-                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera2_stream",
                     },
                     "cam2": {
                         "device": PTZ_CAMERA_DEVICE,
-                        "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/camera2_clean",
-                        "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
-                        "webrtc_clean": f"http://{JETSON_HOST}:8889/camera2_clean",
-                        "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
-                        "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/camera2_stream",
                     },
                 },
-            })
+            }
+            if _ai_stream_enabled("CAM0"):
+                ai_urls = {
+                    "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
+                    "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
+                }
+                payload["cameras"][FIXED_CAMERA].update(ai_urls)
+                payload["cameras"]["cam0"].update(ai_urls)
+            if _ai_stream_enabled("CAM2"):
+                ai_urls = {
+                    "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
+                    "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
+                }
+                payload["cameras"][PTZ_CAMERA].update(ai_urls)
+                payload["cameras"]["cam2"].update(ai_urls)
+            self._json(200, payload)
         else:
             self._json(404, {"error": "not found"})
 
@@ -1001,6 +1059,71 @@ def _capsfilter(name: str, caps_str: str) -> Gst.Element:
     el = _make("capsfilter", name)
     el.set_property("caps", Gst.Caps.from_string(caps_str))
     return el
+
+
+def _set_if_supported(el: Gst.Element, prop: str, value) -> None:
+    if el.find_property(prop) is not None:
+        el.set_property(prop, value)
+
+
+def _request_program_camera_switch(active_camera: str) -> None:
+    global _program_switch_requested_camera, _program_switch_timer_queued
+
+    normalized = _normalize_stream_camera(active_camera) or PTZ_CAMERA
+
+    schedule_timer = False
+    with _program_switch_lock:
+        _program_switch_requested_camera = normalized
+        if not _program_switch_timer_queued:
+            _program_switch_timer_queued = True
+            schedule_timer = True
+
+    if schedule_timer:
+        GLib.idle_add(_queue_program_camera_switch_timer)
+
+
+def _queue_program_camera_switch_timer() -> bool:
+    delay_ms = PROGRAM_SWITCH_DEBOUNCE_MS
+
+    with _program_switch_lock:
+        remaining_ms = max(
+            0,
+            int((_program_switch_settle_until_monotonic - time.monotonic()) * 1000),
+        )
+        if remaining_ms > delay_ms:
+            delay_ms = remaining_ms
+
+    GLib.timeout_add(delay_ms, _drain_program_camera_switch_request)
+    return False
+
+
+def _drain_program_camera_switch_request() -> bool:
+    global _program_switch_requested_camera, _program_switch_timer_queued
+    global _program_switch_settle_until_monotonic
+
+    requested_camera: str | None = None
+
+    with _program_switch_lock:
+        remaining_ms = max(
+            0,
+            int((_program_switch_settle_until_monotonic - time.monotonic()) * 1000),
+        )
+        if remaining_ms > 0:
+            return True
+        else:
+            requested_camera = _program_switch_requested_camera
+            _program_switch_requested_camera = None
+            _program_switch_timer_queued = False
+
+    if requested_camera is not None:
+        previous_switch_seq = _program_switch_seq
+        _switch_program_camera(requested_camera)
+        if _program_switch_seq != previous_switch_seq:
+            with _program_switch_lock:
+                _program_switch_settle_until_monotonic = (
+                        time.monotonic() + (PROGRAM_SWITCH_SETTLE_MS / 1000.0)
+                )
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1490,6 +1613,7 @@ def _build_camera_source(pipeline, device: str, suffix: str):
     tee = _make("tee", f"tee{suffix}")
 
     src.set_property("device", device)
+    _set_if_supported(src, "do-timestamp", True)
     dec.set_property("mjpeg", 1)
 
     for el in (src, caps_src, jparse, dec, conv_src, caps_nvmm, tee):
@@ -1519,6 +1643,16 @@ def _configure_x264_encoder(
     enc.set_property("bitrate", bitrate)
     enc.set_property("key-int-max", keyint)
     enc.set_property("threads", threads)
+    _set_if_supported(enc, "byte-stream", True)
+    _set_if_supported(enc, "bframes", 0)
+    _set_if_supported(enc, "b-adapt", False)
+    _set_if_supported(enc, "rc-lookahead", 0)
+    _set_if_supported(enc, "sync-lookahead", 0)
+    _set_if_supported(enc, "cabac", False)
+    _set_if_supported(enc, "dct8x8", False)
+    _set_if_supported(enc, "mb-tree", False)
+    _set_if_supported(enc, "ref", 1)
+    _set_if_supported(enc, "sliced-threads", True)
 
 
 def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
@@ -1545,6 +1679,7 @@ def _build_simple_rtsp_encode_branch(
     q.set_property("max-size-bytes", 0)
     q.set_property("max-size-time", 0)
     q.set_property("leaky", 2)
+    _set_if_supported(parse, "config-interval", -1)
     _configure_rtsp_sink(sink, rtsp_path)
 
     for el in (q, conv, caps, enc, parse, sink):
@@ -1552,26 +1687,6 @@ def _build_simple_rtsp_encode_branch(
 
     _tee_branch(tee, q)
     _link_many(q, conv, caps, enc, parse, sink)
-
-    return enc
-
-
-# ---------------------------------------------------------------------------
-# Clean branch
-# ---------------------------------------------------------------------------
-def _build_clean_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Element:
-    enc = _build_simple_rtsp_encode_branch(
-        pipeline, tee, suffix, "clean", rtsp_path, caps_name=f"caps{suffix}_i420",
-    )
-
-    _configure_x264_encoder(
-        enc,
-        tune=CLEAN_TUNE,
-        preset=CLEAN_PRESET,
-        bitrate=CLEAN_BITRATE,
-        keyint=CLEAN_KEYINT,
-        threads=CLEAN_THREADS,
-    )
 
     return enc
 
@@ -1588,23 +1703,41 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     mux = _make("nvstreammux", f"mux{suffix}")
     pgie = _make("nvinfer", f"pgie{suffix}")
     tracker = _make("nvtracker", f"tracker{suffix}")
-    conv_pre = _make_nvconv(f"conv{suffix}_pre")
-    nvosd = _make("nvdsosd", f"nvosd{suffix}")
-    conv_post = _make_nvconv(f"conv{suffix}_post")
-    caps_post = _capsfilter(f"caps{suffix}_post", "video/x-raw,format=I420")
-    q_post = _make("queue", f"q{suffix}_post")
-    enc = _make("x264enc", f"enc{suffix}_ai")
-    parse = _make("h264parse", f"parse{suffix}_ai")
-    parse_tee = _make("tee", f"tee{suffix}_ai_parse")
-    q_rtsp = _make("queue", f"q{suffix}_ai_rtsp")
-    sink = _make("rtspclientsink", f"sink{suffix}_ai")
+    stream_enabled = _ai_stream_enabled(cam_label)
+    recording_enabled = _recording_enabled(cam_label)
+    debug_video_enabled = stream_enabled or recording_enabled
+
+    conv_pre = None
+    nvosd = None
+    conv_post = None
+    caps_post = None
+    q_post = None
+    enc = None
+    parse = None
+    parse_tee = None
+    q_rtsp = None
+    sink = None
+    drain = None
 
     q_rec = None
     rec = None
-    recording_enabled = _recording_enabled(cam_label)
     if recording_enabled:
         q_rec = _make("queue", f"q{suffix}_ai_record")
         rec = _make("splitmuxsink", f"rec{suffix}_ai")
+    if debug_video_enabled:
+        conv_pre = _make_nvconv(f"conv{suffix}_pre")
+        nvosd = _make("nvdsosd", f"nvosd{suffix}")
+        conv_post = _make_nvconv(f"conv{suffix}_post")
+        caps_post = _capsfilter(f"caps{suffix}_post", "video/x-raw,format=I420")
+        q_post = _make("queue", f"q{suffix}_post")
+        enc = _make("x264enc", f"enc{suffix}_ai")
+        parse = _make("h264parse", f"parse{suffix}_ai")
+        parse_tee = _make("tee", f"tee{suffix}_ai_parse")
+        if stream_enabled:
+            q_rtsp = _make("queue", f"q{suffix}_ai_rtsp")
+            sink = _make("rtspclientsink", f"sink{suffix}_ai")
+    else:
+        drain = _make("fakesink", f"sink{suffix}_ai_process")
 
     mux.set_property("width", 1280)
     mux.set_property("height", 720)
@@ -1624,22 +1757,25 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     tracker.set_property("gpu-id", 0)
     tracker.set_property("display-tracking-id", 1)
 
-    nvosd.set_property("process-mode", 1)
+    if nvosd is not None:
+        nvosd.set_property("process-mode", 1)
 
     q_ai.set_property("max-size-buffers", 2)
     q_ai.set_property("max-size-bytes", 0)
     q_ai.set_property("max-size-time", 0)
     q_ai.set_property("leaky", 2)
 
-    q_post.set_property("max-size-buffers", 2)
-    q_post.set_property("max-size-bytes", 0)
-    q_post.set_property("max-size-time", 0)
-    q_post.set_property("leaky", 2)
+    if q_post is not None:
+        q_post.set_property("max-size-buffers", 2)
+        q_post.set_property("max-size-bytes", 0)
+        q_post.set_property("max-size-time", 0)
+        q_post.set_property("leaky", 2)
 
-    q_rtsp.set_property("max-size-buffers", 2)
-    q_rtsp.set_property("max-size-bytes", 0)
-    q_rtsp.set_property("max-size-time", 0)
-    q_rtsp.set_property("leaky", 2)
+    if q_rtsp is not None:
+        q_rtsp.set_property("max-size-buffers", 2)
+        q_rtsp.set_property("max-size-bytes", 0)
+        q_rtsp.set_property("max-size-time", 0)
+        q_rtsp.set_property("leaky", 2)
 
     if q_rec is not None:
         q_rec.set_property("max-size-buffers", RECORD_QUEUE_BUFFERS)
@@ -1647,15 +1783,21 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         q_rec.set_property("max-size-time", 0)
         q_rec.set_property("leaky", 2)
 
-    _configure_x264_encoder(
-        enc,
-        tune=AI_TUNE,
-        preset=AI_PRESET,
-        bitrate=AI_BITRATE,
-        keyint=AI_KEYINT,
-        threads=AI_THREADS,
-    )
-    _configure_rtsp_sink(sink, rtsp_path)
+    if enc is not None:
+        _configure_x264_encoder(
+            enc,
+            tune=AI_TUNE,
+            preset=AI_PRESET,
+            bitrate=AI_BITRATE,
+            keyint=AI_KEYINT,
+            threads=AI_THREADS,
+        )
+    if sink is not None:
+        _configure_rtsp_sink(sink, rtsp_path)
+    if drain is not None:
+        _set_if_supported(drain, "sync", False)
+        _set_if_supported(drain, "async", False)
+        _set_if_supported(drain, "enable-last-sample", False)
 
     if rec is not None:
         rec.set_property("location", _recording_location_pattern(cam_label))
@@ -1664,9 +1806,17 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         rec.set_property("send-keyframe-requests", True)
         rec.set_property("async-finalize", True)
 
-    elements = [q_ai, conv_ai, caps_ai, mux, pgie, tracker,
-                conv_pre, nvosd, conv_post, caps_post, q_post,
-                enc, parse, parse_tee, q_rtsp, sink]
+    elements = [q_ai, conv_ai, caps_ai, mux, pgie, tracker]
+    if debug_video_enabled:
+        elements.extend([
+            conv_pre, nvosd, conv_post, caps_post, q_post,
+            enc, parse, parse_tee,
+        ])
+        if q_rtsp is not None and sink is not None:
+            elements.extend([q_rtsp, sink])
+    elif drain is not None:
+        elements.append(drain)
+
     if q_rec is not None and rec is not None:
         elements.extend([q_rec, rec])
 
@@ -1683,105 +1833,283 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         sys.stderr.write(f"ERROR: Failed to link caps{suffix}_ai -> mux{suffix}.sink_0\n")
         sys.exit(1)
 
-    _link_many(
-        mux, pgie, tracker, conv_pre, nvosd, conv_post,
-        caps_post, q_post, enc, parse, parse_tee,
-    )
-
-    _tee_branch(parse_tee, q_rtsp)
-    _link(q_rtsp, sink)
-
-    if q_rec is not None and rec is not None:
-        _tee_branch(parse_tee, q_rec)
-        _link_src_to_request_pad(q_rec, rec, "video", f"{_stream_camera_name(cam_label)} recording")
-        print(
-            f"{_stream_camera_name(cam_label)} AI recording enabled -> {RECORDINGS_DIR} "
-            f"({RECORD_SEGMENT_SECONDS}s segments, .{RECORD_FILE_EXTENSION})"
+    if debug_video_enabled:
+        _link_many(
+            mux, pgie, tracker, conv_pre, nvosd, conv_post,
+            caps_post, q_post, enc, parse, parse_tee,
         )
+
+        if q_rtsp is not None and sink is not None:
+            _tee_branch(parse_tee, q_rtsp)
+            _link(q_rtsp, sink)
+
+        if q_rec is not None and rec is not None:
+            _tee_branch(parse_tee, q_rec)
+            _link_src_to_request_pad(q_rec, rec, "video", f"{_stream_camera_name(cam_label)} recording")
+            print(
+                f"{_stream_camera_name(cam_label)} AI recording enabled -> {RECORDINGS_DIR} "
+                f"({RECORD_SEGMENT_SECONDS}s segments, .{RECORD_FILE_EXTENSION})"
+            )
+        else:
+            print(f"{_stream_camera_name(cam_label)} AI recording disabled")
     else:
-        print(f"{_stream_camera_name(cam_label)} AI recording disabled")
+        _link_many(mux, pgie, tracker, drain)
+        print(f"{_stream_camera_name(cam_label)} AI debug stream disabled")
 
-    return pgie, enc
+    return pgie, enc if stream_enabled else None
 
 
-# ---------------------------------------------------------------------------
-# Internal camera stream branch for external RTMP worker
-# ---------------------------------------------------------------------------
-def _build_internal_stream_branch(pipeline, tee, suffix: str, rtsp_path: str) -> Gst.Element:
-    enc = _build_simple_rtsp_encode_branch(
-        pipeline, tee, suffix, "streamsrc", rtsp_path,
+def _link_tee_to_program_selector(
+        pipeline: Gst.Pipeline,
+        tee: Gst.Element,
+        suffix: str,
+        selector: Gst.Element,
+        camera_name: str,
+) -> None:
+    q = _make("queue", f"q{suffix}_program_sel")
+    caps = _capsfilter(
+        f"caps{suffix}_program_sel",
+        "video/x-raw(memory:NVMM),format=NV12,width=1920,height=1080,framerate=30/1",
     )
+
+    q.set_property("max-size-buffers", 2)
+    q.set_property("max-size-bytes", 0)
+    q.set_property("max-size-time", 0)
+    q.set_property("leaky", 2)
+
+    for el in (q, caps):
+        pipeline.add(el)
+
+    _tee_branch(tee, q)
+    _link(q, caps)
+
+    src_pad = _get_static_pad(caps, "src")
+    sel_pad = selector.request_pad_simple("sink_%u")
+    if sel_pad is None:
+        sys.stderr.write(f"ERROR: Unable to request selector sink pad for {camera_name}\n")
+        sys.exit(1)
+    if src_pad.link(sel_pad) != Gst.PadLinkReturn.OK:
+        sys.stderr.write(f"ERROR: Failed to link {camera_name} to program selector\n")
+        sys.exit(1)
+
+    _program_selector_pads[camera_name] = sel_pad
+
+
+def _switch_program_camera(active_camera: str, *, force_keyframe: bool = True) -> None:
+    global _program_active_camera, _program_previous_camera
+    global _program_switch_seq, _program_last_switch_at_ms
+
+    normalized = _normalize_stream_camera(active_camera) or PTZ_CAMERA
+    available = set(_program_selector_pads)
+    if normalized not in available:
+        if PTZ_CAMERA in available:
+            normalized = PTZ_CAMERA
+        elif FIXED_CAMERA in available:
+            normalized = FIXED_CAMERA
+        else:
+            return
+
+    pad = _program_selector_pads.get(normalized)
+    if _program_selector is None or pad is None:
+        return
+
+    current = _program_selector.get_property("active-pad")
+    if current == pad and _program_active_camera == normalized:
+        return
+
+    previous_camera = _program_active_camera
+    _program_selector.set_property("active-pad", pad)
+    _program_previous_camera = previous_camera
+    _program_active_camera = normalized
+    _program_switch_seq += 1
+    _program_last_switch_at_ms = int(time.time() * 1000)
+    print(f"[program] switched source -> {normalized}")
+    if force_keyframe:
+        force_key_unit(_program_enc, PROGRAM_STREAM_RTSP_PATH, "program-stream")
+        force_key_unit(_program_preview_enc, PROGRAM_WEBRTC_RTSP_PATH, "program-preview")
+    _push_state()
+
+
+def _poll_program_config() -> bool:
+    global _last_program_cfg
+
+    cfg = _read_stream_worker_config()
+    if cfg != _last_program_cfg:
+        previous = _last_program_cfg or {}
+        _last_program_cfg = dict(cfg)
+        if cfg.get("activeCamera") != previous.get("activeCamera"):
+            _request_program_camera_switch(cfg.get("activeCamera", PTZ_CAMERA))
+        else:
+            _push_state()
+    return True
+
+
+def _program_preview_restamp_probe(_pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
+    global _program_preview_frame_index
+
+    buf = info.get_buffer()
+    if buf is None:
+        return Gst.PadProbeReturn.OK
+
+    pts = _program_preview_frame_index * PROGRAM_PREVIEW_FRAME_DURATION_NS
+    _program_preview_frame_index += 1
+    buf.pts = pts
+    buf.dts = pts
+    buf.duration = PROGRAM_PREVIEW_FRAME_DURATION_NS
+
+    return Gst.PadProbeReturn.OK
+
+
+def _build_program_clean_branch(
+        pipeline: Gst.Pipeline,
+        camera_tees: dict[str, Gst.Element],
+) -> tuple[Gst.Element, Gst.Element]:
+    global _program_selector, _program_enc, _program_preview_enc, _last_program_cfg
+
+    selector = _make("input-selector", "program_selector")
+    tee = _make("tee", "tee_program_outputs")
+
+    q_stream = _make("queue", "q_program_stream")
+    conv_stream = _make_nvconv("conv_program_stream")
+    caps_stream = _capsfilter("caps_program_stream_i420", "video/x-raw,format=I420")
+    enc_stream = _make("x264enc", "enc_program_stream")
+    h264_stream_caps = _capsfilter(
+        "caps_program_stream_h264",
+        "video/x-h264,profile=constrained-baseline,stream-format=byte-stream,alignment=au",
+    )
+    parse_stream = _make("h264parse", "parse_program_stream")
+    sink_stream = _make("rtspclientsink", "sink_program_stream")
+
+    q_preview = _make("queue", "q_program_clean")
+    conv_preview = _make_nvconv("conv_program_clean")
+    caps_preview = _capsfilter(
+        "caps_program_clean_i420",
+        (
+            "video/x-raw,format=I420,"
+            f"width={PROGRAM_WEBRTC_WIDTH},height={PROGRAM_WEBRTC_HEIGHT},"
+            "framerate=30/1"
+        ),
+    )
+    enc_preview = _make("x264enc", "enc_program_clean")
+    h264_preview_caps = _capsfilter(
+        "caps_program_clean_h264",
+        "video/x-h264,profile=constrained-baseline,stream-format=byte-stream,alignment=au",
+    )
+    parse_preview = _make("h264parse", "parse_program_clean")
+    sink_preview = _make("rtspclientsink", "sink_program_clean")
+
+    selector.set_property("sync-streams", True)
+    _set_if_supported(selector, "cache-buffers", True)
+    _set_if_supported(selector, "sync-mode", 1)
+    _set_if_supported(selector, "drop-backwards", True)
+
+    for queue in (q_stream, q_preview):
+        queue.set_property("max-size-buffers", 2)
+        queue.set_property("max-size-bytes", 0)
+        queue.set_property("max-size-time", 0)
+        queue.set_property("leaky", 2)
 
     _configure_x264_encoder(
-        enc,
-        tune=CLEAN_TUNE,
-        preset=CLEAN_PRESET,
-        bitrate=10000,
-        keyint=CLEAN_KEYINT,
-        threads=CLEAN_THREADS,
+        enc_stream,
+        tune=PROGRAM_CLEAN_TUNE,
+        preset=PROGRAM_CLEAN_PRESET,
+        bitrate=PROGRAM_CLEAN_BITRATE,
+        keyint=PROGRAM_CLEAN_KEYINT,
+        threads=PROGRAM_CLEAN_THREADS,
     )
+    _set_if_supported(parse_stream, "config-interval", -1)
+    _configure_rtsp_sink(sink_stream, PROGRAM_STREAM_RTSP_PATH)
 
-    return enc
+    _configure_x264_encoder(
+        enc_preview,
+        tune=PROGRAM_CLEAN_TUNE,
+        preset=PROGRAM_CLEAN_PRESET,
+        bitrate=PROGRAM_WEBRTC_BITRATE,
+        keyint=PROGRAM_WEBRTC_KEYINT,
+        threads=PROGRAM_WEBRTC_THREADS,
+    )
+    _set_if_supported(parse_preview, "config-interval", -1)
+    _configure_rtsp_sink(sink_preview, PROGRAM_WEBRTC_RTSP_PATH)
 
-
-# ---------------------------------------------------------------------------
-# Legacy embedded RTMP stream branch. The main runtime now uses stream_worker.py.
-# ---------------------------------------------------------------------------
-def _build_stream_branch(pipeline, tee, rtmp_url: str) -> tuple[Gst.Element | None, Gst.Element | None]:
-    """Returns (enc_stream, rtmpsink)."""
-    global _osd_elements
-
-    if not os.path.exists(SCOREBOARD_PNG):
-        print(f"ERROR: Scoreboard PNG not found: {SCOREBOARD_PNG}")
-        print("       Streaming without scoreboard overlay is not supported.")
-        print("       Place scoreboard.png next to pipeline.py, then restart.")
-        _send_stream_status(
-            active=False,
-            error=f"Missing scoreboard.png: {SCOREBOARD_PNG}",
-        )
-        return None, None
-
-    _render_scoreboard_bg()
-
-    q_stream = _make("queue", "strm_queue")
-    conv_strm = _make_nvconv("strm_conv")
-    caps_strm = _capsfilter("strm_caps_i420", "video/x-raw,format=I420")
-    rtmp = make_rtmp_elements(_make)
-    configure_rtmp_branch(rtmp, q_stream, RTMP_BITRATE, rtmp_url)
-
-    for el in (q_stream, conv_strm, caps_strm, *rtmp.base_elements()):
+    for el in (
+            selector, tee,
+            q_stream, conv_stream, caps_stream, enc_stream, h264_stream_caps,
+            parse_stream, sink_stream,
+            q_preview, conv_preview, caps_preview, enc_preview, h264_preview_caps,
+            parse_preview, sink_preview,
+    ):
         pipeline.add(el)
+
+    _program_selector_pads.clear()
+
+    if FIXED_CAMERA in camera_tees:
+        _link_tee_to_program_selector(
+            pipeline,
+            camera_tees[FIXED_CAMERA],
+            "0",
+            selector,
+            FIXED_CAMERA,
+        )
+    if PTZ_CAMERA in camera_tees:
+        _link_tee_to_program_selector(
+            pipeline,
+            camera_tees[PTZ_CAMERA],
+            "2",
+            selector,
+            PTZ_CAMERA,
+        )
+
+    _link(selector, tee)
 
     _tee_branch(tee, q_stream)
     _link_many(
-        q_stream, conv_strm, caps_strm, *rtmp.overlay_chain(), rtmp.flvmux,
+        q_stream, conv_stream, caps_stream, enc_stream, h264_stream_caps,
+        parse_stream, sink_stream,
     )
 
-    _link_filtered(rtmp.audiosrc, rtmp.aacenc, "audio/x-raw,rate=44100,channels=2")
-    aacenc_src = _get_static_pad(rtmp.aacenc, "src")
-    flvmux_audio = rtmp.flvmux.request_pad_simple("audio")
-    if not flvmux_audio:
-        sys.stderr.write("ERROR: Unable to get audio pad from flvmux\n")
-        sys.exit(1)
-    if aacenc_src.link(flvmux_audio) != Gst.PadLinkReturn.OK:
-        sys.stderr.write("ERROR: Failed to link aacenc -> flvmux.audio\n")
-        sys.exit(1)
+    _tee_branch(tee, q_preview)
+    _link_many(
+        q_preview, conv_preview, caps_preview, enc_preview, h264_preview_caps,
+        parse_preview, sink_preview,
+    )
+    _get_static_pad(caps_preview, "src").add_probe(
+        Gst.PadProbeType.BUFFER,
+        _program_preview_restamp_probe,
+    )
 
-    _link(rtmp.flvmux, rtmp.rtmpsink)
+    _program_selector = selector
+    _program_enc = enc_stream
+    _program_preview_enc = enc_preview
+    _last_program_cfg = _read_stream_worker_config()
+    _switch_program_camera(
+        _last_program_cfg.get("activeCamera", PTZ_CAMERA),
+        force_keyframe=False,
+    )
 
-    with _osd_lock:
-        _osd_elements.update(rtmp.osd_map())
-
-    print("Scoreboard overlay: gdkpixbufoverlay (bg PNG) + textoverlay x8 (text)")
-    return rtmp.enc, rtmp.rtmpsink
+    return enc_stream, enc_preview
 
 
 # ---------------------------------------------------------------------------
 # Main pipeline builder
 # ---------------------------------------------------------------------------
 def build_pipeline() -> tuple:
-    global _encoders
+    global _encoders, _program_selector, _program_enc, _program_preview_enc, _last_program_cfg
+    global _program_previous_camera, _program_switch_seq, _program_last_switch_at_ms
+    global _program_switch_requested_camera, _program_switch_timer_queued
+    global _program_switch_settle_until_monotonic
+    global _program_preview_frame_index
     _encoders = {}
+    _program_selector = None
+    _program_enc = None
+    _program_preview_enc = None
+    _last_program_cfg = None
+    _program_previous_camera = PTZ_CAMERA
+    _program_switch_seq = 0
+    _program_last_switch_at_ms = 0
+    _program_switch_requested_camera = None
+    _program_switch_timer_queued = False
+    _program_switch_settle_until_monotonic = 0.0
+    _program_preview_frame_index = 0
 
     pipeline = Gst.Pipeline()
     if not pipeline:
@@ -1790,56 +2118,56 @@ def build_pipeline() -> tuple:
 
     pgie0 = None
     pgie2 = None
+    camera_tees: dict[str, Gst.Element] = {}
 
     if ENABLE_FIXED_CAMERA:
         print("Building fixed camera source ...")
         tee0 = _build_camera_source(pipeline, FIXED_CAMERA_DEVICE, "0")
-
-        print("Building fixed camera clean RTSP branch (1080p high quality low latency) ...")
-        enc0_clean = _build_clean_branch(pipeline, tee0, "0", "camera0_clean")
-        _encoders["enc0_clean"] = enc0_clean
+        camera_tees[FIXED_CAMERA] = tee0
 
         if _ai_enabled("CAM0"):
-            print("Building fixed camera AI RTSP branch (720p debug) ...")
+            if _ai_stream_enabled("CAM0"):
+                print("Building fixed camera AI RTSP branch (720p debug) ...")
+            else:
+                print("Building fixed camera AI processing branch (debug RTSP disabled) ...")
             pgie0, enc0_ai = _build_ai_branch(
                 pipeline, tee0, "0", "camera0_ai",
                 "config_infer_primary_yoloV8_cam0.txt", "CAM0")
-            _encoders["enc0_ai"] = enc0_ai
+            if enc0_ai is not None:
+                _encoders["enc0_ai"] = enc0_ai
         else:
-            print("Fixed camera AI disabled — skipping AI RTSP branch")
-
-        print("Building fixed camera internal RTSP branch for stream worker ...")
-        enc0_streamsrc = _build_internal_stream_branch(pipeline, tee0, "0", "camera0_stream")
-        _encoders["enc0_streamsrc"] = enc0_streamsrc
+            print("Fixed camera AI disabled — skipping AI branch")
     else:
         print("Fixed camera disabled — skipping source and all branches")
 
     if ENABLE_PTZ_CAMERA:
         print("Building PTZ camera source ...")
         tee2 = _build_camera_source(pipeline, PTZ_CAMERA_DEVICE, "2")
-
-        print("Building PTZ camera clean RTSP branch (1080p high quality low latency) ...")
-        enc2_clean = _build_clean_branch(pipeline, tee2, "2", "camera2_clean")
-        _encoders["enc2_clean"] = enc2_clean
+        camera_tees[PTZ_CAMERA] = tee2
 
         if _ai_enabled("CAM2"):
-            print("Building PTZ camera AI RTSP branch (720p debug) ...")
+            if _ai_stream_enabled("CAM2"):
+                print("Building PTZ camera AI RTSP branch (720p debug) ...")
+            else:
+                print("Building PTZ camera AI processing branch (debug RTSP disabled) ...")
             pgie2, enc2_ai = _build_ai_branch(
                 pipeline, tee2, "2", "camera2_ai",
                 "config_infer_primary_yoloV8_cam2.txt", "CAM2")
-            _encoders["enc2_ai"] = enc2_ai
+            if enc2_ai is not None:
+                _encoders["enc2_ai"] = enc2_ai
         else:
-            print("PTZ camera AI disabled — skipping AI RTSP branch")
-
-        print("Building PTZ camera internal RTSP branch for stream worker ...")
-        enc2_streamsrc = _build_internal_stream_branch(pipeline, tee2, "2", "camera2_stream")
-        _encoders["enc2_streamsrc"] = enc2_streamsrc
+            print("PTZ camera AI disabled — skipping AI branch")
     else:
         print("PTZ camera disabled — skipping source and all branches")
 
     if not ENABLE_FIXED_CAMERA and not ENABLE_PTZ_CAMERA:
         sys.stderr.write("ERROR: All cameras are disabled\n")
         sys.exit(1)
+
+    print("Building switched program RTSP branches for stream worker/WebRTC ...")
+    enc_program_stream, enc_program_clean = _build_program_clean_branch(pipeline, camera_tees)
+    _encoders["enc_program_stream"] = enc_program_stream
+    _encoders["enc_program_clean"] = enc_program_clean
 
     return pipeline, pgie0, pgie2
 
@@ -1897,6 +2225,7 @@ def main():
     if ENABLE_TERMINAL_FPS_METRICS and ENABLE_AI_FPS_METRICS:
         GLib.timeout_add_seconds(TERMINAL_FPS_INTERVAL_SEC, _fps_report)
     GLib.timeout_add_seconds(1, _poll_stream_worker_status)
+    GLib.timeout_add(200, _poll_program_config)
 
     print("Starting pipeline ...")
     pipeline.set_state(Gst.State.PLAYING)

@@ -40,11 +40,11 @@ restart exit codes.
 
 The main process publishes:
 
-- Clean streams:
-    - Fixed camera: `http://<jetson-ip>:8889/camera0_clean`
-    - PTZ camera: `http://<jetson-ip>:8889/camera2_clean`
-    - Fixed camera: `rtsp://<jetson-ip>:8554/camera0_clean`
-    - PTZ camera: `rtsp://<jetson-ip>:8554/camera2_clean`
+- Switched WebRTC preview feed:
+    - `http://<jetson-ip>:8889/program_clean`
+    - `rtsp://<jetson-ip>:8554/program_clean`
+- Switched H.264 RTMP-worker feed:
+    - `rtsp://<jetson-ip>:8554/program_stream`
 - AI/debug streams:
     - Fixed camera: `http://<jetson-ip>:8889/camera0_ai`
     - PTZ camera: `http://<jetson-ip>:8889/camera2_ai` when
@@ -52,9 +52,6 @@ The main process publishes:
     - Fixed camera: `rtsp://<jetson-ip>:8554/camera0_ai`
     - PTZ camera: `rtsp://<jetson-ip>:8554/camera2_ai` when
       `ENABLE_PTZ_CAMERA_AI` is enabled.
-- Internal RTSP camera streams for the RTMP worker:
-    - Fixed camera: `rtsp://<jetson-ip>:8554/camera0_stream`
-    - PTZ camera: `rtsp://<jetson-ip>:8554/camera2_stream`
 - Local HTTP debug API:
     - `GET http://127.0.0.1:9101/status`
     - `POST http://127.0.0.1:9101/score`
@@ -73,11 +70,13 @@ curl -X POST http://127.0.0.1:9101/score \
 
 ## RTMP streaming
 
-The main pipeline creates internal `camera0_stream` and `camera2_stream` feeds.
-RTMP forwarding is handled by a separate worker so RTMP failures do not take down
-the camera/AI pipeline. The worker defaults to the PTZ camera and can switch
-between available camera feeds through `stream_worker_config.json` or the Go
-bridge `switch_cam` command.
+The main pipeline creates a switched `program_clean` H.264 feed for browser
+WebRTC preview with monotonic timestamp restamping and a switched
+`program_stream` H.264 feed for the RTMP worker. Both stay on stable paths while
+the selected camera changes upstream. RTMP forwarding is handled by a separate
+worker so RTMP failures do not take down the camera/AI pipeline. The active
+camera is controlled through
+`stream_worker_config.json` or the Go bridge `switch_cam` command.
 
 Normal flow:
 
@@ -86,8 +85,8 @@ Normal flow:
    `start_stream rtmp://a.rtmp.youtube.com/live2/stream-key`
 3. `pipeline.py` writes `stream.conf` and starts `run_stream_worker.py`.
 4. `run_stream_worker.py` restarts `stream_worker.py` if the RTMP worker fails.
-5. `stream_worker.py` reads the active internal RTSP feed, applies the scoreboard
-   overlay, and publishes to RTMP.
+5. `stream_worker.py` reads `program_stream`, applies the scoreboard overlay,
+   and publishes to RTMP.
 
 The scoreboard OSD is hidden unless OSD is enabled from devtablet. To see the
 OSD graphics in the RTMP stream, send:
