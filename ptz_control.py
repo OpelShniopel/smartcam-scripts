@@ -123,13 +123,8 @@ class PTZController:
             self.manual_move_start(direction, sps)
         elif cmd == "move_stop":
             self.manual_move_stop()
-        elif cmd == "set_mode" or cmd == "cmd.set_cam_mode":
-            payload = msg.get("payload", {})
-            if isinstance(payload, dict) and "mode" in payload:
-                mode = payload.get("mode")
-            else:
-                mode = msg.get("mode", "automatic")
-            self.set_mode(mode)
+        elif cmd == "set_mode":
+            self.set_mode(msg.get("mode", "automatic"))
 
     def return_home(self):
         self._send_stop()
