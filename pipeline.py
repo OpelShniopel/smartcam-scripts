@@ -215,9 +215,12 @@ PROGRAM_CLEAN_PRESET = "ultrafast"
 PROGRAM_CLEAN_TUNE = "zerolatency"
 PROGRAM_WEBRTC_RTSP_PATH = "program_clean"
 PROGRAM_STREAM_RTSP_PATH = "program_stream"
-PROGRAM_WEBRTC_WIDTH = 1280
-PROGRAM_WEBRTC_HEIGHT = 720
-PROGRAM_WEBRTC_VP8_BITRATE = 4_000_000
+PROGRAM_WEBRTC_WIDTH = 1920
+PROGRAM_WEBRTC_HEIGHT = 1080
+PROGRAM_WEBRTC_VP8_BITRATE = 8_000_000
+PROGRAM_WEBRTC_VP8_THREADS = 4
+PROGRAM_WEBRTC_VP8_CPU_USED = 8
+PROGRAM_WEBRTC_VP8_KEYFRAME_MAX_DIST = 10
 PROGRAM_SWITCH_DEBOUNCE_MS = 150
 PROGRAM_SWITCH_SETTLE_MS = 700
 
@@ -1654,6 +1657,11 @@ def _configure_x264_encoder(
 def _configure_vp8_encoder(enc: Gst.Element) -> None:
     _set_if_supported(enc, "target-bitrate", PROGRAM_WEBRTC_VP8_BITRATE)
     _set_if_supported(enc, "deadline", 1)
+    _set_if_supported(enc, "cpu-used", PROGRAM_WEBRTC_VP8_CPU_USED)
+    _set_if_supported(enc, "threads", PROGRAM_WEBRTC_VP8_THREADS)
+    _set_if_supported(enc, "keyframe-max-dist", PROGRAM_WEBRTC_VP8_KEYFRAME_MAX_DIST)
+    _set_if_supported(enc, "lag-in-frames", 0)
+    _set_if_supported(enc, "auto-alt-ref", False)
 
 
 def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
