@@ -1975,7 +1975,16 @@ def _build_program_clean_branch(
     sink_stream = _make("rtspclientsink", "sink_program_stream")
 
     q_preview = _make("queue", "q_program_clean_vp8")
-    conv_preview = _make_nvconv("conv_program_clean_vp8")
+    conv_preview_nv = _make_nvconv("conv_program_clean_vp8_nv")
+    caps_preview_rgba = _capsfilter(
+        "caps_program_clean_vp8_rgba",
+        (
+            "video/x-raw,format=RGBA,"
+            f"width={PROGRAM_WEBRTC_WIDTH},height={PROGRAM_WEBRTC_HEIGHT},"
+            "framerate=30/1"
+        ),
+    )
+    conv_preview_cpu = _make("videoconvert", "conv_program_clean_vp8_cpu")
     caps_preview = _capsfilter(
         "caps_program_clean_vp8_i420",
         (
@@ -2016,7 +2025,8 @@ def _build_program_clean_branch(
             selector, tee,
             q_stream, conv_stream, caps_stream, enc_stream, h264_stream_caps,
             parse_stream, sink_stream,
-            q_preview, conv_preview, caps_preview, enc_preview, sink_preview,
+            q_preview, conv_preview_nv, caps_preview_rgba, conv_preview_cpu,
+            caps_preview, enc_preview, sink_preview,
     ):
         pipeline.add(el)
 
@@ -2048,7 +2058,10 @@ def _build_program_clean_branch(
     )
 
     _tee_branch(tee, q_preview)
-    _link_many(q_preview, conv_preview, caps_preview, enc_preview, sink_preview)
+    _link_many(
+        q_preview, conv_preview_nv, caps_preview_rgba, conv_preview_cpu,
+        caps_preview, enc_preview, sink_preview,
+    )
 
     _program_selector = selector
     _program_enc = enc_stream
