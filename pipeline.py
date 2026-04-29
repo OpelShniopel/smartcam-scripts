@@ -205,13 +205,22 @@ def _ai_stream_enabled(cam_label: str) -> bool:
     return False
 
 
-# Software x264 settings for the local switched preview (`program_clean`).
+# Program outputs:
+# - program_clean: VP8 preview for browser WebRTC.
+# - program_stream: H264 source for the RTMP worker.
 PROGRAM_CLEAN_BITRATE = 6000
 PROGRAM_CLEAN_KEYINT = 15
 PROGRAM_CLEAN_THREADS = 1
 PROGRAM_CLEAN_PRESET = "ultrafast"
 PROGRAM_CLEAN_TUNE = "zerolatency"
-PROGRAM_RTSP_PATH = "program_clean"
+PROGRAM_WEBRTC_RTSP_PATH = "program_clean"
+PROGRAM_STREAM_RTSP_PATH = "program_stream"
+PROGRAM_WEBRTC_WIDTH = 1280
+PROGRAM_WEBRTC_HEIGHT = 720
+PROGRAM_WEBRTC_VP8_BITRATE = 4_000_000
+PROGRAM_WEBRTC_VP8_THREADS = 4
+PROGRAM_WEBRTC_VP8_CPU_USED = 8
+PROGRAM_WEBRTC_VP8_KEYFRAME_MAX_DIST = 15
 PROGRAM_SWITCH_DEBOUNCE_MS = 150
 PROGRAM_SWITCH_SETTLE_MS = 700
 
@@ -238,6 +247,7 @@ _encoders: dict[str, Gst.Element] = {}
 _program_selector: Gst.Element | None = None
 _program_selector_pads: dict[str, Gst.Pad] = {}
 _program_enc: Gst.Element | None = None
+_program_preview_enc: Gst.Element | None = None
 _program_active_camera: str = PTZ_CAMERA
 _program_previous_camera: str = PTZ_CAMERA
 _program_switch_seq = 0
@@ -733,8 +743,9 @@ def _push_state() -> None:
 
     webrtc = {}
     internal_streams = {}
-    program_clean_rtsp_url = f"rtsp://{JETSON_HOST}:8554/{PROGRAM_RTSP_PATH}"
-    program_clean_webrtc_url = f"http://{JETSON_HOST}:8889/{PROGRAM_RTSP_PATH}"
+    program_clean_rtsp_url = f"rtsp://{JETSON_HOST}:8554/{PROGRAM_WEBRTC_RTSP_PATH}"
+    program_clean_webrtc_url = f"http://{JETSON_HOST}:8889/{PROGRAM_WEBRTC_RTSP_PATH}"
+    program_stream_rtsp_url = f"rtsp://{JETSON_HOST}:8554/{PROGRAM_STREAM_RTSP_PATH}"
     switch_meta = {
         "seq": _program_switch_seq,
         "at_ms": _program_last_switch_at_ms,
@@ -744,7 +755,7 @@ def _push_state() -> None:
 
     webrtc["program_clean"] = program_clean_webrtc_url
     internal_streams["program_clean"] = program_clean_rtsp_url
-    internal_streams["program_stream"] = program_clean_rtsp_url
+    internal_streams["program_stream"] = program_stream_rtsp_url
 
     if ENABLE_FIXED_CAMERA and _ai_stream_enabled("CAM0"):
         fixed_ai_url = f"http://{JETSON_HOST}:8889/camera0_ai"
@@ -848,8 +859,9 @@ class ControlHandler(BaseHTTPRequestHandler):
                 "pycam_sock": PTZ_CONTROL_SOCK,
                 "encoders": list(_encoders.keys()),
                 "program": {
-                    "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_RTSP_PATH}",
-                    "webrtc_clean": f"http://{JETSON_HOST}:8889/{PROGRAM_RTSP_PATH}",
+                    "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_WEBRTC_RTSP_PATH}",
+                    "webrtc_clean": f"http://{JETSON_HOST}:8889/{PROGRAM_WEBRTC_RTSP_PATH}",
+                    "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_STREAM_RTSP_PATH}",
                     "active_camera": _program_active_camera,
                     "switch_seq": _program_switch_seq,
                     "switch_at_ms": _program_last_switch_at_ms,
@@ -1642,6 +1654,17 @@ def _configure_x264_encoder(
     _set_if_supported(enc, "sliced-threads", True)
 
 
+def _configure_vp8_encoder(enc: Gst.Element) -> None:
+    _set_if_supported(enc, "target-bitrate", PROGRAM_WEBRTC_VP8_BITRATE)
+    _set_if_supported(enc, "deadline", 1)
+    _set_if_supported(enc, "cpu-used", PROGRAM_WEBRTC_VP8_CPU_USED)
+    _set_if_supported(enc, "threads", PROGRAM_WEBRTC_VP8_THREADS)
+    _set_if_supported(enc, "keyframe-max-dist", PROGRAM_WEBRTC_VP8_KEYFRAME_MAX_DIST)
+    _set_if_supported(enc, "lag-in-frames", 0)
+    _set_if_supported(enc, "auto-alt-ref", False)
+    _set_if_supported(enc, "end-usage", "cbr")
+
+
 def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
     sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
     sink.set_property("protocols", 4)
@@ -1912,7 +1935,8 @@ def _switch_program_camera(active_camera: str, *, force_keyframe: bool = True) -
     _program_last_switch_at_ms = int(time.time() * 1000)
     print(f"[program] switched source -> {normalized}")
     if force_keyframe:
-        force_key_unit(_program_enc, PROGRAM_RTSP_PATH, "program")
+        force_key_unit(_program_enc, PROGRAM_STREAM_RTSP_PATH, "program-stream")
+        force_key_unit(_program_preview_enc, PROGRAM_WEBRTC_RTSP_PATH, "program-preview")
     _push_state()
 
 
@@ -1933,43 +1957,67 @@ def _poll_program_config() -> bool:
 def _build_program_clean_branch(
         pipeline: Gst.Pipeline,
         camera_tees: dict[str, Gst.Element],
-) -> Gst.Element:
-    global _program_selector, _program_enc, _last_program_cfg
+) -> tuple[Gst.Element, Gst.Element]:
+    global _program_selector, _program_enc, _program_preview_enc, _last_program_cfg
 
     selector = _make("input-selector", "program_selector")
-    q = _make("queue", "q_program_clean")
-    conv = _make_nvconv("conv_program_clean")
-    caps = _capsfilter("caps_program_clean_i420", "video/x-raw,format=I420")
-    enc = _make("x264enc", "enc_program_clean")
-    h264_caps = _capsfilter(
-        "caps_program_clean_h264",
+    tee = _make("tee", "tee_program_outputs")
+
+    q_stream = _make("queue", "q_program_stream")
+    conv_stream = _make_nvconv("conv_program_stream")
+    caps_stream = _capsfilter("caps_program_stream_i420", "video/x-raw,format=I420")
+    enc_stream = _make("x264enc", "enc_program_stream")
+    h264_stream_caps = _capsfilter(
+        "caps_program_stream_h264",
         "video/x-h264,profile=constrained-baseline,stream-format=byte-stream,alignment=au",
     )
-    parse = _make("h264parse", "parse_program_clean")
-    sink = _make("rtspclientsink", "sink_program_clean")
+    parse_stream = _make("h264parse", "parse_program_stream")
+    sink_stream = _make("rtspclientsink", "sink_program_stream")
+
+    q_preview = _make("queue", "q_program_clean_vp8")
+    conv_preview = _make_nvconv("conv_program_clean_vp8")
+    caps_preview = _capsfilter(
+        "caps_program_clean_vp8_i420",
+        (
+            "video/x-raw,format=I420,"
+            f"width={PROGRAM_WEBRTC_WIDTH},height={PROGRAM_WEBRTC_HEIGHT},"
+            "framerate=30/1"
+        ),
+    )
+    enc_preview = _make("vp8enc", "enc_program_clean_vp8")
+    sink_preview = _make("rtspclientsink", "sink_program_clean_vp8")
 
     selector.set_property("sync-streams", True)
     _set_if_supported(selector, "cache-buffers", True)
     _set_if_supported(selector, "sync-mode", 1)
     _set_if_supported(selector, "drop-backwards", True)
 
-    q.set_property("max-size-buffers", 2)
-    q.set_property("max-size-bytes", 0)
-    q.set_property("max-size-time", 0)
-    q.set_property("leaky", 2)
+    for queue in (q_stream, q_preview):
+        queue.set_property("max-size-buffers", 2)
+        queue.set_property("max-size-bytes", 0)
+        queue.set_property("max-size-time", 0)
+        queue.set_property("leaky", 2)
 
     _configure_x264_encoder(
-        enc,
+        enc_stream,
         tune=PROGRAM_CLEAN_TUNE,
         preset=PROGRAM_CLEAN_PRESET,
         bitrate=PROGRAM_CLEAN_BITRATE,
         keyint=PROGRAM_CLEAN_KEYINT,
         threads=PROGRAM_CLEAN_THREADS,
     )
-    _set_if_supported(parse, "config-interval", -1)
-    _configure_rtsp_sink(sink, PROGRAM_RTSP_PATH)
+    _set_if_supported(parse_stream, "config-interval", -1)
+    _configure_rtsp_sink(sink_stream, PROGRAM_STREAM_RTSP_PATH)
 
-    for el in (selector, q, conv, caps, enc, h264_caps, parse, sink):
+    _configure_vp8_encoder(enc_preview)
+    _configure_rtsp_sink(sink_preview, PROGRAM_WEBRTC_RTSP_PATH)
+
+    for el in (
+            selector, tee,
+            q_stream, conv_stream, caps_stream, enc_stream, h264_stream_caps,
+            parse_stream, sink_stream,
+            q_preview, conv_preview, caps_preview, enc_preview, sink_preview,
+    ):
         pipeline.add(el)
 
     _program_selector_pads.clear()
@@ -1991,30 +2039,41 @@ def _build_program_clean_branch(
             PTZ_CAMERA,
         )
 
-    _link_many(selector, q, conv, caps, enc, h264_caps, parse, sink)
+    _link(selector, tee)
+
+    _tee_branch(tee, q_stream)
+    _link_many(
+        q_stream, conv_stream, caps_stream, enc_stream, h264_stream_caps,
+        parse_stream, sink_stream,
+    )
+
+    _tee_branch(tee, q_preview)
+    _link_many(q_preview, conv_preview, caps_preview, enc_preview, sink_preview)
 
     _program_selector = selector
-    _program_enc = enc
+    _program_enc = enc_stream
+    _program_preview_enc = enc_preview
     _last_program_cfg = _read_stream_worker_config()
     _switch_program_camera(
         _last_program_cfg.get("activeCamera", PTZ_CAMERA),
         force_keyframe=False,
     )
 
-    return enc
+    return enc_stream, enc_preview
 
 
 # ---------------------------------------------------------------------------
 # Main pipeline builder
 # ---------------------------------------------------------------------------
 def build_pipeline() -> tuple:
-    global _encoders, _program_selector, _program_enc, _last_program_cfg
+    global _encoders, _program_selector, _program_enc, _program_preview_enc, _last_program_cfg
     global _program_previous_camera, _program_switch_seq, _program_last_switch_at_ms
     global _program_switch_requested_camera, _program_switch_timer_queued
     global _program_switch_settle_until_monotonic
     _encoders = {}
     _program_selector = None
     _program_enc = None
+    _program_preview_enc = None
     _last_program_cfg = None
     _program_previous_camera = PTZ_CAMERA
     _program_switch_seq = 0
@@ -2076,9 +2135,10 @@ def build_pipeline() -> tuple:
         sys.stderr.write("ERROR: All cameras are disabled\n")
         sys.exit(1)
 
-    print("Building switched program clean RTSP branch for stream worker/WebRTC ...")
-    enc_program_clean = _build_program_clean_branch(pipeline, camera_tees)
-    _encoders["enc_program_clean"] = enc_program_clean
+    print("Building switched program RTSP branches for stream worker/WebRTC ...")
+    enc_program_stream, enc_program_clean_vp8 = _build_program_clean_branch(pipeline, camera_tees)
+    _encoders["enc_program_stream"] = enc_program_stream
+    _encoders["enc_program_clean_vp8"] = enc_program_clean_vp8
 
     return pipeline, pgie0, pgie2
 

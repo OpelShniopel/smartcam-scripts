@@ -145,7 +145,7 @@ def _get_local_ip() -> str:
 LOCAL_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
 SOURCE_RTSP_PROGRAM_URL = (
         os.environ.get("STREAM_SOURCE_PROGRAM_RTSP")
-        or "rtsp://127.0.0.1:8554/program_clean"
+        or "rtsp://127.0.0.1:8554/program_stream"
 )
 AVAILABLE_CAMERAS = {
     camera: os.path.exists(device)
