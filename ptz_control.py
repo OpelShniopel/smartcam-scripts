@@ -4,8 +4,8 @@ import time
 import sys
 import atexit
 import signal
-from pan_control_esp_stationary import PanController
-from zoom_control_stationary import ZoomController
+from pan_control_esp_fixed import PanController
+from zoom_control_fixed import ZoomController
 import threading
 
 _cleanup_done = False
