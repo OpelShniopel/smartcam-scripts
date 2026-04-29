@@ -1632,6 +1632,12 @@ def _configure_x264_encoder(
     enc.set_property("threads", threads)
     _set_if_supported(enc, "byte-stream", True)
     _set_if_supported(enc, "bframes", 0)
+    _set_if_supported(enc, "b-adapt", False)
+    _set_if_supported(enc, "rc-lookahead", 0)
+    _set_if_supported(enc, "sync-lookahead", 0)
+    _set_if_supported(enc, "cabac", False)
+    _set_if_supported(enc, "dct8x8", False)
+    _set_if_supported(enc, "mb-tree", False)
     _set_if_supported(enc, "ref", 1)
     _set_if_supported(enc, "sliced-threads", True)
 
@@ -1931,18 +1937,21 @@ def _build_program_clean_branch(
     global _program_selector, _program_enc, _last_program_cfg
 
     selector = _make("input-selector", "program_selector")
-    identity = _make("identity", "identity_program_clean")
     q = _make("queue", "q_program_clean")
     conv = _make_nvconv("conv_program_clean")
     caps = _capsfilter("caps_program_clean_i420", "video/x-raw,format=I420")
     enc = _make("x264enc", "enc_program_clean")
+    h264_caps = _capsfilter(
+        "caps_program_clean_h264",
+        "video/x-h264,profile=constrained-baseline,stream-format=byte-stream,alignment=au",
+    )
     parse = _make("h264parse", "parse_program_clean")
     sink = _make("rtspclientsink", "sink_program_clean")
 
-    selector.set_property("sync-streams", False)
-    _set_if_supported(selector, "cache-buffers", False)
+    selector.set_property("sync-streams", True)
+    _set_if_supported(selector, "cache-buffers", True)
+    _set_if_supported(selector, "sync-mode", 1)
     _set_if_supported(selector, "drop-backwards", True)
-    _set_if_supported(identity, "single-segment", True)
 
     q.set_property("max-size-buffers", 2)
     q.set_property("max-size-bytes", 0)
@@ -1960,7 +1969,7 @@ def _build_program_clean_branch(
     _set_if_supported(parse, "config-interval", -1)
     _configure_rtsp_sink(sink, PROGRAM_RTSP_PATH)
 
-    for el in (selector, identity, q, conv, caps, enc, parse, sink):
+    for el in (selector, q, conv, caps, enc, h264_caps, parse, sink):
         pipeline.add(el)
 
     _program_selector_pads.clear()
@@ -1982,7 +1991,7 @@ def _build_program_clean_branch(
             PTZ_CAMERA,
         )
 
-    _link_many(selector, identity, q, conv, caps, enc, parse, sink)
+    _link_many(selector, q, conv, caps, enc, h264_caps, parse, sink)
 
     _program_selector = selector
     _program_enc = enc
