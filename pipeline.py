@@ -1600,6 +1600,7 @@ def _build_camera_source(pipeline, device: str, suffix: str):
     tee = _make("tee", f"tee{suffix}")
 
     src.set_property("device", device)
+    _set_if_supported(src, "do-timestamp", True)
     dec.set_property("mjpeg", 1)
 
     for el in (src, caps_src, jparse, dec, conv_src, caps_nvmm, tee):
@@ -1937,9 +1938,8 @@ def _build_program_clean_branch(
     parse = _make("h264parse", "parse_program_clean")
     sink = _make("rtspclientsink", "sink_program_clean")
 
-    selector.set_property("sync-streams", True)
-    _set_if_supported(selector, "cache-buffers", True)
-    _set_if_supported(selector, "sync-mode", 1)
+    selector.set_property("sync-streams", False)
+    _set_if_supported(selector, "cache-buffers", False)
     _set_if_supported(selector, "drop-backwards", True)
 
     q.set_property("max-size-buffers", 2)
