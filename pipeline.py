@@ -206,7 +206,7 @@ def _ai_stream_enabled(cam_label: str) -> bool:
 
 
 # Program outputs:
-# - program_clean: VP8 preview for browser WebRTC.
+# - program_clean: H264 preview for browser WebRTC with restamped timestamps.
 # - program_stream: H264 source for the RTMP worker.
 PROGRAM_CLEAN_BITRATE = 6000
 PROGRAM_CLEAN_KEYINT = 15
@@ -217,10 +217,10 @@ PROGRAM_WEBRTC_RTSP_PATH = "program_clean"
 PROGRAM_STREAM_RTSP_PATH = "program_stream"
 PROGRAM_WEBRTC_WIDTH = 1920
 PROGRAM_WEBRTC_HEIGHT = 1080
-PROGRAM_WEBRTC_VP8_BITRATE = 8_000_000
-PROGRAM_WEBRTC_VP8_THREADS = 4
-PROGRAM_WEBRTC_VP8_CPU_USED = 8
-PROGRAM_WEBRTC_VP8_KEYFRAME_MAX_DIST = 10
+PROGRAM_WEBRTC_BITRATE = 6000
+PROGRAM_WEBRTC_KEYINT = 10
+PROGRAM_WEBRTC_THREADS = 1
+PROGRAM_PREVIEW_FRAME_DURATION_NS = Gst.SECOND // 30
 PROGRAM_SWITCH_DEBOUNCE_MS = 150
 PROGRAM_SWITCH_SETTLE_MS = 700
 
@@ -257,6 +257,7 @@ _program_switch_lock = threading.Lock()
 _program_switch_requested_camera: str | None = None
 _program_switch_timer_queued = False
 _program_switch_settle_until_monotonic = 0.0
+_program_preview_frame_index = 0
 
 # ---------------------------------------------------------------------------
 # RTMP stream status tracking
@@ -1654,16 +1655,6 @@ def _configure_x264_encoder(
     _set_if_supported(enc, "sliced-threads", True)
 
 
-def _configure_vp8_encoder(enc: Gst.Element) -> None:
-    _set_if_supported(enc, "target-bitrate", PROGRAM_WEBRTC_VP8_BITRATE)
-    _set_if_supported(enc, "deadline", 1)
-    _set_if_supported(enc, "cpu-used", PROGRAM_WEBRTC_VP8_CPU_USED)
-    _set_if_supported(enc, "threads", PROGRAM_WEBRTC_VP8_THREADS)
-    _set_if_supported(enc, "keyframe-max-dist", PROGRAM_WEBRTC_VP8_KEYFRAME_MAX_DIST)
-    _set_if_supported(enc, "lag-in-frames", 0)
-    _set_if_supported(enc, "auto-alt-ref", False)
-
-
 def _configure_rtsp_sink(sink: Gst.Element, rtsp_path: str) -> None:
     sink.set_property("location", f"rtsp://127.0.0.1:8554/{rtsp_path}")
     sink.set_property("protocols", 4)
@@ -1953,6 +1944,22 @@ def _poll_program_config() -> bool:
     return True
 
 
+def _program_preview_restamp_probe(_pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
+    global _program_preview_frame_index
+
+    buf = info.get_buffer()
+    if buf is None:
+        return Gst.PadProbeReturn.OK
+
+    pts = _program_preview_frame_index * PROGRAM_PREVIEW_FRAME_DURATION_NS
+    _program_preview_frame_index += 1
+    buf.pts = pts
+    buf.dts = pts
+    buf.duration = PROGRAM_PREVIEW_FRAME_DURATION_NS
+
+    return Gst.PadProbeReturn.OK
+
+
 def _build_program_clean_branch(
         pipeline: Gst.Pipeline,
         camera_tees: dict[str, Gst.Element],
@@ -1973,28 +1980,23 @@ def _build_program_clean_branch(
     parse_stream = _make("h264parse", "parse_program_stream")
     sink_stream = _make("rtspclientsink", "sink_program_stream")
 
-    q_preview = _make("queue", "q_program_clean_vp8")
-    conv_preview_nv = _make_nvconv("conv_program_clean_vp8_nv")
-    caps_preview_rgba = _capsfilter(
-        "caps_program_clean_vp8_rgba",
-        (
-            "video/x-raw,format=RGBA,"
-            f"width={PROGRAM_WEBRTC_WIDTH},height={PROGRAM_WEBRTC_HEIGHT},"
-            "framerate=30/1"
-        ),
-    )
-    conv_preview_cpu = _make("videoconvert", "conv_program_clean_vp8_cpu")
+    q_preview = _make("queue", "q_program_clean")
+    conv_preview = _make_nvconv("conv_program_clean")
     caps_preview = _capsfilter(
-        "caps_program_clean_vp8_i420",
+        "caps_program_clean_i420",
         (
             "video/x-raw,format=I420,"
             f"width={PROGRAM_WEBRTC_WIDTH},height={PROGRAM_WEBRTC_HEIGHT},"
             "framerate=30/1"
         ),
     )
-    enc_preview = _make("vp8enc", "enc_program_clean_vp8")
-    vp8_caps = _capsfilter("caps_program_clean_vp8_profile", "video/x-vp8,profile=(string)0")
-    sink_preview = _make("rtspclientsink", "sink_program_clean_vp8")
+    enc_preview = _make("x264enc", "enc_program_clean")
+    h264_preview_caps = _capsfilter(
+        "caps_program_clean_h264",
+        "video/x-h264,profile=constrained-baseline,stream-format=byte-stream,alignment=au",
+    )
+    parse_preview = _make("h264parse", "parse_program_clean")
+    sink_preview = _make("rtspclientsink", "sink_program_clean")
 
     selector.set_property("sync-streams", True)
     _set_if_supported(selector, "cache-buffers", True)
@@ -2018,15 +2020,23 @@ def _build_program_clean_branch(
     _set_if_supported(parse_stream, "config-interval", -1)
     _configure_rtsp_sink(sink_stream, PROGRAM_STREAM_RTSP_PATH)
 
-    _configure_vp8_encoder(enc_preview)
+    _configure_x264_encoder(
+        enc_preview,
+        tune=PROGRAM_CLEAN_TUNE,
+        preset=PROGRAM_CLEAN_PRESET,
+        bitrate=PROGRAM_WEBRTC_BITRATE,
+        keyint=PROGRAM_WEBRTC_KEYINT,
+        threads=PROGRAM_WEBRTC_THREADS,
+    )
+    _set_if_supported(parse_preview, "config-interval", -1)
     _configure_rtsp_sink(sink_preview, PROGRAM_WEBRTC_RTSP_PATH)
 
     for el in (
             selector, tee,
             q_stream, conv_stream, caps_stream, enc_stream, h264_stream_caps,
             parse_stream, sink_stream,
-            q_preview, conv_preview_nv, caps_preview_rgba, conv_preview_cpu,
-            caps_preview, enc_preview, vp8_caps, sink_preview,
+            q_preview, conv_preview, caps_preview, enc_preview, h264_preview_caps,
+            parse_preview, sink_preview,
     ):
         pipeline.add(el)
 
@@ -2059,8 +2069,12 @@ def _build_program_clean_branch(
 
     _tee_branch(tee, q_preview)
     _link_many(
-        q_preview, conv_preview_nv, caps_preview_rgba, conv_preview_cpu,
-        caps_preview, enc_preview, vp8_caps, sink_preview,
+        q_preview, conv_preview, caps_preview, enc_preview, h264_preview_caps,
+        parse_preview, sink_preview,
+    )
+    _get_static_pad(caps_preview, "src").add_probe(
+        Gst.PadProbeType.BUFFER,
+        _program_preview_restamp_probe,
     )
 
     _program_selector = selector
@@ -2083,6 +2097,7 @@ def build_pipeline() -> tuple:
     global _program_previous_camera, _program_switch_seq, _program_last_switch_at_ms
     global _program_switch_requested_camera, _program_switch_timer_queued
     global _program_switch_settle_until_monotonic
+    global _program_preview_frame_index
     _encoders = {}
     _program_selector = None
     _program_enc = None
@@ -2094,6 +2109,7 @@ def build_pipeline() -> tuple:
     _program_switch_requested_camera = None
     _program_switch_timer_queued = False
     _program_switch_settle_until_monotonic = 0.0
+    _program_preview_frame_index = 0
 
     pipeline = Gst.Pipeline()
     if not pipeline:
@@ -2149,9 +2165,9 @@ def build_pipeline() -> tuple:
         sys.exit(1)
 
     print("Building switched program RTSP branches for stream worker/WebRTC ...")
-    enc_program_stream, enc_program_clean_vp8 = _build_program_clean_branch(pipeline, camera_tees)
+    enc_program_stream, enc_program_clean = _build_program_clean_branch(pipeline, camera_tees)
     _encoders["enc_program_stream"] = enc_program_stream
-    _encoders["enc_program_clean_vp8"] = enc_program_clean_vp8
+    _encoders["enc_program_clean"] = enc_program_clean
 
     return pipeline, pgie0, pgie2
 

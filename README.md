@@ -70,11 +70,12 @@ curl -X POST http://127.0.0.1:9101/score \
 
 ## RTMP streaming
 
-The main pipeline creates a switched `program_clean` VP8 feed for browser
-WebRTC preview and a switched `program_stream` H.264 feed for the RTMP worker.
-Both stay on stable paths while the selected camera changes upstream. RTMP
-forwarding is handled by a separate worker so RTMP failures do not take down the
-camera/AI pipeline. The active camera is controlled through
+The main pipeline creates a switched `program_clean` H.264 feed for browser
+WebRTC preview with monotonic timestamp restamping and a switched
+`program_stream` H.264 feed for the RTMP worker. Both stay on stable paths while
+the selected camera changes upstream. RTMP forwarding is handled by a separate
+worker so RTMP failures do not take down the camera/AI pipeline. The active
+camera is controlled through
 `stream_worker_config.json` or the Go bridge `switch_cam` command.
 
 Normal flow:
