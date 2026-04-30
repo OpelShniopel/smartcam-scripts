@@ -22,6 +22,10 @@ STEP_SIZE_STEPS   = 62    # motor steps per Go "step" (0.5° at 125 steps/°)
 JOG_STEPS_PER_SPS = 62    # motor steps/sec per Go stepsPerSecond unit
 STEP_TIMEOUT_S    = 5.0   # max seconds to wait for G command OK response
 
+ZOOM_STEP_SIZE    = 100   # zoom_pos units per Go "step"
+ZOOM_JOG_INTERVAL = 0.1   # seconds between jog ticks
+ZOOM_JOG_PER_SPS  = 20    # zoom_pos units added per tick per stepsPerSecond unit
+
 
 class PTZController:
     def __init__(self):
@@ -33,6 +37,7 @@ class PTZController:
 
         self._manual_mode = False
         self._manual_lock = threading.Lock()
+        self._zoom_jog_active = False
 
     def process_detection(self, detections):
         if self._manual_mode:
@@ -95,6 +100,40 @@ class PTZController:
             self._send_stop()
             # mode stays manual — only set_mode changes the mode
 
+    def manual_zoom_step(self, direction, steps=1):
+        if not self._manual_mode:
+            print("[ptz] zoom_step ignored: not in manual mode")
+            return
+        with self._manual_lock:
+            if not self.zoom or not self.zoom.ser_z:
+                return
+            sign = -1 if direction == "in" else 1
+            self.zoom.send_zoom(sign * steps * ZOOM_STEP_SIZE)
+
+    def manual_zoom_start(self, direction, steps_per_second=10):
+        if not self._manual_mode:
+            print("[ptz] zoom_start ignored: not in manual mode")
+            return
+        self._zoom_jog_active = False  # stop any existing jog
+        with self._manual_lock:
+            if not self.zoom or not self.zoom.ser_z:
+                return
+            sign = -1 if direction == "in" else 1
+            delta = sign * steps_per_second * ZOOM_JOG_PER_SPS
+            self._zoom_jog_active = True
+
+            def _jog():
+                while self._zoom_jog_active and self._manual_mode:
+                    self.zoom.send_zoom(delta)
+                    time.sleep(ZOOM_JOG_INTERVAL)
+
+            threading.Thread(target=_jog, daemon=True, name="ptz-zoom-jog").start()
+
+    def manual_zoom_stop(self):
+        if not self._manual_mode:
+            return
+        self._zoom_jog_active = False
+
     def set_mode(self, mode):
         if mode == "manual":
             self._manual_mode = True   # set FIRST — detection thread sees this immediately
@@ -106,6 +145,7 @@ class PTZController:
                         pass
             print("[ptz] mode -> manual")
         else:
+            self._zoom_jog_active = False
             with self._manual_lock:
                 self._send_stop()
             self._manual_mode = False  # clear AFTER — detection resumes on next frame
@@ -125,6 +165,16 @@ class PTZController:
             self.manual_move_stop()
         elif cmd == "set_mode":
             self.set_mode(msg.get("mode", "automatic"))
+        elif cmd == "zoom_step":
+            direction = msg.get("direction", "out")
+            steps = max(1, int(msg.get("steps", 1)))
+            self.manual_zoom_step(direction, steps)
+        elif cmd == "zoom_start":
+            direction = msg.get("direction", "out")
+            sps = max(1, int(msg.get("steps_per_second", 10)))
+            self.manual_zoom_start(direction, sps)
+        elif cmd == "zoom_stop":
+            self.manual_zoom_stop()
 
     def return_home(self):
         self._send_stop()

@@ -136,6 +136,9 @@ _PTZ_CMD_TYPES = frozenset({
     "cmd.cam_move_start",
     "cmd.cam_move_stop",
     "cmd.set_cam_mode",
+    "cmd.cam_zoom_step",
+    "cmd.cam_zoom_start",
+    "cmd.cam_zoom_stop",
 })
 
 CLASS_ID_RIM = 0
@@ -552,6 +555,32 @@ def _dispatch_ptz_manual_cmd(msg: dict) -> None:
             return
         _ptz_manual_q.put({"type": "set_mode", "mode": mode})
         _ack(True)
+
+    elif msg_type == "cmd.cam_zoom_step":
+        direction = payload.get("direction")
+        if direction not in ("in", "out"):
+            _ack(False, error=f"direction must be in|out, got {direction!r}")
+            return
+        steps = int(payload.get("steps", 1))
+        if steps <= 0:
+            _ack(False, error="steps must be > 0")
+            return
+        _ptz_manual_q.put({"type": "zoom_step", "direction": direction, "steps": steps})
+        _ack(True, {})
+
+    elif msg_type == "cmd.cam_zoom_start":
+        direction = payload.get("direction")
+        if direction not in ("in", "out"):
+            _ack(False, error=f"direction must be in|out, got {direction!r}")
+            return
+        sps = max(1, int(payload.get("stepsPerSecond", 10)))
+        _ptz_manual_q.put({"type": "zoom_start", "direction": direction,
+                           "steps_per_second": sps})
+        _ack(True, {})
+
+    elif msg_type == "cmd.cam_zoom_stop":
+        _ptz_manual_q.put({"type": "zoom_stop"})
+        _ack(True, {})
 
 
 # ---------------------------------------------------------------------------
