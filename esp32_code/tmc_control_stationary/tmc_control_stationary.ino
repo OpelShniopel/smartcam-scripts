@@ -41,13 +41,13 @@
 #define HOMING_VEL_SPS      3000
 
 #define BALL_BOOST_THR_STEPS  100   // step/frame delta — above this, apply velocity boost
-#define BALL_BOOST_GAIN        6.0f
+#define BALL_BOOST_GAIN        5.0f
 #define BALL_TIMEOUT_MS        1000  // ms without X update before auto-stop
 
 // ============================================================
 //  MOTION CONSTANTS
 // ============================================================
-#define ACCEL_PER_MS         500     // steps/sec per ms ramp rate
+#define ACCEL_PER_MS         400     // steps/sec per ms ramp rate
 
 // ============================================================
 //  SERIAL
@@ -159,6 +159,10 @@ void updateVelocity() {
     if (ballActive) {
         targetVel = computeVelocityFromSteps(targetSteps, 1.0f);
     }
+
+    // Enforce limits regardless of whether velocity is still ramping
+    if (runningVel > 0 && stepPos >= PAN_MAX_STEPS) { hardStop(); targetVel = 0; return; }
+    if (runningVel < 0 && stepPos <= PAN_MIN_STEPS) { hardStop(); targetVel = 0; return; }
 
     int32_t tv = targetVel;
     int32_t cv = runningVel;
