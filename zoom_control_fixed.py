@@ -86,6 +86,7 @@ class ZoomController:
     def __init__(self):
         self.current_zoom_pos  = ZOOM_BASE_POS
         self.target_zoom_pos   = ZOOM_BASE_POS
+        self.focus_bias        = FOCUS_BIAS
         self.last_ball_x       = None
         self.last_ball_y       = None
         self.smooth_velocity   = 0.0
@@ -129,7 +130,7 @@ class ZoomController:
         lens_helpers.calibrate_lens(self.ser_z, ZOOM_SPEED, FOCUS_SPEED)
 
     def get_focus_for_zoom(self, zoom_pos):
-        result = int(self.focus_interp(zoom_pos)) + FOCUS_BIAS
+        result = int(self.focus_interp(zoom_pos)) + self.focus_bias
         return result
 
     def get_pan_speed_factor(self):

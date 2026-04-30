@@ -139,6 +139,7 @@ _PTZ_CMD_TYPES = frozenset({
     "cmd.cam_zoom_step",
     "cmd.cam_zoom_start",
     "cmd.cam_zoom_stop",
+    "cmd.cam_focus_offset",
 })
 
 CLASS_ID_RIM = 0
@@ -580,6 +581,14 @@ def _dispatch_ptz_manual_cmd(msg: dict) -> None:
 
     elif msg_type == "cmd.cam_zoom_stop":
         _ptz_manual_q.put({"type": "zoom_stop"})
+        _ack(True, {})
+
+    elif msg_type == "cmd.cam_focus_offset":
+        offset = payload.get("offset", 0)
+        if not isinstance(offset, int) or offset == 0:
+            _ack(False, error="offset must be a non-zero integer")
+            return
+        _ptz_manual_q.put({"type": "focus_offset", "offset": offset})
         _ack(True, {})
 
 

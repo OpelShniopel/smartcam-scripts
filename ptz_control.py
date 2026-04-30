@@ -175,6 +175,18 @@ class PTZController:
             self.manual_zoom_start(direction, sps)
         elif cmd == "zoom_stop":
             self.manual_zoom_stop()
+        elif cmd == "focus_offset":
+            self.apply_focus_offset(int(msg.get("offset", 0)))
+
+    def apply_focus_offset(self, offset):
+        if not self._manual_mode:
+            print("[ptz] focus_offset ignored: not in manual mode")
+            return
+        if not offset or not self.zoom or not self.zoom.ser_z:
+            return
+        self.zoom.focus_bias += offset
+        print(f"[ptz] focus_bias -> {self.zoom.focus_bias}")
+        self.zoom._drive_motor()
 
     def return_home(self):
         self._send_stop()
