@@ -17,24 +17,24 @@ import termios
 import time
 import tty
 
-import lens_helpers
+import lens_helpers_x3 as lens_helpers
 
 # --- CONFIGURATION ---
 SERIAL_PORT_Z  = "/dev/zoom_control"
 ZOOM_SPEED     = 1000
 FOCUS_SPEED    = 1200
-OUTPUT_CSV     = "zoom_focus_table_new.csv"
+OUTPUT_CSV     = "zoom_focus_table_x3.csv"
 
-ZOOM_MIN_STEPS   = 30000
-ZOOM_MAX_STEPS   = 41000
+ZOOM_MIN_STEPS   = 29500
+ZOOM_MAX_STEPS   = 34700
 ZOOM_STEP        = 100     # Motor steps between calibration points
 
-FOCUS_FINE       = 10      # Steps per arrow key press
+FOCUS_FINE       = 5      # Steps per arrow key press
 FOCUS_COARSE     = 200     # Steps per +/- press
 
-FOCUS_START      = 35000   # Initial focus position for each zoom step
-FOCUS_MIN        = 32000
-FOCUS_MAX        = 37000
+FOCUS_START      = 33300   # Initial focus position for each zoom step
+FOCUS_MIN        = 25300
+FOCUS_MAX        = 33400
 
 
 # ── Raw keyboard input ─────────────────────────────────────────────────────────
