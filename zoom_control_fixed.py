@@ -66,7 +66,7 @@ FOCUS_MAX_STEPS = 33300
 FOCUS_MIN_STEPS = 25340
 FOCUS_BIAS      = 0
 
-MAX_SEGMENT = 250   # max zoom step per serial command
+MAX_SEGMENT = 50   # max zoom step per serial command
 
 def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     last_exc = None
@@ -86,6 +86,7 @@ class ZoomController:
     def __init__(self):
         self.current_zoom_pos  = ZOOM_BASE_POS
         self.target_zoom_pos   = ZOOM_BASE_POS
+        self.focus_bias        = FOCUS_BIAS
         self.last_ball_x       = None
         self.last_ball_y       = None
         self.smooth_velocity   = 0.0
@@ -129,7 +130,7 @@ class ZoomController:
         lens_helpers.calibrate_lens(self.ser_z, ZOOM_SPEED, FOCUS_SPEED)
 
     def get_focus_for_zoom(self, zoom_pos):
-        result = int(self.focus_interp(zoom_pos)) + FOCUS_BIAS
+        result = int(self.focus_interp(zoom_pos)) + self.focus_bias
         return result
 
     def get_pan_speed_factor(self):
@@ -166,6 +167,14 @@ class ZoomController:
         self.current_zoom_pos = ZOOM_RTH_POS
         self.target_zoom_pos  = ZOOM_RTH_POS
         print("Zoom home reached.")
+
+    def apply_focus_bias(self, delta):
+        self.focus_bias += delta
+        if not self.ser_z:
+            return
+        new_focus = self.get_focus_for_zoom(self.current_zoom_pos)
+        lens_helpers.send_command(self.ser_z, f"G0 B{int(new_focus)}")
+        self.last_cmd_time = time.time()
 
     def send_zoom(self, zoom_steps):
         if not self.ser_z:
