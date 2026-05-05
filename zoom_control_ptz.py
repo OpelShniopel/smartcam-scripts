@@ -28,12 +28,12 @@ MAX_SEGMENT             = 250   # Maximum dynamic zoom step segment
 ZOOM_BASE_POS  = 40000
 
 # --- LIMITS ---
-ZOOM_MAX_STEPS    = 41000
-ZOOM_MIN_STEPS    = 30000
-MAX_OPTICAL_ZOOM  = 8     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
-FOCUS_MAX_STEPS = 37000
-FOCUS_MIN_STEPS = 32000
-FOCUS_BIAS      = -1040      # Steps added to every CSV lookup — tune if table is systematically off
+ZOOM_MAX_STEPS = 34700   # 1x (widest FOV)
+ZOOM_MIN_STEPS = 29500   # max optical zoom (~3x)
+MAX_OPTICAL_ZOOM  = 3     # Optical zoom ratio at ZOOM_MIN_STEPS (1x at ZOOM_MAX_STEPS)
+FOCUS_MAX_STEPS = 33300
+FOCUS_MIN_STEPS = 25340
+FOCUS_BIAS      = 0      # Steps added to every CSV lookup — tune if table is systematically off
 
 
 class ZoomController:
