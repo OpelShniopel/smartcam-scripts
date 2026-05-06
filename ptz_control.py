@@ -46,8 +46,14 @@ class PTZController:
         if self.pan:
             self.pan.process_detection(detections, speed_scale=speed_scale)
         if self.zoom:
-            pan_error_x = self.pan.last_error_x if self.pan else 0.0
-            self.zoom.process_detection(detections, pan_error_x=pan_error_x)
+            # Check if zoom controller expects pan_error_x (Fixed version) or not (PTZ version)
+            import inspect
+            sig = inspect.signature(self.zoom.process_detection)
+            if 'pan_error_x' in sig.parameters:
+                pan_error_x = self.pan.last_error_x if self.pan else 0.0
+                self.zoom.process_detection(detections, pan_error_x=pan_error_x)
+            else:
+                self.zoom.process_detection(detections)
 
     def _send_stop(self):
         if self.pan and self.pan.ser_p:
