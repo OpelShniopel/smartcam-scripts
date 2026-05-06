@@ -5,15 +5,15 @@ import time
 import sys
 import atexit
 import signal
-from pan_control_esp_fixed import PanController
-from zoom_control_fixed import ZoomController
+from pan_control_esp_ptz import PanController
+from zoom_control_ptz import ZoomController
 import threading
 
 _cleanup_done = False
 _cleanup_lock = threading.Lock()
 UNIX_SOCK   = "/tmp/ptz_control.sock"
 MANUAL_SOCK = "/tmp/ptz_manual.sock"
-TARGET_CAM  = "fixed"
+TARGET_CAM  = "ptz"
 DEBUG       = False
 ENABLE_PAN  = True
 ENABLE_ZOOM = True
