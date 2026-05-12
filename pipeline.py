@@ -361,6 +361,7 @@ _SCORE_INT_FIELDS = frozenset({
 _SCORE_NUMBER_FIELDS = frozenset({"updated_at"})
 _SCORE_BOOL_FIELDS = frozenset({"visible"})
 
+
 # ---------------------------------------------------------------------------
 # Scoreboard overlay elements
 # ---------------------------------------------------------------------------

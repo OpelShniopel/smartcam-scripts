@@ -57,7 +57,7 @@ class PTZController:
         if self._manual_mode:
             return
         speed_scale = self.zoom.get_pan_speed_factor() if (
-                    self.zoom and hasattr(self.zoom, 'ser_z') and self.zoom.ser_z) else 1.0
+                self.zoom and hasattr(self.zoom, 'ser_z') and self.zoom.ser_z) else 1.0
         if self.pan:
             self.pan.process_detection(detections, speed_scale=speed_scale)
         if self.zoom:
