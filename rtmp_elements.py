@@ -591,6 +591,88 @@ TIMEOUT_TEXT_KEYS: tuple[str, ...] = (
 )
 
 
+def _set_overlay_text_by_key(els: Mapping[str, Any], key: str, text: str) -> None:
+    text_element = els.get(key)
+    if text_element:
+        text_element.set_property("text", text)
+
+
+def _format_timeout_pct(value: Any) -> str:
+    try:
+        pct = float(value)
+    except (TypeError, ValueError):
+        pct = 0.0
+    if 0.0 <= pct <= 1.0:
+        pct *= 100.0
+    return f"{pct:.1f}%"
+
+
+def _timeout_team_rows(prefix: str, stats: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    return (
+        (f"osd_timeout_{prefix}_pts", f"PTS  {stats.get('points', 0)}"),
+        (f"osd_timeout_{prefix}_fg", f"FG%  {_format_timeout_pct(stats.get('fg_pct', 0.0))}"),
+        (f"osd_timeout_{prefix}_3p", f"3P%  {_format_timeout_pct(stats.get('tp_pct', 0.0))}"),
+        (f"osd_timeout_{prefix}_reb", f"REB  {stats.get('rebounds', 0)}"),
+        (f"osd_timeout_{prefix}_ast", f"AST  {stats.get('assists', 0)}"),
+        (f"osd_timeout_{prefix}_stl", f"STL  {stats.get('steals', 0)}"),
+        (f"osd_timeout_{prefix}_blk", f"BLK  {stats.get('blocks', 0)}"),
+        (f"osd_timeout_{prefix}_foul", f"FOULS  {stats.get('fouls', 0)}"),
+    )
+
+
+def _populate_timeout_team_texts(
+        els: Mapping[str, Any],
+        prefix: str,
+        team_name: str,
+        stats: Mapping[str, Any],
+) -> None:
+    _set_overlay_text_by_key(els, f"osd_timeout_{prefix}_name", team_name)
+    for key, text in _timeout_team_rows(prefix, stats):
+        _set_overlay_text_by_key(els, key, text)
+
+
+def _timeout_team_players(players: list[Any], team_id) -> list[Any]:
+    return [player for player in players if player.get("team_id") == team_id][:3]
+
+
+def _timeout_player_text(player: Mapping[str, Any]) -> str:
+    return (
+        f"{player.get('player_name', '')}  {player.get('points', 0)}pts  "
+        f"{player.get('rebounds', 0)}reb  {player.get('assists', 0)}ast"
+    )
+
+
+def _populate_timeout_player_slots(els: Mapping[str, Any], slots: tuple[str, ...], players: list[Any]) -> None:
+    for index, slot in enumerate(slots):
+        element = els.get(slot)
+        if not element:
+            continue
+        if index < len(players):
+            element.set_property("text", _timeout_player_text(players[index]))
+            element.set_property("silent", False)
+        else:
+            element.set_property("silent", True)
+
+
+def _populate_timeout_players(
+        els: Mapping[str, Any],
+        timeout_stats: Mapping[str, Any],
+        home_stats: Mapping[str, Any],
+        away_stats: Mapping[str, Any],
+) -> None:
+    top_players = timeout_stats.get("top_players") or []
+    _populate_timeout_player_slots(
+        els,
+        ("osd_timeout_player_h1", "osd_timeout_player_h2", "osd_timeout_player_h3"),
+        _timeout_team_players(top_players, home_stats.get("team_id")),
+    )
+    _populate_timeout_player_slots(
+        els,
+        ("osd_timeout_player_a1", "osd_timeout_player_a2", "osd_timeout_player_a3"),
+        _timeout_team_players(top_players, away_stats.get("team_id")),
+    )
+
+
 def populate_timeout_texts(
         timeout_stats: Mapping[str, Any],
         state: Mapping[str, Any],
@@ -602,72 +684,11 @@ def populate_timeout_texts(
     home_stats = timeout_stats.get("home_stats") or {}
     away_stats = timeout_stats.get("away_stats") or {}
 
-    def _set(key: str, text: str) -> None:
-        text_element = els.get(key)
-        if text_element:
-            text_element.set_property("text", text)
-
-    def _format_pct(value: Any) -> str:
-        try:
-            pct = float(value)
-        except (TypeError, ValueError):
-            pct = 0.0
-        if 0.0 <= pct <= 1.0:
-            pct *= 100.0
-        return f"{pct:.1f}%"
-
     calling_name = home_name if calling == "home" else away_name
-    _set("osd_timeout_header", f"TIMEOUT  {calling_name}")
-
-    _set("osd_timeout_home_name", home_name)
-    _set("osd_timeout_home_pts", f"PTS  {home_stats.get('points', 0)}")
-    _set("osd_timeout_home_fg", f"FG%  {_format_pct(home_stats.get('fg_pct', 0.0))}")
-    _set("osd_timeout_home_3p", f"3P%  {_format_pct(home_stats.get('tp_pct', 0.0))}")
-    _set("osd_timeout_home_reb", f"REB  {home_stats.get('rebounds', 0)}")
-    _set("osd_timeout_home_ast", f"AST  {home_stats.get('assists', 0)}")
-    _set("osd_timeout_home_stl", f"STL  {home_stats.get('steals', 0)}")
-    _set("osd_timeout_home_blk", f"BLK  {home_stats.get('blocks', 0)}")
-    _set("osd_timeout_home_foul", f"FOULS  {home_stats.get('fouls', 0)}")
-
-    _set("osd_timeout_away_name", away_name)
-    _set("osd_timeout_away_pts", f"PTS  {away_stats.get('points', 0)}")
-    _set("osd_timeout_away_fg", f"FG%  {_format_pct(away_stats.get('fg_pct', 0.0))}")
-    _set("osd_timeout_away_3p", f"3P%  {_format_pct(away_stats.get('tp_pct', 0.0))}")
-    _set("osd_timeout_away_reb", f"REB  {away_stats.get('rebounds', 0)}")
-    _set("osd_timeout_away_ast", f"AST  {away_stats.get('assists', 0)}")
-    _set("osd_timeout_away_stl", f"STL  {away_stats.get('steals', 0)}")
-    _set("osd_timeout_away_blk", f"BLK  {away_stats.get('blocks', 0)}")
-    _set("osd_timeout_away_foul", f"FOULS  {away_stats.get('fouls', 0)}")
-
-    top_players = timeout_stats.get("top_players") or []
-    home_team_id = home_stats.get("team_id")
-    away_team_id = away_stats.get("team_id")
-    home_players = [p for p in top_players if p.get("team_id") == home_team_id][:3]
-    away_players = [p for p in top_players if p.get("team_id") == away_team_id][:3]
-
-    for i, slot in enumerate(("osd_timeout_player_h1", "osd_timeout_player_h2", "osd_timeout_player_h3")):
-        el = els.get(slot)
-        if not el:
-            continue
-        if i < len(home_players):
-            p = home_players[i]
-            el.set_property("text",
-                            f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast")
-            el.set_property("silent", False)
-        else:
-            el.set_property("silent", True)
-
-    for i, slot in enumerate(("osd_timeout_player_a1", "osd_timeout_player_a2", "osd_timeout_player_a3")):
-        el = els.get(slot)
-        if not el:
-            continue
-        if i < len(away_players):
-            p = away_players[i]
-            el.set_property("text",
-                            f"{p.get('player_name', '')}  {p.get('points', 0)}pts  {p.get('rebounds', 0)}reb  {p.get('assists', 0)}ast")
-            el.set_property("silent", False)
-        else:
-            el.set_property("silent", True)
+    _set_overlay_text_by_key(els, "osd_timeout_header", f"TIMEOUT  {calling_name}")
+    _populate_timeout_team_texts(els, "home", home_name, home_stats)
+    _populate_timeout_team_texts(els, "away", away_name, away_stats)
+    _populate_timeout_players(els, timeout_stats, home_stats, away_stats)
 
 
 def foul_png_path(team: str, count: int) -> str | None:
