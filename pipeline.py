@@ -220,7 +220,7 @@ def _ai_stream_enabled(cam_label: str) -> bool:
 # Program outputs:
 # - program_clean: H264 preview for browser WebRTC with restamped timestamps.
 # - program_stream: H264 source for the RTMP worker.
-PROGRAM_CLEAN_BITRATE = 8000
+PROGRAM_CLEAN_BITRATE = 9000
 PROGRAM_CLEAN_KEYINT = 15
 PROGRAM_CLEAN_THREADS = 1
 PROGRAM_CLEAN_PRESET = "ultrafast"
