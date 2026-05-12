@@ -64,6 +64,7 @@ import time
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Any
 
 import gi
 
@@ -144,6 +145,7 @@ CLASS_ID_BALL = 1
 CLASS_NAMES = {CLASS_ID_RIM: "RIM", CLASS_ID_BALL: "BALL"}
 
 PROBE_EVERY_N_FRAMES = 1
+RAW_I420_CAPS = "video/x-raw,format=I420"
 
 # ---------------------------------------------------------------------------
 # Camera / AI feature flags
@@ -538,7 +540,7 @@ def _dispatch_ptz_manual_cmd(msg: dict) -> None:
     if not isinstance(payload, dict):
         payload = {}
 
-    def _ack(ok: bool, resp: dict | None = None, error: str = "") -> None:
+    def _send_ptz_ack(ok: bool, resp: dict | None = None, error: str = "") -> None:
         ack: dict = {"type": "ack", "action": msg_type, "id": msg_id, "ok": ok}
         if resp is not None:
             ack["payload"] = resp
@@ -549,7 +551,7 @@ def _dispatch_ptz_manual_cmd(msg: dict) -> None:
     if msg_type == "cmd.cam_pan_step":
         direction = payload.get("direction")
         if direction not in ("left", "right"):
-            _ack(False, error=f"direction must be left|right, got {direction!r}")
+            _send_ptz_ack(False, error=f"direction must be left|right, got {direction!r}")
             return
         steps = payload.get("steps", 1)
         if not isinstance(steps, int) or isinstance(steps, bool) or steps < 1:
@@ -559,65 +561,65 @@ def _dispatch_ptz_manual_cmd(msg: dict) -> None:
             _pan_deg += sign * steps * PAN_DEG_PER_STEP
             pan_deg = _pan_deg
         _ptz_manual_q.put({"type": "pan_step", "direction": direction, "steps": steps})
-        _ack(True, {"panDeg": round(pan_deg, 2)})
+        _send_ptz_ack(True, {"panDeg": round(pan_deg, 2)})
 
     elif msg_type == "cmd.cam_move_start":
         direction = payload.get("direction")
         if direction not in ("left", "right"):
-            _ack(False, error=f"direction must be left|right, got {direction!r}")
+            _send_ptz_ack(False, error=f"direction must be left|right, got {direction!r}")
             return
         sps = payload.get("stepsPerSecond", 10)
         if not isinstance(sps, (int, float)) or isinstance(sps, bool) or sps <= 0:
             sps = 10
         _ptz_manual_q.put({"type": "move_start", "direction": direction,
                             "steps_per_second": int(sps)})
-        _ack(True, {})
+        _send_ptz_ack(True, {})
 
     elif msg_type == "cmd.cam_move_stop":
         _ptz_manual_q.put({"type": "move_stop"})
-        _ack(True, {})
+        _send_ptz_ack(True, {})
 
     elif msg_type == "cmd.set_cam_mode":
         mode = payload.get("mode")
         if mode not in ("manual", "automatic"):
-            _ack(False, error=f"mode must be manual|automatic, got {mode!r}")
+            _send_ptz_ack(False, error=f"mode must be manual|automatic, got {mode!r}")
             return
         _ptz_manual_q.put({"type": "set_mode", "mode": mode})
-        _ack(True)
+        _send_ptz_ack(True)
 
     elif msg_type == "cmd.cam_zoom_step":
         direction = payload.get("direction")
         if direction not in ("in", "out"):
-            _ack(False, error=f"direction must be in|out, got {direction!r}")
+            _send_ptz_ack(False, error=f"direction must be in|out, got {direction!r}")
             return
         steps = int(payload.get("steps", 1))
         if steps <= 0:
-            _ack(False, error="steps must be > 0")
+            _send_ptz_ack(False, error="steps must be > 0")
             return
         _ptz_manual_q.put({"type": "zoom_step", "direction": direction, "steps": steps})
-        _ack(True, {})
+        _send_ptz_ack(True, {})
 
     elif msg_type == "cmd.cam_zoom_start":
         direction = payload.get("direction")
         if direction not in ("in", "out"):
-            _ack(False, error=f"direction must be in|out, got {direction!r}")
+            _send_ptz_ack(False, error=f"direction must be in|out, got {direction!r}")
             return
         sps = max(1, int(payload.get("stepsPerSecond", 10)))
         _ptz_manual_q.put({"type": "zoom_start", "direction": direction,
                            "steps_per_second": sps})
-        _ack(True, {})
+        _send_ptz_ack(True, {})
 
     elif msg_type == "cmd.cam_zoom_stop":
         _ptz_manual_q.put({"type": "zoom_stop"})
-        _ack(True, {})
+        _send_ptz_ack(True, {})
 
     elif msg_type == "cmd.cam_focus_offset":
         offset = payload.get("offset", 0)
         if not isinstance(offset, int) or offset == 0:
-            _ack(False, error="offset must be a non-zero integer")
+            _send_ptz_ack(False, error="offset must be a non-zero integer")
             return
         _ptz_manual_q.put({"type": "focus_offset", "offset": offset})
-        _ack(True, {})
+        _send_ptz_ack(True, {})
 
 
 # ---------------------------------------------------------------------------
@@ -974,7 +976,21 @@ class ControlHandler(BaseHTTPRequestHandler):
             url = read_stream_url()
             with score_lock:
                 score_visible = score_state["visible"]
-            payload = {
+            cameras: dict[str, dict[str, str]] = {
+                FIXED_CAMERA: {
+                    "device": FIXED_CAMERA_DEVICE,
+                },
+                "cam0": {
+                    "device": FIXED_CAMERA_DEVICE,
+                },
+                PTZ_CAMERA: {
+                    "device": PTZ_CAMERA_DEVICE,
+                },
+                "cam2": {
+                    "device": PTZ_CAMERA_DEVICE,
+                },
+            }
+            payload: dict[str, Any] = {
                 "alive": True,
                 "pid": os.getpid(),
                 "streaming": bool(url) and _is_stream_worker_running(),
@@ -1000,35 +1016,22 @@ class ControlHandler(BaseHTTPRequestHandler):
                     "switch_at_ms": _program_last_switch_at_ms,
                     "previous_camera": _program_previous_camera,
                 },
-                "cameras": {
-                    FIXED_CAMERA: {
-                        "device": FIXED_CAMERA_DEVICE,
-                    },
-                    "cam0": {
-                        "device": FIXED_CAMERA_DEVICE,
-                    },
-                    PTZ_CAMERA: {
-                        "device": PTZ_CAMERA_DEVICE,
-                    },
-                    "cam2": {
-                        "device": PTZ_CAMERA_DEVICE,
-                    },
-                },
+                "cameras": cameras,
             }
             if _ai_stream_enabled("CAM0"):
                 ai_urls = {
                     "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
                     "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
                 }
-                payload["cameras"][FIXED_CAMERA].update(ai_urls)
-                payload["cameras"]["cam0"].update(ai_urls)
+                cameras[FIXED_CAMERA].update(ai_urls)
+                cameras["cam0"].update(ai_urls)
             if _ai_stream_enabled("CAM2"):
                 ai_urls = {
                     "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
                     "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
                 }
-                payload["cameras"][PTZ_CAMERA].update(ai_urls)
-                payload["cameras"]["cam2"].update(ai_urls)
+                cameras[PTZ_CAMERA].update(ai_urls)
+                cameras["cam2"].update(ai_urls)
             self._json(200, payload)
         else:
             self._json(404, {"error": "not found"})
@@ -1802,7 +1805,7 @@ def _build_simple_rtsp_encode_branch(
 ) -> Gst.Element:
     q = _make("queue", f"q{suffix}_{branch_name}")
     conv = _make_nvconv(f"conv{suffix}_{branch_name}")
-    caps = _capsfilter(caps_name or f"caps{suffix}_{branch_name}", "video/x-raw,format=I420")
+    caps = _capsfilter(caps_name or f"caps{suffix}_{branch_name}", RAW_I420_CAPS)
     enc = _make("x264enc", f"enc{suffix}_{branch_name}")
     parse = _make("h264parse", f"parse{suffix}_{branch_name}")
     sink = _make("rtspclientsink", f"sink{suffix}_{branch_name}")
@@ -1860,7 +1863,7 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
         conv_pre = _make_nvconv(f"conv{suffix}_pre")
         nvosd = _make("nvdsosd", f"nvosd{suffix}")
         conv_post = _make_nvconv(f"conv{suffix}_post")
-        caps_post = _capsfilter(f"caps{suffix}_post", "video/x-raw,format=I420")
+        caps_post = _capsfilter(f"caps{suffix}_post", RAW_I420_CAPS)
         q_post = _make("queue", f"q{suffix}_post")
         enc = _make("x264enc", f"enc{suffix}_ai")
         parse = _make("h264parse", f"parse{suffix}_ai")
@@ -2103,7 +2106,7 @@ def _build_program_clean_branch(
 
     q_stream = _make("queue", "q_program_stream")
     conv_stream = _make_nvconv("conv_program_stream")
-    caps_stream = _capsfilter("caps_program_stream_i420", "video/x-raw,format=I420")
+    caps_stream = _capsfilter("caps_program_stream_i420", RAW_I420_CAPS)
     enc_stream = _make("x264enc", "enc_program_stream")
     h264_stream_caps = _capsfilter(
         "caps_program_stream_h264",
@@ -2135,11 +2138,11 @@ def _build_program_clean_branch(
     _set_if_supported(selector, "sync-mode", 1)
     _set_if_supported(selector, "drop-backwards", True)
 
-    for queue in (q_stream, q_preview):
-        queue.set_property("max-size-buffers", 2)
-        queue.set_property("max-size-bytes", 0)
-        queue.set_property("max-size-time", 0)
-        queue.set_property("leaky", 2)
+    for gst_queue in (q_stream, q_preview):
+        gst_queue.set_property("max-size-buffers", 2)
+        gst_queue.set_property("max-size-bytes", 0)
+        gst_queue.set_property("max-size-time", 0)
+        gst_queue.set_property("leaky", 2)
 
     _configure_x264_encoder(
         enc_stream,
