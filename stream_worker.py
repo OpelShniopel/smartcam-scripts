@@ -31,6 +31,7 @@ from camera_config import (
     PTZ_CAMERA,
 )
 from exit_codes import ProcessExitCode
+from gst_utils import force_key_unit
 from runtime_paths import (
     SCOREBOARD_PNG,
     SCORE_STATE_FILE,
@@ -57,8 +58,8 @@ from score_utils import DEFAULT_SCORE_STATE, default_score_state, truncate_team_
 RTMP_BITRATE_DEFAULT = 6800
 
 VERIFY_TIMEOUT_SEC = 15
-CONFIG_POLL_SEC = 1
-STATE_POLL_SEC = 1
+CONFIG_POLL_SEC = 0.2
+STATE_POLL_SEC = 0.2
 STALL_CHECK_SEC = 1
 STALL_TIMEOUT_SEC = 8
 
@@ -100,8 +101,8 @@ _timeout_fade_active: bool = False
 _pre_timeout_bg_alpha: float = 0.0
 _pre_timeout_home_foul_alpha: float = 0.0
 _pre_timeout_away_foul_alpha: float = 0.0
-_sb_timeout_alpha: float = 1.0   # scoreboard alpha during timeout transition
-_timeout_pause_ticks: int = 0    # countdown ticks for pause between phases
+_sb_timeout_alpha: float = 1.0  # scoreboard alpha during timeout transition
+_timeout_pause_ticks: int = 0  # countdown ticks for pause between phases
 TIMEOUT_TRANSITION_PAUSE_TICKS = 20  # 20 × 100 ms = 2 s
 
 _blitz_pulse_active: bool = False
@@ -126,8 +127,6 @@ _SCOREBOARD_CROSS_FADE_KEYS: tuple[str, ...] = (
 
 _last_config: dict | None = None
 _enc_stream: Gst.Element | None = None
-_selector: Gst.Element | None = None
-_selector_pads: dict[str, Gst.Pad] = {}
 _current_active_camera: str = PTZ_CAMERA
 _osd_elements: dict[str, Gst.Element] = {}
 
@@ -144,31 +143,13 @@ def _get_local_ip() -> str:
 
 
 LOCAL_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
-SOURCE_RTSP_FIXED_URL = (
-        os.environ.get("STREAM_SOURCE_FIXED_RTSP")
-        or os.environ.get("STREAM_SOURCE_CAM0_RTSP")
-        or "rtsp://127.0.0.1:8554/camera0_stream"
-)
-SOURCE_RTSP_PTZ_URL = (
-        os.environ.get("STREAM_SOURCE_PTZ_RTSP")
-        or os.environ.get("STREAM_SOURCE_CAM2_RTSP")
-        or "rtsp://127.0.0.1:8554/camera2_stream"
+SOURCE_RTSP_PROGRAM_URL = (
+        os.environ.get("STREAM_SOURCE_PROGRAM_RTSP")
+        or "rtsp://127.0.0.1:8554/program_stream"
 )
 AVAILABLE_CAMERAS = {
     camera: os.path.exists(device)
     for camera, device in CAMERA_DEVICE_BY_STREAM_CAMERA.items()
-}
-CAMERA_SOURCE_ENV_KEYS = {
-    FIXED_CAMERA: ("STREAM_SOURCE_FIXED_RTSP", "STREAM_SOURCE_CAM0_RTSP"),
-    PTZ_CAMERA: ("STREAM_SOURCE_PTZ_RTSP", "STREAM_SOURCE_CAM2_RTSP"),
-}
-CAMERA_SOURCE_URLS = {
-    FIXED_CAMERA: SOURCE_RTSP_FIXED_URL,
-    PTZ_CAMERA: SOURCE_RTSP_PTZ_URL,
-}
-CAMERA_SOURCE_SUFFIXES = {
-    FIXED_CAMERA: "0",
-    PTZ_CAMERA: "2",
 }
 CAMERA_FALLBACK_ORDER = (PTZ_CAMERA, FIXED_CAMERA)
 
@@ -207,11 +188,7 @@ def read_score_state() -> dict:
 
 
 def _camera_input_available(camera: str) -> bool:
-    env_keys = CAMERA_SOURCE_ENV_KEYS.get(camera, ())
-    return bool(
-        AVAILABLE_CAMERAS.get(camera, False)
-        or any(os.environ.get(env_key) for env_key in env_keys)
-    )
+    return bool(AVAILABLE_CAMERAS.get(camera, False))
 
 
 def _available_camera_names() -> list[str]:
@@ -452,8 +429,8 @@ def update_timeout_overlay(state: dict, els: dict) -> None:
     timeout_stats = state.get("timeout_stats")
     now_ms = int(time.time() * 1000)
     timeout_active = (
-        isinstance(timeout_stats, dict)
-        and timeout_stats.get("show_until", 0) > now_ms
+            isinstance(timeout_stats, dict)
+            and timeout_stats.get("show_until", 0) > now_ms
     )
 
     if timeout_active:
@@ -601,20 +578,20 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
         if color is not None:
             el.set_property("color", color)
 
-    show_el("osd_end_winner",      winner_text,                          0xFFFFD700)
+    show_el("osd_end_winner", winner_text, 0xFFFFD700)
     show_el("osd_end_header_home", home_name)
     show_el("osd_end_header_away", away_name)
-    show_el("osd_end_home_pts",    f"TOTAL  {home_pts} PTS")
-    show_el("osd_end_home_blitz",  f"BLITZ  {home_blitz}",              0xFFFFD700)
-    show_el("osd_end_home_inner",     f"INNER   {state.get('home_inner_scores', 0)}")
-    show_el("osd_end_home_middle",    f"MIDDLE  {state.get('home_middle_scores', 0)}")
-    show_el("osd_end_home_outer",     f"OUTER   {state.get('home_outer_scores', 0)}")
+    show_el("osd_end_home_pts", f"TOTAL  {home_pts} PTS")
+    show_el("osd_end_home_blitz", f"BLITZ  {home_blitz}", 0xFFFFD700)
+    show_el("osd_end_home_inner", f"INNER   {state.get('home_inner_scores', 0)}")
+    show_el("osd_end_home_middle", f"MIDDLE  {state.get('home_middle_scores', 0)}")
+    show_el("osd_end_home_outer", f"OUTER   {state.get('home_outer_scores', 0)}")
     show_el("osd_end_home_intercept", f"INTERCEPTS  {state.get('home_interceptions', 0)}")
-    show_el("osd_end_away_pts",       f"TOTAL  {away_pts} PTS")
-    show_el("osd_end_away_blitz",     f"BLITZ  {away_blitz}",              0xFFFFD700)
-    show_el("osd_end_away_inner",     f"INNER   {state.get('away_inner_scores', 0)}")
-    show_el("osd_end_away_middle",    f"MIDDLE  {state.get('away_middle_scores', 0)}")
-    show_el("osd_end_away_outer",     f"OUTER   {state.get('away_outer_scores', 0)}")
+    show_el("osd_end_away_pts", f"TOTAL  {away_pts} PTS")
+    show_el("osd_end_away_blitz", f"BLITZ  {away_blitz}", 0xFFFFD700)
+    show_el("osd_end_away_inner", f"INNER   {state.get('away_inner_scores', 0)}")
+    show_el("osd_end_away_middle", f"MIDDLE  {state.get('away_middle_scores', 0)}")
+    show_el("osd_end_away_outer", f"OUTER   {state.get('away_outer_scores', 0)}")
     show_el("osd_end_away_intercept", f"INTERCEPTS  {state.get('away_interceptions', 0)}")
     for key in ("osd_end_home_blitz_rate", "osd_end_away_blitz_rate"):
         el = els.get(key)
@@ -764,13 +741,13 @@ def _poll_score_state() -> bool:
 
     timeout_stats = state.get("timeout_stats")
     timeout_active = (
-        isinstance(timeout_stats, dict)
-        and timeout_stats.get("show_until", 0) > now_ms
+            isinstance(timeout_stats, dict)
+            and timeout_stats.get("show_until", 0) > now_ms
     )
 
     end_active = (
-        state.get("game_finished", False)
-        and _end_stats_show_until > int(time.time() * 1000)
+            state.get("game_finished", False)
+            and _end_stats_show_until > int(time.time() * 1000)
     )
     if state != _last_score_state or milestone_active or timeout_active or _timeout_fade_active or end_active:
         _update_overlay(state)
@@ -779,16 +756,12 @@ def _poll_score_state() -> bool:
 
 def _switch_active_camera(active_camera: str) -> None:
     global _current_active_camera
-    normalized = _normalize_camera(active_camera, set(_selector_pads))
-    pad = _selector_pads.get(normalized)
-    if _selector is None or pad is None:
+    normalized = _normalize_camera(active_camera)
+    if _current_active_camera == normalized:
         return
-    current = _selector.get_property("active-pad")
-    if current == pad and _current_active_camera == normalized:
-        return
-    _selector.set_property("active-pad", pad)
     _current_active_camera = normalized
-    print(f"[worker] switched stream source -> {normalized}")
+    print(f"[worker] updated active camera -> {normalized}")
+    force_key_unit(_enc_stream, "rtmp", "worker")
     _set_status(active_camera=normalized)
 
 
@@ -796,9 +769,10 @@ def _poll_worker_config() -> bool:
     global _last_config
     cfg = read_worker_config()
     if cfg != _last_config:
+        previous = _last_config or {}
         _last_config = dict(cfg)
         bitrate = cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)
-        if _enc_stream is not None:
+        if _enc_stream is not None and bitrate != previous.get("bitrateKbps", RTMP_BITRATE_DEFAULT):
             _enc_stream.set_property("bitrate", int(bitrate))
             print(f"[worker] updated stream bitrate -> {bitrate} kbps")
         _switch_active_camera(cfg.get("activeCamera", PTZ_CAMERA))
@@ -921,7 +895,12 @@ def _build_rtsp_input_branch(pipeline: Gst.Pipeline, suffix: str, url: str) -> G
 
     conv.set_property("gpu-id", 0)
     conv.set_property("copy-hw", 2)
-    caps.set_property("caps", Gst.Caps.from_string("video/x-raw,format=I420"))
+    caps.set_property(
+        "caps",
+        Gst.Caps.from_string(
+            os.environ.get("RTMP_RAW_CAPS", "video/x-raw,format=I420")
+        ),
+    )
 
     # Keeps up to 2 frames in this queue.
     q.set_property("max-size-buffers", 2)
@@ -944,40 +923,8 @@ def _build_rtsp_input_branch(pipeline: Gst.Pipeline, suffix: str, url: str) -> G
     return q
 
 
-def _link_branch_to_selector(last_el: Gst.Element, selector: Gst.Element, cam_name: str) -> Gst.Pad:
-    src_pad = _get_static_pad(last_el, "src")
-    sel_pad = selector.request_pad_simple("sink_%u")
-    if sel_pad is None:
-        raise RuntimeError(f"Unable to request selector sink pad for {cam_name}")
-    if src_pad.link(sel_pad) != Gst.PadLinkReturn.OK:
-        raise RuntimeError(f"Failed to link {last_el.get_name()} -> selector for {cam_name}")
-    _selector_pads[cam_name] = sel_pad
-    return sel_pad
-
-
-def _build_available_input_branches(pipeline: Gst.Pipeline) -> dict[str, Gst.Element]:
-    input_branches: dict[str, Gst.Element] = {}
-    for camera in (FIXED_CAMERA, PTZ_CAMERA):
-        if _camera_input_available(camera):
-            input_branches[camera] = _build_rtsp_input_branch(
-                pipeline,
-                CAMERA_SOURCE_SUFFIXES[camera],
-                CAMERA_SOURCE_URLS[camera],
-            )
-            continue
-
-        env_keys = "/".join(CAMERA_SOURCE_ENV_KEYS[camera])
-        print(
-            f"[worker] skipping {camera} RTSP source: "
-            f"device unavailable and {env_keys} not set"
-        )
-
-    if not input_branches:
-        raise RuntimeError(
-            "No available RTSP input sources; expected configured camera devices "
-            "or explicit STREAM_SOURCE_FIXED_RTSP/STREAM_SOURCE_PTZ_RTSP override"
-        )
-    return input_branches
+def _build_program_input_branch(pipeline: Gst.Pipeline) -> Gst.Element:
+    return _build_rtsp_input_branch(pipeline, "program", SOURCE_RTSP_PROGRAM_URL)
 
 
 def _make_watchdog() -> Gst.Element | None:
@@ -992,12 +939,11 @@ def _make_watchdog() -> Gst.Element | None:
 
 def _add_output_elements(
         pipeline: Gst.Pipeline,
-        selector: Gst.Element,
         q: Gst.Element,
         rtmp: RtmpElements,
         watchdog: Gst.Element | None,
 ) -> None:
-    elements = [selector, q, *rtmp.base_elements()]
+    elements = [q, *rtmp.base_elements()]
     if watchdog is not None:
         elements.insert(-3, watchdog)
 
@@ -1035,7 +981,7 @@ def _add_buffer_probe_if_present(
 
 
 def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
-    global _enc_stream, _selector, _current_active_camera, _last_config
+    global _enc_stream, _current_active_camera, _last_config
 
     rtmp_url = read_stream_url()
     if not rtmp_url:
@@ -1049,9 +995,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     if pipeline is None:
         raise RuntimeError("Unable to create stream-worker pipeline")
 
-    input_branches = _build_available_input_branches(pipeline)
-
-    selector = _make("input-selector", "strm_selector")
+    program_input = _build_program_input_branch(pipeline)
     q = _make("queue", "strm_queue")
     rtmp = make_rtmp_elements(_make)
     watchdog = _make_watchdog()
@@ -1061,13 +1005,9 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
         int(cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)),
         rtmp_url,
     )
-    _add_output_elements(pipeline, selector, q, rtmp, watchdog)
+    _add_output_elements(pipeline, q, rtmp, watchdog)
 
-    _selector_pads.clear()
-    for camera, branch in input_branches.items():
-        _link_branch_to_selector(branch, selector, camera)
-
-    _link(selector, q)
+    _link(program_input, q)
     _link_many(q, *rtmp.overlay_chain())
     _link_parse_to_mux(rtmp, watchdog)
     _link_audio_encoder_to_mux(rtmp)
@@ -1081,9 +1021,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     _osd_elements.update(rtmp.osd_map())
 
     _enc_stream = rtmp.enc
-    _selector = selector
-    _current_active_camera = _normalize_camera(cfg.get("activeCamera", PTZ_CAMERA), set(_selector_pads))
-    _switch_active_camera(_current_active_camera)
+    _current_active_camera = _normalize_camera(cfg.get("activeCamera", PTZ_CAMERA))
     _update_overlay(read_score_state())
     _last_config = read_worker_config()
     _set_status(active_camera=_current_active_camera)
@@ -1154,8 +1092,8 @@ def main() -> None:
 
     GLib.timeout_add_seconds(VERIFY_TIMEOUT_SEC, _verify_timeout)
     GLib.timeout_add_seconds(STALL_CHECK_SEC, _stall_check)
-    GLib.timeout_add_seconds(STATE_POLL_SEC, _poll_score_state)
-    GLib.timeout_add_seconds(CONFIG_POLL_SEC, _poll_worker_config)
+    GLib.timeout_add(int(STATE_POLL_SEC * 1000), _poll_score_state)
+    GLib.timeout_add(int(CONFIG_POLL_SEC * 1000), _poll_worker_config)
     if ENABLE_TERMINAL_FPS_METRICS and ENABLE_RTMP_FPS_METRICS:
         GLib.timeout_add_seconds(TERMINAL_FPS_INTERVAL_SEC, _rtmp_fps_report)
 
@@ -1167,8 +1105,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _signal_handler)
 
     _set_status(worker_alive=True, stream_active=False, last_error="")
-    print(f"[worker] source fixed: {SOURCE_RTSP_FIXED_URL}")
-    print(f"[worker] source ptz:   {SOURCE_RTSP_PTZ_URL}")
+    print(f"[worker] source program: {SOURCE_RTSP_PROGRAM_URL}")
     print(f"[worker] active source: {_current_active_camera}")
     print(f"[worker] sink:   {rtmp_url[:80]}")
     print("[worker] starting pipeline ...")

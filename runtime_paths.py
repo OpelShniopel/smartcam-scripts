@@ -16,15 +16,15 @@ STREAM_WORKER_WRAPPER = os.path.join(SCRIPT_DIR, "run_stream_worker.py")
 STREAM_WORKER_PID_ROLE = "smartcam_stream_worker_wrapper"
 
 # assets/basketball/
-SCOREBOARD_PNG   = os.path.join(ASSETS_DIR, "basketball", "scoreboard.png")
-TIMEOUT_BG_PNG   = os.path.join(ASSETS_DIR, "basketball", "timeout_bg.png")
-FOULS_HOME_DIR   = os.path.join(ASSETS_DIR, "basketball", "fouls", "home")
-FOULS_AWAY_DIR   = os.path.join(ASSETS_DIR, "basketball", "fouls", "away")
+SCOREBOARD_PNG = os.path.join(ASSETS_DIR, "basketball", "scoreboard.png")
+TIMEOUT_BG_PNG = os.path.join(ASSETS_DIR, "basketball", "timeout_bg.png")
+FOULS_HOME_DIR = os.path.join(ASSETS_DIR, "basketball", "fouls", "home")
+FOULS_AWAY_DIR = os.path.join(ASSETS_DIR, "basketball", "fouls", "away")
 
 # assets/blitzball/
 BLITZBALL_SCOREBOARD_PNG = os.path.join(ASSETS_DIR, "blitzball", "scoreboard.png")
-BLITZBALL_ACTIVE_PNG     = os.path.join(ASSETS_DIR, "blitzball", "active.png")
-END_STATS_BG_PNG         = os.path.join(ASSETS_DIR, "blitzball", "end_stats_bg.png")
+BLITZBALL_ACTIVE_PNG = os.path.join(ASSETS_DIR, "blitzball", "active.png")
+END_STATS_BG_PNG = os.path.join(ASSETS_DIR, "blitzball", "end_stats_bg.png")
 
 __all__ = [
     "ASSETS_DIR",

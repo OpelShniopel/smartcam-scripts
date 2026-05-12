@@ -143,7 +143,7 @@ CLASS_ID_RIM = 0
 CLASS_ID_BALL = 1
 CLASS_NAMES = {CLASS_ID_RIM: "RIM", CLASS_ID_BALL: "BALL"}
 
-PROBE_EVERY_N_FRAMES = 2
+PROBE_EVERY_N_FRAMES = 1
 
 # ---------------------------------------------------------------------------
 # Camera / AI feature flags
