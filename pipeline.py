@@ -582,7 +582,7 @@ def _ptz_manual_relay_loop() -> None:
         try:
             conn = _connect_ptz_manual_socket()
             _send_ptz_manual_messages(conn)
-        except (ConnectionRefusedError, FileNotFoundError, OSError):
+        except OSError:
             time.sleep(1)
         finally:
             _close_socket_quietly(conn)
@@ -1615,52 +1615,77 @@ def _pid_metadata_int(info: dict, key: str, *, required: bool = False) -> int | 
     return int(raw_value)
 
 
-def _worker_pid_info_is_current(info: dict | None) -> bool:
-    if not info:
-        return False
-
+def _worker_pid_from_info(info: dict) -> int | None:
     try:
         pid = _pid_metadata_int(info, "pid", required=True)
     except ValueError:
-        return False
-    assert pid is not None
-    if not _pid_exists(pid):
-        return False
+        return None
+    return pid if pid is not None and _pid_exists(pid) else None
 
+
+def _worker_role_matches(info: dict) -> bool:
     role = info.get("role")
-    if role is not None and role != STREAM_WORKER_PID_ROLE:
-        return False
+    return role is None or role == STREAM_WORKER_PID_ROLE
 
+
+def _worker_script_matches(info: dict) -> bool:
     script = info.get("script")
-    if script is not None and os.path.abspath(str(script)) != os.path.abspath(STREAM_WORKER_WRAPPER):
-        return False
+    return (
+        script is None
+        or os.path.abspath(str(script)) == os.path.abspath(STREAM_WORKER_WRAPPER)
+    )
 
+
+def _worker_owner_pid_matches(info: dict) -> bool:
     try:
         owner_pid = _pid_metadata_int(info, "owner_pid")
     except ValueError:
         return False
-    if owner_pid is not None and owner_pid not in (0, os.getpid()):
-        return False
+    return owner_pid is None or owner_pid in (0, os.getpid())
 
+
+def _worker_owner_start_ticks_match(info: dict) -> bool:
     try:
         owner_start_ticks = _pid_metadata_int(info, "owner_start_ticks")
     except ValueError:
         return False
-    if owner_start_ticks is not None:
-        current_owner_start_ticks = _process_start_ticks(os.getpid())
-        if current_owner_start_ticks is None or current_owner_start_ticks != owner_start_ticks:
-            return False
+    if owner_start_ticks is None:
+        return True
+    current_owner_start_ticks = _process_start_ticks(os.getpid())
+    return current_owner_start_ticks is not None and current_owner_start_ticks == owner_start_ticks
 
+
+def _worker_start_ticks_match(info: dict, pid: int) -> bool:
     try:
         expected_start_ticks = _pid_metadata_int(info, "start_ticks")
     except ValueError:
         return False
-    if expected_start_ticks is not None:
-        current_start_ticks = _process_start_ticks(pid)
-        if current_start_ticks is None or current_start_ticks != expected_start_ticks:
-            return False
+    if expected_start_ticks is None:
+        return True
+    current_start_ticks = _process_start_ticks(pid)
+    return current_start_ticks is not None and current_start_ticks == expected_start_ticks
 
-    return _worker_cmdline_matches(pid)
+
+def _worker_pid_metadata_matches(info: dict, pid: int) -> bool:
+    return (
+        _worker_role_matches(info)
+        and _worker_script_matches(info)
+        and _worker_owner_pid_matches(info)
+        and _worker_owner_start_ticks_match(info)
+        and _worker_start_ticks_match(info, pid)
+    )
+
+
+def _worker_pid_info_is_current(info: dict | None) -> bool:
+    if not info:
+        return False
+
+    pid = _worker_pid_from_info(info)
+    return (
+        pid is not None
+        and _worker_pid_metadata_matches(info, pid)
+        and _worker_cmdline_matches(pid)
+    )
 
 
 def _signal_worker_process(pid: int, sig: signal.Signals) -> None:
@@ -1771,74 +1796,84 @@ def _emit_stream_status_and_sync_cache(active: bool, error: str = "") -> None:
 # ---------------------------------------------------------------------------
 # Detection probe
 # ---------------------------------------------------------------------------
-def pgie_src_pad_buffer_probe(_pad, info, cam_label):
+def _iter_nvds_meta_list(node, caster):
+    while node is not None:
+        try:
+            yield caster(node.data)
+        except StopIteration:
+            return
+
+        try:
+            node = node.next
+        except StopIteration:
+            return
+
+
+def _record_ai_frame(cam_label: str) -> None:
+    if not _ai_fps_metric_enabled(cam_label):
+        return
+    with _fps_lock:
+        if cam_label in _fps_counters:
+            _fps_counters[cam_label] += 1
+
+
+def _should_collect_detections(frame_meta, cam_label: str) -> bool:
+    return _ai_enabled(cam_label) and frame_meta.frame_num % PROBE_EVERY_N_FRAMES == 0
+
+
+def _object_detection_payload(obj_meta) -> dict | None:
+    class_name = CLASS_NAMES.get(obj_meta.class_id)
+    if class_name is None:
+        return None
+
+    rect = obj_meta.rect_params
+    return {
+        "class": class_name,
+        "class_id": obj_meta.class_id,
+        "tracker_id": obj_meta.object_id,
+        "center_x": round(rect.left + rect.width / 2.0, 1),
+        "center_y": round(rect.top + rect.height / 2.0, 1),
+        "width": round(rect.width, 1),
+        "height": round(rect.height, 1),
+        "left": round(rect.left, 1),
+        "top": round(rect.top, 1),
+        "confidence": round(obj_meta.confidence, 4),
+    }
+
+
+def _collect_frame_detections(frame_meta) -> list[dict]:
+    detections = []
+    for obj_meta in _iter_nvds_meta_list(frame_meta.obj_meta_list, pyds.NvDsObjectMeta.cast):
+        detection = _object_detection_payload(obj_meta)
+        if detection is not None:
+            detections.append(detection)
+    return detections
+
+
+def _process_detection_frame(frame_meta, cam_label: str) -> None:
+    _record_ai_frame(cam_label)
+    if not _should_collect_detections(frame_meta, cam_label):
+        return
+
+    detections = _collect_frame_detections(frame_meta)
+    if detections:
+        send_to_ptz_control(cam_label, frame_meta.frame_num, detections)
+
+
+def _batch_meta_from_probe_info(info):
     gst_buffer = info.get_buffer()
     if not gst_buffer:
-        return Gst.PadProbeReturn.OK
+        return None
+    return pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
 
-    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
+
+def pgie_src_pad_buffer_probe(_pad, info, cam_label):
+    batch_meta = _batch_meta_from_probe_info(info)
     if not batch_meta:
         return Gst.PadProbeReturn.OK
 
-    l_frame = batch_meta.frame_meta_list
-    while l_frame is not None:
-        try:
-            frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
-        except StopIteration:
-            break
-
-        if _ai_fps_metric_enabled(cam_label):
-            with _fps_lock:
-                if cam_label in _fps_counters:
-                    _fps_counters[cam_label] += 1
-
-        # AI disabled for this camera -> do nothing else, but keep pipeline healthy
-        if not _ai_enabled(cam_label):
-            try:
-                l_frame = l_frame.next
-            except StopIteration:
-                break
-            continue
-
-        # Only inspect metadata every Nth frame
-        if frame_meta.frame_num % PROBE_EVERY_N_FRAMES == 0:
-            detections = []
-            l_obj = frame_meta.obj_meta_list
-
-            while l_obj is not None:
-                try:
-                    obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
-                except StopIteration:
-                    break
-
-                cid = obj_meta.class_id
-                if cid in CLASS_NAMES:
-                    r = obj_meta.rect_params
-                    detections.append({
-                        "class": CLASS_NAMES[cid],
-                        "class_id": cid,
-                        "tracker_id": obj_meta.object_id,
-                        "center_x": round(r.left + r.width / 2.0, 1),
-                        "center_y": round(r.top + r.height / 2.0, 1),
-                        "width": round(r.width, 1),
-                        "height": round(r.height, 1),
-                        "left": round(r.left, 1),
-                        "top": round(r.top, 1),
-                        "confidence": round(obj_meta.confidence, 4),
-                    })
-
-                try:
-                    l_obj = l_obj.next
-                except StopIteration:
-                    break
-
-            if detections:
-                send_to_ptz_control(cam_label, frame_meta.frame_num, detections)
-
-        try:
-            l_frame = l_frame.next
-        except StopIteration:
-            break
+    for frame_meta in _iter_nvds_meta_list(batch_meta.frame_meta_list, pyds.NvDsFrameMeta.cast):
+        _process_detection_frame(frame_meta, cam_label)
 
     return Gst.PadProbeReturn.OK
 
@@ -1958,51 +1993,19 @@ def _build_simple_rtsp_encode_branch(
 # ---------------------------------------------------------------------------
 # AI branch
 # ---------------------------------------------------------------------------
-def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
-                     infer_config: str, cam_label: str):
-    q_ai = _make("queue", f"q{suffix}_ai")
-    conv_ai = _make_nvconv(f"conv{suffix}_ai")
-    caps_ai = _capsfilter(f"caps{suffix}_ai",
-                          "video/x-raw(memory:NVMM),format=NV12,width=1280,height=720")
-    mux = _make("nvstreammux", f"mux{suffix}")
-    pgie = _make("nvinfer", f"pgie{suffix}")
-    tracker = _make("nvtracker", f"tracker{suffix}")
-    stream_enabled = _ai_stream_enabled(cam_label)
-    recording_enabled = _recording_enabled(cam_label)
-    debug_video_enabled = stream_enabled or recording_enabled
+def _configure_queue(
+        queue_el: Gst.Element,
+        *,
+        max_size_buffers: int = 2,
+        leaky: int = 2,
+) -> None:
+    queue_el.set_property("max-size-buffers", max_size_buffers)
+    queue_el.set_property("max-size-bytes", 0)
+    queue_el.set_property("max-size-time", 0)
+    queue_el.set_property("leaky", leaky)
 
-    conv_pre = None
-    nvosd = None
-    conv_post = None
-    caps_post = None
-    q_post = None
-    enc = None
-    parse = None
-    parse_tee = None
-    q_rtsp = None
-    sink = None
-    drain = None
 
-    q_rec = None
-    rec = None
-    if recording_enabled:
-        q_rec = _make("queue", f"q{suffix}_ai_record")
-        rec = _make("splitmuxsink", f"rec{suffix}_ai")
-    if debug_video_enabled:
-        conv_pre = _make_nvconv(f"conv{suffix}_pre")
-        nvosd = _make("nvdsosd", f"nvosd{suffix}")
-        conv_post = _make_nvconv(f"conv{suffix}_post")
-        caps_post = _capsfilter(f"caps{suffix}_post", RAW_I420_CAPS)
-        q_post = _make("queue", f"q{suffix}_post")
-        enc = _make("x264enc", f"enc{suffix}_ai")
-        parse = _make("h264parse", f"parse{suffix}_ai")
-        parse_tee = _make("tee", f"tee{suffix}_ai_parse")
-        if stream_enabled:
-            q_rtsp = _make("queue", f"q{suffix}_ai_rtsp")
-            sink = _make("rtspclientsink", f"sink{suffix}_ai")
-    else:
-        drain = _make("fakesink", f"sink{suffix}_ai_process")
-
+def _configure_ai_mux(mux: Gst.Element) -> None:
     mux.set_property("width", 1280)
     mux.set_property("height", 720)
     mux.set_property("batch-size", 1)
@@ -2010,117 +2013,210 @@ def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
     mux.set_property("live-source", 1)
     mux.set_property("nvbuf-memory-type", 0)
 
-    pgie.set_property("config-file-path", infer_config)
 
-    tracker.set_property("ll-lib-file",
-                         "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so")
-    tracker.set_property("ll-config-file",
-                         "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_IOU.yml")
+def _configure_ai_tracker(tracker: Gst.Element) -> None:
+    tracker.set_property(
+        "ll-lib-file",
+        "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so",
+    )
+    tracker.set_property(
+        "ll-config-file",
+        "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_IOU.yml",
+    )
     tracker.set_property("tracker-width", 1280)
     tracker.set_property("tracker-height", 736)
     tracker.set_property("gpu-id", 0)
     tracker.set_property("display-tracking-id", 1)
 
-    if nvosd is not None:
-        nvosd.set_property("process-mode", 1)
 
-    q_ai.set_property("max-size-buffers", 2)
-    q_ai.set_property("max-size-bytes", 0)
-    q_ai.set_property("max-size-time", 0)
-    q_ai.set_property("leaky", 2)
+def _configure_ai_recording_sink(rec: Gst.Element, cam_label: str) -> None:
+    rec.set_property("location", _recording_location_pattern(cam_label))
+    rec.set_property("max-size-time", RECORD_SEGMENT_SECONDS * Gst.SECOND)
+    rec.set_property("muxer-factory", RECORD_MUXER_FACTORY)
+    rec.set_property("send-keyframe-requests", True)
+    rec.set_property("async-finalize", True)
 
-    if q_post is not None:
-        q_post.set_property("max-size-buffers", 2)
-        q_post.set_property("max-size-bytes", 0)
-        q_post.set_property("max-size-time", 0)
-        q_post.set_property("leaky", 2)
 
-    if q_rtsp is not None:
-        q_rtsp.set_property("max-size-buffers", 2)
-        q_rtsp.set_property("max-size-bytes", 0)
-        q_rtsp.set_property("max-size-time", 0)
-        q_rtsp.set_property("leaky", 2)
+def _configure_ai_drain(drain: Gst.Element) -> None:
+    _set_if_supported(drain, "sync", False)
+    _set_if_supported(drain, "async", False)
+    _set_if_supported(drain, "enable-last-sample", False)
 
-    if q_rec is not None:
-        q_rec.set_property("max-size-buffers", RECORD_QUEUE_BUFFERS)
-        q_rec.set_property("max-size-bytes", 0)
-        q_rec.set_property("max-size-time", 0)
-        q_rec.set_property("leaky", 2)
 
-    if enc is not None:
-        _configure_x264_encoder(
-            enc,
-            tune=AI_TUNE,
-            preset=AI_PRESET,
-            bitrate=AI_BITRATE,
-            keyint=AI_KEYINT,
-            threads=AI_THREADS,
-        )
-    if sink is not None:
-        _configure_rtsp_sink(sink, rtsp_path)
-    if drain is not None:
-        _set_if_supported(drain, "sync", False)
-        _set_if_supported(drain, "async", False)
-        _set_if_supported(drain, "enable-last-sample", False)
+def _build_ai_base_elements(suffix: str, infer_config: str) -> dict[str, Gst.Element]:
+    mux = _make("nvstreammux", f"mux{suffix}")
+    pgie = _make("nvinfer", f"pgie{suffix}")
+    tracker = _make("nvtracker", f"tracker{suffix}")
+    pgie.set_property("config-file-path", infer_config)
+    _configure_ai_mux(mux)
+    _configure_ai_tracker(tracker)
+    return {
+        "q_ai": _make("queue", f"q{suffix}_ai"),
+        "conv_ai": _make_nvconv(f"conv{suffix}_ai"),
+        "caps_ai": _capsfilter(
+            f"caps{suffix}_ai",
+            "video/x-raw(memory:NVMM),format=NV12,width=1280,height=720",
+        ),
+        "mux": mux,
+        "pgie": pgie,
+        "tracker": tracker,
+    }
 
-    if rec is not None:
-        rec.set_property("location", _recording_location_pattern(cam_label))
-        rec.set_property("max-size-time", RECORD_SEGMENT_SECONDS * Gst.SECOND)
-        rec.set_property("muxer-factory", RECORD_MUXER_FACTORY)
-        rec.set_property("send-keyframe-requests", True)
-        rec.set_property("async-finalize", True)
 
-    elements = [q_ai, conv_ai, caps_ai, mux, pgie, tracker]
-    if debug_video_enabled:
-        elements.extend([
-            conv_pre, nvosd, conv_post, caps_post, q_post,
-            enc, parse, parse_tee,
-        ])
-        if q_rtsp is not None and sink is not None:
-            elements.extend([q_rtsp, sink])
-    elif drain is not None:
-        elements.append(drain)
+def _build_ai_debug_elements(suffix: str) -> dict[str, Gst.Element]:
+    nvosd = _make("nvdsosd", f"nvosd{suffix}")
+    nvosd.set_property("process-mode", 1)
+    enc = _make("x264enc", f"enc{suffix}_ai")
+    _configure_x264_encoder(
+        enc,
+        tune=AI_TUNE,
+        preset=AI_PRESET,
+        bitrate=AI_BITRATE,
+        keyint=AI_KEYINT,
+        threads=AI_THREADS,
+    )
+    return {
+        "conv_pre": _make_nvconv(f"conv{suffix}_pre"),
+        "nvosd": nvosd,
+        "conv_post": _make_nvconv(f"conv{suffix}_post"),
+        "caps_post": _capsfilter(f"caps{suffix}_post", RAW_I420_CAPS),
+        "q_post": _make("queue", f"q{suffix}_post"),
+        "enc": enc,
+        "parse": _make("h264parse", f"parse{suffix}_ai"),
+        "parse_tee": _make("tee", f"tee{suffix}_ai_parse"),
+    }
 
-    if q_rec is not None and rec is not None:
-        elements.extend([q_rec, rec])
 
+def _build_ai_rtsp_elements(suffix: str, rtsp_path: str) -> dict[str, Gst.Element]:
+    sink = _make("rtspclientsink", f"sink{suffix}_ai")
+    _configure_rtsp_sink(sink, rtsp_path)
+    return {
+        "q_rtsp": _make("queue", f"q{suffix}_ai_rtsp"),
+        "sink": sink,
+    }
+
+
+def _build_ai_recording_elements(suffix: str, cam_label: str) -> dict[str, Gst.Element]:
+    rec = _make("splitmuxsink", f"rec{suffix}_ai")
+    _configure_ai_recording_sink(rec, cam_label)
+    return {
+        "q_rec": _make("queue", f"q{suffix}_ai_record"),
+        "rec": rec,
+    }
+
+
+def _build_ai_drain_element(suffix: str) -> dict[str, Gst.Element]:
+    drain = _make("fakesink", f"sink{suffix}_ai_process")
+    _configure_ai_drain(drain)
+    return {"drain": drain}
+
+
+def _add_pipeline_elements(pipeline, elements: list[Gst.Element | None]) -> None:
     for el in elements:
-        pipeline.add(el)
+        if el is not None:
+            pipeline.add(el)
 
-    _tee_branch(tee, q_ai)
-    _link(q_ai, conv_ai)
-    _link(conv_ai, caps_ai)
 
-    caps_ai_src = _get_static_pad(caps_ai, "src")
-    mux_sinkpad = _request_mux_sinkpad(mux, "sink_0")
+def _ai_branch_elements(ctx: dict) -> list[Gst.Element | None]:
+    elements = [
+        ctx["q_ai"], ctx["conv_ai"], ctx["caps_ai"],
+        ctx["mux"], ctx["pgie"], ctx["tracker"],
+    ]
+    if ctx["debug_video_enabled"]:
+        elements.extend([
+            ctx["conv_pre"], ctx["nvosd"], ctx["conv_post"], ctx["caps_post"],
+            ctx["q_post"], ctx["enc"], ctx["parse"], ctx["parse_tee"],
+            ctx.get("q_rtsp"), ctx.get("sink"),
+        ])
+    else:
+        elements.append(ctx.get("drain"))
+    elements.extend([ctx.get("q_rec"), ctx.get("rec")])
+    return elements
+
+
+def _configure_ai_branch_queues(ctx: dict) -> None:
+    _configure_queue(ctx["q_ai"])
+    if ctx.get("q_post") is not None:
+        _configure_queue(ctx["q_post"])
+    if ctx.get("q_rtsp") is not None:
+        _configure_queue(ctx["q_rtsp"])
+    if ctx.get("q_rec") is not None:
+        _configure_queue(ctx["q_rec"], max_size_buffers=RECORD_QUEUE_BUFFERS)
+
+
+def _link_ai_input_to_mux(tee, ctx: dict, suffix: str) -> None:
+    _tee_branch(tee, ctx["q_ai"])
+    _link(ctx["q_ai"], ctx["conv_ai"])
+    _link(ctx["conv_ai"], ctx["caps_ai"])
+    caps_ai_src = _get_static_pad(ctx["caps_ai"], "src")
+    mux_sinkpad = _request_mux_sinkpad(ctx["mux"], "sink_0")
     if caps_ai_src.link(mux_sinkpad) != Gst.PadLinkReturn.OK:
         sys.stderr.write(f"ERROR: Failed to link caps{suffix}_ai -> mux{suffix}.sink_0\n")
         sys.exit(1)
 
-    if debug_video_enabled:
-        _link_many(
-            mux, pgie, tracker, conv_pre, nvosd, conv_post,
-            caps_post, q_post, enc, parse, parse_tee,
-        )
 
-        if q_rtsp is not None and sink is not None:
-            _tee_branch(parse_tee, q_rtsp)
-            _link(q_rtsp, sink)
+def _link_ai_debug_path(ctx: dict, cam_label: str) -> None:
+    _link_many(
+        ctx["mux"], ctx["pgie"], ctx["tracker"], ctx["conv_pre"], ctx["nvosd"],
+        ctx["conv_post"], ctx["caps_post"], ctx["q_post"], ctx["enc"],
+        ctx["parse"], ctx["parse_tee"],
+    )
+    if ctx.get("q_rtsp") is not None and ctx.get("sink") is not None:
+        _tee_branch(ctx["parse_tee"], ctx["q_rtsp"])
+        _link(ctx["q_rtsp"], ctx["sink"])
+    _link_ai_recording_path(ctx, cam_label)
 
-        if q_rec is not None and rec is not None:
-            _tee_branch(parse_tee, q_rec)
-            _link_src_to_request_pad(q_rec, rec, "video", f"{_stream_camera_name(cam_label)} recording")
-            print(
-                f"{_stream_camera_name(cam_label)} AI recording enabled -> {RECORDINGS_DIR} "
-                f"({RECORD_SEGMENT_SECONDS}s segments, .{RECORD_FILE_EXTENSION})"
-            )
-        else:
-            print(f"{_stream_camera_name(cam_label)} AI recording disabled")
+
+def _link_ai_recording_path(ctx: dict, cam_label: str) -> None:
+    if ctx.get("q_rec") is None or ctx.get("rec") is None:
+        print(f"{_stream_camera_name(cam_label)} AI recording disabled")
+        return
+    _tee_branch(ctx["parse_tee"], ctx["q_rec"])
+    _link_src_to_request_pad(ctx["q_rec"], ctx["rec"], "video", f"{_stream_camera_name(cam_label)} recording")
+    print(
+        f"{_stream_camera_name(cam_label)} AI recording enabled -> {RECORDINGS_DIR} "
+        f"({RECORD_SEGMENT_SECONDS}s segments, .{RECORD_FILE_EXTENSION})"
+    )
+
+
+def _link_ai_processing_path(ctx: dict) -> None:
+    _link_many(ctx["mux"], ctx["pgie"], ctx["tracker"], ctx["drain"])
+
+
+def _build_ai_branch_context(suffix: str, rtsp_path: str, infer_config: str, cam_label: str) -> dict:
+    stream_enabled = _ai_stream_enabled(cam_label)
+    recording_enabled = _recording_enabled(cam_label)
+    ctx = _build_ai_base_elements(suffix, infer_config)
+    ctx.update({
+        "stream_enabled": stream_enabled,
+        "recording_enabled": recording_enabled,
+        "debug_video_enabled": stream_enabled or recording_enabled,
+    })
+    if ctx["debug_video_enabled"]:
+        ctx.update(_build_ai_debug_elements(suffix))
+        if stream_enabled:
+            ctx.update(_build_ai_rtsp_elements(suffix, rtsp_path))
+        if recording_enabled:
+            ctx.update(_build_ai_recording_elements(suffix, cam_label))
     else:
-        _link_many(mux, pgie, tracker, drain)
+        ctx.update(_build_ai_drain_element(suffix))
+    return ctx
+
+
+def _build_ai_branch(pipeline, tee, suffix: str, rtsp_path: str,
+                     infer_config: str, cam_label: str):
+    ctx = _build_ai_branch_context(suffix, rtsp_path, infer_config, cam_label)
+    _configure_ai_branch_queues(ctx)
+    _add_pipeline_elements(pipeline, _ai_branch_elements(ctx))
+    _link_ai_input_to_mux(tee, ctx, suffix)
+
+    if ctx["debug_video_enabled"]:
+        _link_ai_debug_path(ctx, cam_label)
+    else:
+        _link_ai_processing_path(ctx)
         print(f"{_stream_camera_name(cam_label)} AI debug stream disabled")
 
-    return pgie, enc if stream_enabled else None
+    return ctx["pgie"], ctx.get("enc") if ctx["stream_enabled"] else None
 
 
 def _link_tee_to_program_selector(
@@ -2356,7 +2452,7 @@ def _build_program_clean_branch(
 # ---------------------------------------------------------------------------
 # Main pipeline builder
 # ---------------------------------------------------------------------------
-def build_pipeline() -> tuple:
+def _reset_program_pipeline_state() -> None:
     global _encoders, _program_selector, _program_enc, _program_preview_enc, _last_program_cfg
     global _program_previous_camera, _program_switch_seq, _program_last_switch_at_ms
     global _program_switch_requested_camera, _program_switch_timer_queued
@@ -2375,63 +2471,102 @@ def build_pipeline() -> tuple:
     _program_switch_settle_until_monotonic = 0.0
     _program_preview_frame_index = 0
 
+
+def _new_pipeline() -> Gst.Pipeline:
     pipeline = Gst.Pipeline()
     if not pipeline:
         sys.stderr.write("ERROR: Unable to create Pipeline\n")
         sys.exit(1)
+    return pipeline
 
-    pgie0 = None
-    pgie2 = None
-    camera_tees: dict[str, Gst.Element] = {}
 
-    if ENABLE_FIXED_CAMERA:
-        print("Building fixed camera source ...")
-        tee0 = _build_camera_source(pipeline, FIXED_CAMERA_DEVICE, "0")
-        camera_tees[FIXED_CAMERA] = tee0
+def _ai_branch_message(camera_name: str, cam_label: str) -> str:
+    if _ai_stream_enabled(cam_label):
+        return f"Building {camera_name} AI RTSP branch (720p debug) ..."
+    return f"Building {camera_name} AI processing branch (debug RTSP disabled) ..."
 
-        if _ai_enabled("CAM0"):
-            if _ai_stream_enabled("CAM0"):
-                print("Building fixed camera AI RTSP branch (720p debug) ...")
-            else:
-                print("Building fixed camera AI processing branch (debug RTSP disabled) ...")
-            pgie0, enc0_ai = _build_ai_branch(
-                pipeline, tee0, "0", "camera0_ai",
-                "config_infer_primary_yoloV8_cam0.txt", "CAM0")
-            if enc0_ai is not None:
-                _encoders["enc0_ai"] = enc0_ai
-        else:
-            print("Fixed camera AI disabled — skipping AI branch")
-    else:
-        print("Fixed camera disabled — skipping source and all branches")
 
-    if ENABLE_PTZ_CAMERA:
-        print("Building PTZ camera source ...")
-        tee2 = _build_camera_source(pipeline, PTZ_CAMERA_DEVICE, "2")
-        camera_tees[PTZ_CAMERA] = tee2
+def _build_camera_pipeline_branch(
+        pipeline: Gst.Pipeline,
+        camera_tees: dict[str, Gst.Element],
+        *,
+        enabled: bool,
+        camera_key: str,
+        camera_name: str,
+        device: str,
+        suffix: str,
+        cam_label: str,
+        rtsp_path: str,
+        infer_config: str,
+        encoder_key: str,
+) -> Gst.Element | None:
+    if not enabled:
+        print(f"{camera_name} disabled — skipping source and all branches")
+        return None
 
-        if _ai_enabled("CAM2"):
-            if _ai_stream_enabled("CAM2"):
-                print("Building PTZ camera AI RTSP branch (720p debug) ...")
-            else:
-                print("Building PTZ camera AI processing branch (debug RTSP disabled) ...")
-            pgie2, enc2_ai = _build_ai_branch(
-                pipeline, tee2, "2", "camera2_ai",
-                "config_infer_primary_yoloV8_cam2.txt", "CAM2")
-            if enc2_ai is not None:
-                _encoders["enc2_ai"] = enc2_ai
-        else:
-            print("PTZ camera AI disabled — skipping AI branch")
-    else:
-        print("PTZ camera disabled — skipping source and all branches")
+    print(f"Building {camera_name} source ...")
+    tee = _build_camera_source(pipeline, device, suffix)
+    camera_tees[camera_key] = tee
 
-    if not ENABLE_FIXED_CAMERA and not ENABLE_PTZ_CAMERA:
-        sys.stderr.write("ERROR: All cameras are disabled\n")
-        sys.exit(1)
+    if not _ai_enabled(cam_label):
+        print(f"{camera_name} AI disabled — skipping AI branch")
+        return None
 
+    print(_ai_branch_message(camera_name, cam_label))
+    pgie, enc_ai = _build_ai_branch(pipeline, tee, suffix, rtsp_path, infer_config, cam_label)
+    if enc_ai is not None:
+        _encoders[encoder_key] = enc_ai
+    return pgie
+
+
+def _ensure_any_camera_enabled() -> None:
+    if ENABLE_FIXED_CAMERA or ENABLE_PTZ_CAMERA:
+        return
+    sys.stderr.write("ERROR: All cameras are disabled\n")
+    sys.exit(1)
+
+
+def _build_program_outputs(pipeline: Gst.Pipeline, camera_tees: dict[str, Gst.Element]) -> None:
     print("Building switched program RTSP branches for stream worker/WebRTC ...")
     enc_program_stream, enc_program_clean = _build_program_clean_branch(pipeline, camera_tees)
     _encoders["enc_program_stream"] = enc_program_stream
     _encoders["enc_program_clean"] = enc_program_clean
+
+
+def build_pipeline() -> tuple:
+    _reset_program_pipeline_state()
+    pipeline = _new_pipeline()
+    camera_tees: dict[str, Gst.Element] = {}
+
+    pgie0 = _build_camera_pipeline_branch(
+        pipeline,
+        camera_tees,
+        enabled=ENABLE_FIXED_CAMERA,
+        camera_key=FIXED_CAMERA,
+        camera_name="Fixed camera",
+        device=FIXED_CAMERA_DEVICE,
+        suffix="0",
+        cam_label="CAM0",
+        rtsp_path="camera0_ai",
+        infer_config="config_infer_primary_yoloV8_cam0.txt",
+        encoder_key="enc0_ai",
+    )
+    pgie2 = _build_camera_pipeline_branch(
+        pipeline,
+        camera_tees,
+        enabled=ENABLE_PTZ_CAMERA,
+        camera_key=PTZ_CAMERA,
+        camera_name="PTZ camera",
+        device=PTZ_CAMERA_DEVICE,
+        suffix="2",
+        cam_label="CAM2",
+        rtsp_path="camera2_ai",
+        infer_config="config_infer_primary_yoloV8_cam2.txt",
+        encoder_key="enc2_ai",
+    )
+
+    _ensure_any_camera_enabled()
+    _build_program_outputs(pipeline, camera_tees)
 
     return pipeline, pgie0, pgie2
 
@@ -2439,90 +2574,128 @@ def build_pipeline() -> tuple:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def main():
+def _reset_rtmp_status() -> None:
     global _rtmp_status_sent, _rtmp_status_cached
     _rtmp_status_sent = False
     _rtmp_status_cached = None
 
+
+def _ensure_display_env() -> None:
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         os.environ.setdefault("DISPLAY", ":0")
         print("WARNING: DISPLAY not set — defaulting to :0")
 
+
+def _install_restart_signal_handler() -> None:
     def _restart_handler(_sig, _frame):
         raise SystemExit(int(ProcessExitCode.RESTART))
 
     signal.signal(signal.SIGUSR1, _restart_handler)
 
-    Gst.init(None)
 
+def _start_control_services() -> None:
     start_go_bridge_server()
     start_http_server()
     start_ptz_control_server()
     start_ptz_manual_relay()
 
+
+def _initialize_persistent_state() -> None:
     _persist_score_state()
     _persist_stream_worker_config()
     _emit_stream_status_and_sync_cache(False)
 
-    print("Building pipeline ...")
-    pipeline, pgie0, pgie2 = build_pipeline()
 
+def _attach_detection_probe(pgie, cam_label: str) -> None:
+    if pgie is None:
+        print(f"Probe skipped -> {_stream_camera_name(cam_label)} (camera or AI disabled)")
+        return
+
+    srcpad = pgie.get_static_pad("src")
+    if not srcpad:
+        sys.stderr.write(f"ERROR: Cannot get src pad of {pgie.get_name()}\n")
+        sys.exit(1)
+
+    srcpad.add_probe(Gst.PadProbeType.BUFFER, pgie_src_pad_buffer_probe, cam_label)
+    print(f"Probe attached -> {pgie.get_name()} ({_stream_camera_name(cam_label)})")
+
+
+def _attach_detection_probes(pgie0, pgie2) -> None:
     for pgie, cam_label in [(pgie0, "CAM0"), (pgie2, "CAM2")]:
-        if pgie is None:
-            print(f"Probe skipped -> {_stream_camera_name(cam_label)} (camera or AI disabled)")
-            continue
+        _attach_detection_probe(pgie, cam_label)
 
-        srcpad = pgie.get_static_pad("src")
-        if not srcpad:
-            sys.stderr.write(f"ERROR: Cannot get src pad of {pgie.get_name()}\n")
-            sys.exit(1)
 
-        srcpad.add_probe(Gst.PadProbeType.BUFFER, pgie_src_pad_buffer_probe, cam_label)
-        print(f"Probe attached -> {pgie.get_name()} ({_stream_camera_name(cam_label)})")
-
-    _startup_stream_requested = bool(read_stream_url())
-
+def _make_main_loop(pipeline: Gst.Pipeline) -> GLib.MainLoop:
     loop = GLib.MainLoop()
     bus = pipeline.get_bus()
     bus.add_signal_watch()
     bus.connect("message", bus_call, loop)
+    return loop
 
+
+def _install_periodic_tasks() -> None:
     if ENABLE_TERMINAL_FPS_METRICS and ENABLE_AI_FPS_METRICS:
         GLib.timeout_add_seconds(TERMINAL_FPS_INTERVAL_SEC, _fps_report)
     GLib.timeout_add_seconds(1, _poll_stream_worker_status)
     GLib.timeout_add(200, _poll_program_config)
 
+
+def _start_worker_after_main_ready() -> bool:
+    ok, info = _start_stream_worker()
+    if ok:
+        print(f"[startup] stream worker {info}")
+    else:
+        print(f"[startup] stream worker failed to start: {info}")
+    return False
+
+
+def _schedule_startup_stream_if_needed(startup_stream_requested: bool) -> None:
+    if startup_stream_requested:
+        GLib.timeout_add_seconds(2, _start_worker_after_main_ready)
+
+
+def _cleanup_runtime_sockets() -> None:
+    for sock_path in (GO_BRIDGE_SOCK, PTZ_CONTROL_SOCK):
+        try:
+            os.unlink(sock_path)
+        except FileNotFoundError:
+            pass
+
+
+def _shutdown_pipeline(pipeline: Gst.Pipeline) -> None:
+    _stop_stream_worker()
+    print("Stopping pipeline ...")
+    pipeline.set_state(Gst.State.NULL)
+    pipeline.get_state(Gst.CLOCK_TIME_NONE)
+    _cleanup_runtime_sockets()
+
+
+def main():
+    _reset_rtmp_status()
+    _ensure_display_env()
+    _install_restart_signal_handler()
+
+    Gst.init(None)
+    _start_control_services()
+    _initialize_persistent_state()
+
+    print("Building pipeline ...")
+    pipeline, pgie0, pgie2 = build_pipeline()
+    _attach_detection_probes(pgie0, pgie2)
+    startup_stream_requested = bool(read_stream_url())
+    loop = _make_main_loop(pipeline)
+    _install_periodic_tasks()
+
     print("Starting pipeline ...")
     pipeline.set_state(Gst.State.PLAYING)
-
-    if _startup_stream_requested:
-        def _start_worker_after_main_ready() -> bool:
-            ok, info = _start_stream_worker()
-            if ok:
-                print(f"[startup] stream worker {info}")
-            else:
-                print(f"[startup] stream worker failed to start: {info}")
-            return False
-
-        GLib.timeout_add_seconds(2, _start_worker_after_main_ready)
+    _schedule_startup_stream_if_needed(startup_stream_requested)
 
     try:
         loop.run()
     except KeyboardInterrupt:
         pass
     finally:
-        _stop_stream_worker()
-        print("Stopping pipeline ...")
-        pipeline.set_state(Gst.State.NULL)
-        pipeline.get_state(Gst.CLOCK_TIME_NONE)
-        try:
-            os.unlink(GO_BRIDGE_SOCK)
-        except FileNotFoundError:
-            pass
-        try:
-            os.unlink(PTZ_CONTROL_SOCK)
-        except FileNotFoundError:
-            pass
+        _shutdown_pipeline(pipeline)
 
 
 if __name__ == "__main__":
