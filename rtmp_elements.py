@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from overlay_utils import set_overlay_alpha as _set_overlay_alpha
+from overlay_utils import set_overlay_silent as _set_overlay_silent
 from runtime_paths import (
     BLITZBALL_ACTIVE_PNG, BLITZBALL_SCOREBOARD_PNG, END_STATS_BG_PNG,
     FOULS_AWAY_DIR, FOULS_HOME_DIR,
@@ -1039,18 +1041,6 @@ def _active_end_stats(state: Mapping[str, Any]) -> Mapping[str, Any] | None:
     if end_stats.get("show_until", 0) <= now_ms:
         return None
     return end_stats
-
-
-def _set_overlay_alpha(els: _OverlayMap, key: str, alpha: float) -> None:
-    element = els.get(key)
-    if element:
-        element.set_property("alpha", alpha)
-
-
-def _set_overlay_silent(els: _OverlayMap, key: str, silent: bool) -> None:
-    element = els.get(key)
-    if element:
-        element.set_property("silent", silent)
 
 
 def _set_text_overlay(els: _OverlayMap, key: str, text: str) -> None:

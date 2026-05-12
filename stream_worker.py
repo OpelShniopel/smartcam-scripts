@@ -32,6 +32,8 @@ from camera_config import (
 )
 from exit_codes import ProcessExitCode
 from gst_utils import force_key_unit
+from overlay_utils import set_overlay_alpha as _set_overlay_alpha
+from overlay_utils import set_overlay_silent as _set_overlay_silent
 from runtime_paths import (
     SCOREBOARD_PNG,
     SCORE_STATE_FILE,
@@ -629,18 +631,6 @@ def _milestone_fade_step() -> bool:
 
     _apply_milestone_alpha(elements)
     return True
-
-
-def _set_overlay_alpha(els: _OverlayElements, key: str, alpha: float) -> None:
-    element = els.get(key)
-    if element:
-        element.set_property("alpha", alpha)
-
-
-def _set_overlay_silent(els: _OverlayElements, key: str, silent: bool) -> None:
-    element = els.get(key)
-    if element:
-        element.set_property("silent", silent)
 
 
 def _show_end_stat_text(
