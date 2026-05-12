@@ -422,67 +422,103 @@ def _timeout_fade_step() -> bool:
     return True
 
 
-def update_timeout_overlay(state: dict, els: dict) -> None:
+def _active_timeout_stats(state: dict, now_ms: int) -> dict | None:
+    timeout_stats = state.get("timeout_stats")
+    if not isinstance(timeout_stats, dict):
+        return None
+    if timeout_stats.get("show_until", 0) <= now_ms:
+        return None
+    return timeout_stats
+
+
+def _element_alpha(els: dict, key: str) -> float:
+    element = els.get(key)
+    return element.get_property("alpha") if element else 0.0
+
+
+def _capture_pre_timeout_alphas(els: dict) -> None:
+    global _pre_timeout_bg_alpha, _pre_timeout_home_foul_alpha, _pre_timeout_away_foul_alpha
+    _pre_timeout_bg_alpha = _element_alpha(els, "osd_bg")
+    _pre_timeout_home_foul_alpha = _element_alpha(els, "osd_home_fouls_bar")
+    _pre_timeout_away_foul_alpha = _element_alpha(els, "osd_away_fouls_bar")
+
+
+def _disable_scoreboard_cross_fade_shadow(els: dict, visible: bool) -> None:
+    if not visible:
+        return
+    for scoreboard_key in _SCOREBOARD_CROSS_FADE_KEYS:
+        element = els.get(scoreboard_key)
+        if element:
+            element.set_property("draw-shadow", False)
+
+
+def _silence_timeout_milestone(els: dict) -> None:
+    for milestone_key in ("osd_milestone_player", "osd_milestone_text"):
+        element = els.get(milestone_key)
+        if element:
+            element.set_property("silent", True)
+
+
+def _prepare_timeout_text_fade_in(els: dict) -> None:
+    for timeout_text_key in TIMEOUT_TEXT_KEYS:
+        element = els.get(timeout_text_key)
+        if element:
+            element.set_property("draw-shadow", False)
+            element.set_property("color", 0x00FFFFFF)
+            element.set_property("outline-color", 0x00000000)
+            element.set_property("silent", False)
+
+
+def _prepare_timeout_text_fade_out(els: dict) -> None:
+    for timeout_text_key in TIMEOUT_TEXT_KEYS:
+        element = els.get(timeout_text_key)
+        if element:
+            element.set_property("draw-shadow", False)
+
+
+def _start_timeout_fade_in(state: dict, els: dict, timeout_stats: dict) -> None:
     global _timeout_fade_in, _timeout_fade_out, _timeout_fade_active, _timeout_alpha
     global _sb_timeout_alpha, _timeout_pause_ticks
-    global _pre_timeout_bg_alpha, _pre_timeout_home_foul_alpha, _pre_timeout_away_foul_alpha
+    _timeout_fade_in = True
+    _timeout_fade_out = False
+    _timeout_fade_active = True
+    _timeout_alpha = 0.0
+    _sb_timeout_alpha = 1.0
+    _timeout_pause_ticks = 0
 
-    timeout_stats = state.get("timeout_stats")
-    now_ms = int(time.time() * 1000)
-    timeout_active = (
-            isinstance(timeout_stats, dict)
-            and timeout_stats.get("show_until", 0) > now_ms
-    )
+    _capture_pre_timeout_alphas(els)
+    _disable_scoreboard_cross_fade_shadow(els, state.get("visible", False))
+    _silence_timeout_milestone(els)
+    populate_timeout_texts(timeout_stats, state, els)
+    _prepare_timeout_text_fade_in(els)
+    GLib.timeout_add(100, _timeout_fade_step)
 
-    if timeout_active:
-        if not _timeout_fade_active:
-            _timeout_fade_in = True
-            _timeout_fade_out = False
-            _timeout_fade_active = True
-            _timeout_alpha = 0.0
-            _sb_timeout_alpha = 1.0
-            _timeout_pause_ticks = 0
 
-            # Capture current scoreboard pixel alphas for sequential fade
-            bg_el = els.get("osd_bg")
-            _pre_timeout_bg_alpha = bg_el.get_property("alpha") if bg_el else 0.0
-            home_foul_el = els.get("osd_home_fouls_bar")
-            _pre_timeout_home_foul_alpha = home_foul_el.get_property("alpha") if home_foul_el else 0.0
-            away_foul_el = els.get("osd_away_fouls_bar")
-            _pre_timeout_away_foul_alpha = away_foul_el.get_property("alpha") if away_foul_el else 0.0
+def _ensure_timeout_fade_in(state: dict, els: dict, timeout_stats: dict) -> None:
+    if not _timeout_fade_active:
+        _start_timeout_fade_in(state, els, timeout_stats)
 
-            # Prepare scoreboard text for fade-out (disable shadow before alpha fade)
-            visible = state.get("visible", False)
-            if visible:
-                for scoreboard_key in _SCOREBOARD_CROSS_FADE_KEYS:
-                    el = els.get(scoreboard_key)
-                    if el:
-                        el.set_property("draw-shadow", False)
 
-            # Silence milestone during timeout (has its own fade)
-            for milestone_key in ("osd_milestone_player", "osd_milestone_text"):
-                el = els.get(milestone_key)
-                if el:
-                    el.set_property("silent", True)
+def _start_timeout_fade_out(els: dict) -> None:
+    global _timeout_fade_in, _timeout_fade_out, _timeout_pause_ticks
+    _timeout_fade_in = False
+    _timeout_fade_out = True
+    _timeout_pause_ticks = 0
+    _prepare_timeout_text_fade_out(els)
 
-            populate_timeout_texts(timeout_stats, state, els)
-            for timeout_text_key in TIMEOUT_TEXT_KEYS:
-                el = els.get(timeout_text_key)
-                if el:
-                    el.set_property("draw-shadow", False)
-                    el.set_property("color", 0x00FFFFFF)
-                    el.set_property("outline-color", 0x00000000)
-                    el.set_property("silent", False)
-            GLib.timeout_add(100, _timeout_fade_step)
-    else:
-        if _timeout_fade_active and not _timeout_fade_out:
-            _timeout_fade_in = False
-            _timeout_fade_out = True
-            _timeout_pause_ticks = 0
-            for timeout_text_key in TIMEOUT_TEXT_KEYS:
-                el = els.get(timeout_text_key)
-                if el:
-                    el.set_property("draw-shadow", False)
+
+def _ensure_timeout_fade_out(els: dict) -> None:
+    if _timeout_fade_active and not _timeout_fade_out:
+        _start_timeout_fade_out(els)
+
+
+def update_timeout_overlay(state: dict, els: dict) -> None:
+    timeout_stats = _active_timeout_stats(state, int(time.time() * 1000))
+    if timeout_stats is not None:
+        _ensure_timeout_fade_in(state, els, timeout_stats)
+        return
+
+    _ensure_timeout_fade_out(els)
 
 
 def _milestone_elements() -> tuple:
