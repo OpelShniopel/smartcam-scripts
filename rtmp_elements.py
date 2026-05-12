@@ -45,7 +45,7 @@ FONT_UBUNTU_MONO_BOLD_32 = "Ubuntu Mono Bold 32"
 FONT_UBUNTU_MONO_BOLD_42 = "Ubuntu Mono Bold 42"
 
 
-def _set_if_supported(el: Any, prop: str, value) -> None:
+def _set_if_supported(el: Any, prop: str, value: Any) -> None:
     if el.find_property(prop) is not None:
         el.set_property(prop, value)
 

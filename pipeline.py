@@ -1347,7 +1347,7 @@ def _capsfilter(name: str, caps_str: str) -> Gst.Element:
     return el
 
 
-def _set_if_supported(el: Gst.Element, prop: str, value) -> None:
+def _set_if_supported(el: Gst.Element, prop: str, value: Any) -> None:
     if el.find_property(prop) is not None:
         el.set_property(prop, value)
 
