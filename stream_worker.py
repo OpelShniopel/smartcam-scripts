@@ -424,6 +424,7 @@ def _timeout_fade_step() -> bool:
 
 def update_timeout_overlay(state: dict, els: dict) -> None:
     global _timeout_fade_in, _timeout_fade_out, _timeout_fade_active, _timeout_alpha
+    global _sb_timeout_alpha, _timeout_pause_ticks
     global _pre_timeout_bg_alpha, _pre_timeout_home_foul_alpha, _pre_timeout_away_foul_alpha
 
     timeout_stats = state.get("timeout_stats")
@@ -453,20 +454,20 @@ def update_timeout_overlay(state: dict, els: dict) -> None:
             # Prepare scoreboard text for fade-out (disable shadow before alpha fade)
             visible = state.get("visible", False)
             if visible:
-                for key in _SCOREBOARD_CROSS_FADE_KEYS:
-                    el = els.get(key)
+                for scoreboard_key in _SCOREBOARD_CROSS_FADE_KEYS:
+                    el = els.get(scoreboard_key)
                     if el:
                         el.set_property("draw-shadow", False)
 
             # Silence milestone during timeout (has its own fade)
-            for key in ("osd_milestone_player", "osd_milestone_text"):
-                el = els.get(key)
+            for milestone_key in ("osd_milestone_player", "osd_milestone_text"):
+                el = els.get(milestone_key)
                 if el:
                     el.set_property("silent", True)
 
             populate_timeout_texts(timeout_stats, state, els)
-            for key in TIMEOUT_TEXT_KEYS:
-                el = els.get(key)
+            for timeout_text_key in TIMEOUT_TEXT_KEYS:
+                el = els.get(timeout_text_key)
                 if el:
                     el.set_property("draw-shadow", False)
                     el.set_property("color", 0x00FFFFFF)
@@ -478,8 +479,8 @@ def update_timeout_overlay(state: dict, els: dict) -> None:
             _timeout_fade_in = False
             _timeout_fade_out = True
             _timeout_pause_ticks = 0
-            for key in TIMEOUT_TEXT_KEYS:
-                el = els.get(key)
+            for timeout_text_key in TIMEOUT_TEXT_KEYS:
+                el = els.get(timeout_text_key)
                 if el:
                     el.set_property("draw-shadow", False)
 
