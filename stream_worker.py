@@ -69,7 +69,13 @@ ENABLE_TERMINAL_FPS_METRICS = True
 ENABLE_RTMP_FPS_METRICS = True
 TERMINAL_FPS_INTERVAL_SEC = 5
 
-_loop: GLib.MainLoop | None = None
+
+class _QuitLoop(Protocol):
+    def quit(self) -> None:
+        ...
+
+
+_loop: _QuitLoop | None = None
 _status_lock = threading.Lock()
 _status_payload: dict = {
     "worker_alive": True,
@@ -138,6 +144,7 @@ class _OverlayPropertyElement(Protocol):
         ...
 
 
+_OverlayElements = dict[str, _OverlayPropertyElement]
 _osd_elements: dict[str, _OverlayPropertyElement] = {}
 
 
@@ -281,7 +288,7 @@ def _blitz_pulse_step() -> bool:
     state = _last_score_state
     if not (state and state.get("blitz_active", False) and state.get("sport_code") == "BLITZBALL"):
         _blitz_pulse_active = False
-        els = dict(_osd_elements)
+        els = _overlay_elements_snapshot()
         el = els.get("osd_blitz_active")
         if el:
             el.set_property("alpha", 0.0)
@@ -290,7 +297,7 @@ def _blitz_pulse_step() -> bool:
     _blitz_pulse_phase += 0.15
     alpha = 0.5 + 0.4 * math.sin(_blitz_pulse_phase)
     _blitz_pulse_alpha = alpha
-    els = dict(_osd_elements)
+    els = _overlay_elements_snapshot()
     el = els.get("osd_blitz_active")
     if el:
         el.set_property("alpha", alpha)
@@ -301,24 +308,24 @@ def _alpha_color(alpha: float, rgb: int) -> int:
     return (int(alpha * 255) << 24) | rgb
 
 
-def _set_overlay_key_property(els: dict, key: str, prop: str, value) -> None:
+def _set_overlay_key_property(els: _OverlayElements, key: str, prop: str, value: Any) -> None:
     element = els.get(key)
     if element:
         element.set_property(prop, value)
 
 
-def _set_overlay_keys_property(els: dict, keys: tuple[str, ...], prop: str, value) -> None:
+def _set_overlay_keys_property(els: _OverlayElements, keys: tuple[str, ...], prop: str, value: Any) -> None:
     for key in keys:
         _set_overlay_key_property(els, key, prop, value)
 
 
-def _set_scoreboard_pixel_alpha(els: dict, alpha: float) -> None:
+def _set_scoreboard_pixel_alpha(els: _OverlayElements, alpha: float) -> None:
     _set_overlay_key_property(els, "osd_bg", "alpha", _pre_timeout_bg_alpha * alpha)
     _set_overlay_key_property(els, "osd_home_fouls_bar", "alpha", _pre_timeout_home_foul_alpha * alpha)
     _set_overlay_key_property(els, "osd_away_fouls_bar", "alpha", _pre_timeout_away_foul_alpha * alpha)
 
 
-def _set_scoreboard_text_alpha(els: dict, visible: bool, alpha: float) -> None:
+def _set_scoreboard_text_alpha(els: _OverlayElements, visible: bool, alpha: float) -> None:
     if not visible:
         return
     color = _alpha_color(alpha, 0x00FFFFFF)
@@ -328,7 +335,7 @@ def _set_scoreboard_text_alpha(els: dict, visible: bool, alpha: float) -> None:
         _set_overlay_key_property(els, key, "outline-color", outline)
 
 
-def _set_timeout_alpha(els: dict, timeout_bg, alpha: float) -> None:
+def _set_timeout_alpha(els: _OverlayElements, timeout_bg: _OverlayPropertyElement | None, alpha: float) -> None:
     if timeout_bg:
         timeout_bg.set_property("alpha", alpha)
     color = _alpha_color(alpha, 0x00FFFFFF)
@@ -346,7 +353,7 @@ def _pause_timeout_transition() -> bool:
     return True
 
 
-def _fade_scoreboard_out_for_timeout(els: dict, visible: bool) -> bool:
+def _fade_scoreboard_out_for_timeout(els: _OverlayElements, visible: bool) -> bool:
     global _sb_timeout_alpha, _timeout_pause_ticks
     if _sb_timeout_alpha <= 0.0:
         return False
@@ -361,7 +368,7 @@ def _fade_scoreboard_out_for_timeout(els: dict, visible: bool) -> bool:
     return True
 
 
-def _fade_timeout_in(els: dict, timeout_bg) -> None:
+def _fade_timeout_in(els: _OverlayElements, timeout_bg: _OverlayPropertyElement | None) -> None:
     global _timeout_alpha, _timeout_fade_in
     _timeout_alpha = min(1.0, _timeout_alpha + 0.05)
     _set_timeout_alpha(els, timeout_bg, _timeout_alpha)
@@ -370,7 +377,11 @@ def _fade_timeout_in(els: dict, timeout_bg) -> None:
         _set_overlay_keys_property(els, TIMEOUT_TEXT_KEYS, "draw-shadow", True)
 
 
-def _timeout_fade_in_step(els: dict, timeout_bg, visible: bool) -> None:
+def _timeout_fade_in_step(
+        els: _OverlayElements,
+        timeout_bg: _OverlayPropertyElement | None,
+        visible: bool,
+) -> None:
     if _fade_scoreboard_out_for_timeout(els, visible):
         return
     if _pause_timeout_transition():
@@ -378,7 +389,7 @@ def _timeout_fade_in_step(els: dict, timeout_bg, visible: bool) -> None:
     _fade_timeout_in(els, timeout_bg)
 
 
-def _restore_scoreboard_for_timeout_out(els: dict, visible: bool) -> None:
+def _restore_scoreboard_for_timeout_out(els: _OverlayElements, visible: bool) -> None:
     if not visible:
         return
     for key in _SCOREBOARD_CROSS_FADE_KEYS:
@@ -388,7 +399,7 @@ def _restore_scoreboard_for_timeout_out(els: dict, visible: bool) -> None:
         _set_overlay_key_property(els, key, "silent", False)
 
 
-def _fade_timeout_out(els: dict, timeout_bg, visible: bool) -> bool:
+def _fade_timeout_out(els: _OverlayElements, timeout_bg: _OverlayPropertyElement | None, visible: bool) -> bool:
     global _timeout_alpha, _timeout_pause_ticks
     if _timeout_alpha <= 0.0:
         return False
@@ -404,7 +415,7 @@ def _fade_timeout_out(els: dict, timeout_bg, visible: bool) -> bool:
     return True
 
 
-def _restore_scoreboard_after_timeout(els: dict, visible: bool) -> None:
+def _restore_scoreboard_after_timeout(els: _OverlayElements, visible: bool) -> None:
     if not visible:
         return
     for key in _SCOREBOARD_CROSS_FADE_KEYS:
@@ -413,7 +424,7 @@ def _restore_scoreboard_after_timeout(els: dict, visible: bool) -> None:
         _set_overlay_key_property(els, key, "draw-shadow", True)
 
 
-def _finish_timeout_fade_out(els: dict, visible: bool) -> bool:
+def _finish_timeout_fade_out(els: _OverlayElements, visible: bool) -> bool:
     global _timeout_fade_out, _timeout_fade_active
     _restore_scoreboard_after_timeout(els, visible)
     _timeout_fade_out = False
@@ -423,7 +434,7 @@ def _finish_timeout_fade_out(els: dict, visible: bool) -> bool:
     return False
 
 
-def _fade_scoreboard_in_after_timeout(els: dict, visible: bool) -> bool:
+def _fade_scoreboard_in_after_timeout(els: _OverlayElements, visible: bool) -> bool:
     global _sb_timeout_alpha
     _sb_timeout_alpha = min(1.0, _sb_timeout_alpha + 0.05)
     _set_scoreboard_pixel_alpha(els, _sb_timeout_alpha)
@@ -433,7 +444,11 @@ def _fade_scoreboard_in_after_timeout(els: dict, visible: bool) -> bool:
     return True
 
 
-def _timeout_fade_out_step(els: dict, timeout_bg, visible: bool) -> bool:
+def _timeout_fade_out_step(
+        els: _OverlayElements,
+        timeout_bg: _OverlayPropertyElement | None,
+        visible: bool,
+) -> bool:
     if _fade_timeout_out(els, timeout_bg, visible):
         return True
     if _pause_timeout_transition():
@@ -442,7 +457,7 @@ def _timeout_fade_out_step(els: dict, timeout_bg, visible: bool) -> bool:
 
 
 def _timeout_fade_step() -> bool:
-    els = dict(_osd_elements)
+    els = _overlay_elements_snapshot()
     timeout_bg = els.get("osd_timeout_bg")
     visible = _last_score_state.get("visible", False) if _last_score_state else False
 
@@ -463,21 +478,21 @@ def _active_timeout_stats(state: dict, now_ms: int) -> dict | None:
     return timeout_stats
 
 
-def _element_alpha(els: dict, key: str) -> float:
+def _element_alpha(els: _OverlayElements, key: str) -> float:
     element = els.get(key)
     if element is None:
         return 0.0
     return element.get_property("alpha")
 
 
-def _capture_pre_timeout_alphas(els: dict) -> None:
+def _capture_pre_timeout_alphas(els: _OverlayElements) -> None:
     global _pre_timeout_bg_alpha, _pre_timeout_home_foul_alpha, _pre_timeout_away_foul_alpha
     _pre_timeout_bg_alpha = _element_alpha(els, "osd_bg")
     _pre_timeout_home_foul_alpha = _element_alpha(els, "osd_home_fouls_bar")
     _pre_timeout_away_foul_alpha = _element_alpha(els, "osd_away_fouls_bar")
 
 
-def _disable_scoreboard_cross_fade_shadow(els: dict, visible: bool) -> None:
+def _disable_scoreboard_cross_fade_shadow(els: _OverlayElements, visible: bool) -> None:
     if not visible:
         return
     for scoreboard_key in _SCOREBOARD_CROSS_FADE_KEYS:
@@ -486,14 +501,14 @@ def _disable_scoreboard_cross_fade_shadow(els: dict, visible: bool) -> None:
             element.set_property("draw-shadow", False)
 
 
-def _silence_timeout_milestone(els: dict) -> None:
+def _silence_timeout_milestone(els: _OverlayElements) -> None:
     for milestone_key in ("osd_milestone_player", "osd_milestone_text"):
         element = els.get(milestone_key)
         if element:
             element.set_property("silent", True)
 
 
-def _prepare_timeout_text_fade_in(els: dict) -> None:
+def _prepare_timeout_text_fade_in(els: _OverlayElements) -> None:
     for timeout_text_key in TIMEOUT_TEXT_KEYS:
         element = els.get(timeout_text_key)
         if element:
@@ -503,14 +518,14 @@ def _prepare_timeout_text_fade_in(els: dict) -> None:
             element.set_property("silent", False)
 
 
-def _prepare_timeout_text_fade_out(els: dict) -> None:
+def _prepare_timeout_text_fade_out(els: _OverlayElements) -> None:
     for timeout_text_key in TIMEOUT_TEXT_KEYS:
         element = els.get(timeout_text_key)
         if element:
             element.set_property("draw-shadow", False)
 
 
-def _start_timeout_fade_in(state: dict, els: dict, timeout_stats: dict) -> None:
+def _start_timeout_fade_in(state: dict, els: _OverlayElements, timeout_stats: dict) -> None:
     global _timeout_fade_in, _timeout_fade_out, _timeout_fade_active, _timeout_alpha
     global _sb_timeout_alpha, _timeout_pause_ticks
     _timeout_fade_in = True
@@ -528,12 +543,12 @@ def _start_timeout_fade_in(state: dict, els: dict, timeout_stats: dict) -> None:
     GLib.timeout_add(100, _timeout_fade_step)
 
 
-def _ensure_timeout_fade_in(state: dict, els: dict, timeout_stats: dict) -> None:
+def _ensure_timeout_fade_in(state: dict, els: _OverlayElements, timeout_stats: dict) -> None:
     if not _timeout_fade_active:
         _start_timeout_fade_in(state, els, timeout_stats)
 
 
-def _start_timeout_fade_out(els: dict) -> None:
+def _start_timeout_fade_out(els: _OverlayElements) -> None:
     global _timeout_fade_in, _timeout_fade_out, _timeout_pause_ticks
     _timeout_fade_in = False
     _timeout_fade_out = True
@@ -541,12 +556,12 @@ def _start_timeout_fade_out(els: dict) -> None:
     _prepare_timeout_text_fade_out(els)
 
 
-def _ensure_timeout_fade_out(els: dict) -> None:
+def _ensure_timeout_fade_out(els: _OverlayElements) -> None:
     if _timeout_fade_active and not _timeout_fade_out:
         _start_timeout_fade_out(els)
 
 
-def update_timeout_overlay(state: dict, els: dict) -> None:
+def update_timeout_overlay(state: dict, els: _OverlayElements) -> None:
     timeout_stats = _active_timeout_stats(state, int(time.time() * 1000))
     if timeout_stats is not None:
         _ensure_timeout_fade_in(state, els, timeout_stats)
@@ -555,18 +570,24 @@ def update_timeout_overlay(state: dict, els: dict) -> None:
     _ensure_timeout_fade_out(els)
 
 
-def _milestone_elements() -> tuple:
-    els = dict(_osd_elements)
+def _milestone_elements() -> tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None]:
+    els = _overlay_elements_snapshot()
     return els.get("osd_milestone_player"), els.get("osd_milestone_text")
 
 
-def _set_milestone_elements_property(elements: tuple, prop: str, value) -> None:
+def _set_milestone_elements_property(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+        prop: str,
+        value: Any,
+) -> None:
     for element in elements:
         if element:
             element.set_property(prop, value)
 
 
-def _apply_milestone_alpha(elements: tuple) -> None:
+def _apply_milestone_alpha(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+) -> None:
     a = int(_milestone_alpha * 255)
     fg = (a << 24) | 0x00FFFFFF
     outline = (a << 24) | 0x00000000
@@ -576,7 +597,9 @@ def _apply_milestone_alpha(elements: tuple) -> None:
             element.set_property("outline-color", outline)
 
 
-def _advance_milestone_fade_in(elements: tuple) -> None:
+def _advance_milestone_fade_in(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+) -> None:
     global _milestone_alpha, _milestone_fading_in
     _milestone_alpha = min(1.0, _milestone_alpha + 0.1)
     if _milestone_alpha >= 1.0:
@@ -584,7 +607,9 @@ def _advance_milestone_fade_in(elements: tuple) -> None:
         _set_milestone_elements_property(elements, "draw-shadow", True)
 
 
-def _advance_milestone_fade_out(elements: tuple) -> bool:
+def _advance_milestone_fade_out(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+) -> bool:
     global _milestone_alpha, _milestone_fading_out, _milestone_fade_active
     _milestone_alpha = max(0.0, _milestone_alpha - 0.05)
     if _milestone_alpha > 0.0:
@@ -606,19 +631,24 @@ def _milestone_fade_step() -> bool:
     return True
 
 
-def _set_overlay_alpha(els: dict, key: str, alpha: float) -> None:
+def _set_overlay_alpha(els: _OverlayElements, key: str, alpha: float) -> None:
     element = els.get(key)
     if element:
         element.set_property("alpha", alpha)
 
 
-def _set_overlay_silent(els: dict, key: str, silent: bool) -> None:
+def _set_overlay_silent(els: _OverlayElements, key: str, silent: bool) -> None:
     element = els.get(key)
     if element:
         element.set_property("silent", silent)
 
 
-def _show_end_stat_text(els: dict, element_key: str, text: str, color: int | None = None) -> None:
+def _show_end_stat_text(
+        els: _OverlayElements,
+        element_key: str,
+        text: str,
+        color: int | None = None,
+) -> None:
     text_element = els.get(element_key)
     if not text_element:
         return
@@ -628,7 +658,7 @@ def _show_end_stat_text(els: dict, element_key: str, text: str, color: int | Non
         text_element.set_property("color", color)
 
 
-def _hide_scoreboards_for_end_stats(els: dict) -> None:
+def _hide_scoreboards_for_end_stats(els: _OverlayElements) -> None:
     for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
         _set_overlay_alpha(els, key, 0.0)
     for key in ("osd_quarter", "osd_home", "osd_away",
@@ -677,24 +707,29 @@ def _end_stat_rows(state: dict) -> tuple[tuple[str, str, int | None], ...]:
     )
 
 
-def _populate_blitzball_end_stats(state: dict, els: dict) -> None:
+def _populate_blitzball_end_stats(state: dict, els: _OverlayElements) -> None:
     for element_key, text, color in _end_stat_rows(state):
         _show_end_stat_text(els, element_key, text, color)
     for key in ("osd_end_home_blitz_rate", "osd_end_away_blitz_rate"):
         _set_overlay_silent(els, key, True)
 
 
-def _show_blitzball_end_stats(state: dict, els: dict) -> None:
+def _show_blitzball_end_stats(state: dict, els: _OverlayElements) -> None:
     _hide_scoreboards_for_end_stats(els)
     _set_overlay_alpha(els, "osd_end_bg", 0.85)
     _populate_blitzball_end_stats(state, els)
 
 
-def _overlay_elements_snapshot() -> dict[str, _OverlayPropertyElement]:
+def _overlay_elements_snapshot() -> _OverlayElements:
     return dict(_osd_elements)
 
 
-def _handle_blitzball_finished_stats(state: dict, els: dict, sport_code: str, now_ms: int) -> bool:
+def _handle_blitzball_finished_stats(
+        state: dict,
+        els: _OverlayElements,
+        sport_code: str,
+        now_ms: int,
+) -> bool:
     global _end_stats_show_until
     game_finished = state.get("game_finished", False)
     if not game_finished:
@@ -751,14 +786,20 @@ def _update_foul_bar(
     element.set_property("alpha", 1.0 if visible else 0.0)
 
 
-def _prepare_milestone_fade_elements(elements: tuple, reset_color: bool) -> None:
+def _prepare_milestone_fade_elements(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+        reset_color: bool,
+) -> None:
     _set_milestone_elements_property(elements, "draw-shadow", False)
     if reset_color:
         _set_milestone_elements_property(elements, "color", 0x00FFFFFF)
         _set_milestone_elements_property(elements, "outline-color", 0x00000000)
 
 
-def _start_milestone_fade_in(elements: tuple, state: dict) -> None:
+def _start_milestone_fade_in(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+        state: dict,
+) -> None:
     global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
     _milestone_fading_in = True
     _milestone_fading_out = False
@@ -769,7 +810,10 @@ def _start_milestone_fade_in(elements: tuple, state: dict) -> None:
     GLib.timeout_add(100, _milestone_fade_step)
 
 
-def _resume_milestone_fade_in(elements: tuple, state: dict) -> None:
+def _resume_milestone_fade_in(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+        state: dict,
+) -> None:
     global _milestone_fading_in, _milestone_fading_out
     _milestone_fading_in = True
     _milestone_fading_out = False
@@ -783,14 +827,20 @@ def _start_milestone_fade_out() -> None:
     _milestone_fading_out = True
 
 
-def _update_active_milestone(elements: tuple, state: dict) -> None:
+def _update_active_milestone(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+        state: dict,
+) -> None:
     if not _milestone_fade_active:
         _start_milestone_fade_in(elements, state)
     elif _milestone_fading_out:
         _resume_milestone_fade_in(elements, state)
 
 
-def _update_inactive_milestone(elements: tuple, state: dict) -> None:
+def _update_inactive_milestone(
+        elements: tuple[_OverlayPropertyElement | None, _OverlayPropertyElement | None],
+        state: dict,
+) -> None:
     if _milestone_fade_active and not _milestone_fading_out:
         _start_milestone_fade_out()
         return
@@ -798,7 +848,7 @@ def _update_inactive_milestone(elements: tuple, state: dict) -> None:
         update_milestone_overlays(elements[0], elements[1], state)
 
 
-def _update_milestone_state(state: dict, els: dict[str, _OverlayPropertyElement]) -> None:
+def _update_milestone_state(state: dict, els: _OverlayElements) -> None:
     elements = els.get("osd_milestone_player"), els.get("osd_milestone_text")
     if int(time.time() * 1000) < _milestone_display_until:
         _update_active_milestone(elements, state)
@@ -806,7 +856,7 @@ def _update_milestone_state(state: dict, els: dict[str, _OverlayPropertyElement]
     _update_inactive_milestone(elements, state)
 
 
-def _update_regular_scoreboard(state: dict, els: dict[str, _OverlayPropertyElement]) -> None:
+def _update_regular_scoreboard(state: dict, els: _OverlayElements) -> None:
     visible = state.get("visible", False)
     update_quarter_overlay(els.get("osd_quarter"), visible, state)
     _set_team_overlay(els.get("osd_home"), state.get("home_name", "HOME"), "HOME", visible)
@@ -826,14 +876,14 @@ def _update_regular_scoreboard(state: dict, els: dict[str, _OverlayPropertyEleme
 
 def _update_regular_scoreboard_if_needed(
         state: dict,
-        els: dict[str, _OverlayPropertyElement],
+        els: _OverlayElements,
         sport_code: str,
 ) -> None:
     if not _timeout_fade_active and sport_code != "BLITZBALL":
         _update_regular_scoreboard(state, els)
 
 
-def _update_blitz_pulse(state: dict, els: dict) -> None:
+def _update_blitz_pulse(state: dict, els: _OverlayElements) -> None:
     global _blitz_pulse_active, _blitz_pulse_alpha
     blitz_pulse_needed = update_blitzball_overlay(state, els)
     if blitz_pulse_needed and not _blitz_pulse_active:
@@ -935,6 +985,12 @@ def _get_last_buffer_activity() -> float:
         return _last_buffer_monotonic
 
 
+def _quit_main_loop() -> None:
+    loop = _loop
+    if loop is not None:
+        loop.quit()
+
+
 def _count_rtmp_fps_frame() -> None:
     global _rtmp_fps_frames
     if not (ENABLE_TERMINAL_FPS_METRICS and ENABLE_RTMP_FPS_METRICS):
@@ -982,7 +1038,7 @@ def _stall_check() -> bool:
     print(f"[worker] {msg}")
     _set_status(stream_active=False, last_error=msg, active_camera=_current_active_camera)
     _exit_code = int(ProcessExitCode.STREAM_ERROR)
-    _loop.quit()
+    _quit_main_loop()
     return False
 
 
@@ -1006,8 +1062,7 @@ def _verify_timeout() -> bool:
         print(f"[worker] {msg}")
         _set_status(stream_active=False, last_error=msg, active_camera=_current_active_camera)
         _exit_code = int(ProcessExitCode.STREAM_ERROR)
-        if _loop is not None:
-            _loop.quit()
+        _quit_main_loop()
     return False
 
 
@@ -1173,7 +1228,7 @@ def build_pipeline() -> tuple[Gst.Pipeline, Gst.Element]:
     return pipeline, rtmp.rtmpsink
 
 
-def bus_call(_bus, message, loop: GLib.MainLoop):
+def bus_call(_bus, message, loop: _QuitLoop):
     global _exit_code
     t = message.type
     if t == Gst.MessageType.EOS:
@@ -1243,8 +1298,7 @@ def main() -> None:
         GLib.timeout_add_seconds(TERMINAL_FPS_INTERVAL_SEC, _rtmp_fps_report)
 
     def _signal_handler(_sig, _frame):
-        if _loop is not None:
-            _loop.quit()
+        _quit_main_loop()
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
