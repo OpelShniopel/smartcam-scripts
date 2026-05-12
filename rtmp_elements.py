@@ -779,22 +779,18 @@ _BLITZ_SCOREBOARD_TEXT_KEYS: tuple[str, ...] = (
 )
 
 
-def configure_blitzball_overlay(elements: RtmpElements) -> None:
-    bg = elements.osd_blitz_bg
-    bg.set_property("location", BLITZBALL_SCOREBOARD_PNG)
-    bg.set_property("offset-x", 465)
-    bg.set_property("offset-y", 900)
-    bg.set_property("overlay-width", 990)
-    bg.set_property("overlay-height", 180)
-    bg.set_property("alpha", 0.0)
+def _configure_blitzball_image_overlay(element: Any, image_path: str) -> None:
+    element.set_property("location", image_path)
+    element.set_property("offset-x", 465)
+    element.set_property("offset-y", 900)
+    element.set_property("overlay-width", 990)
+    element.set_property("overlay-height", 180)
+    element.set_property("alpha", 0.0)
 
-    active = elements.osd_blitz_active
-    active.set_property("location", BLITZBALL_ACTIVE_PNG)
-    active.set_property("offset-x", 465)
-    active.set_property("offset-y", 900)
-    active.set_property("overlay-width", 990)
-    active.set_property("overlay-height", 180)
-    active.set_property("alpha", 0.0)
+
+def configure_blitzball_overlay(elements: RtmpElements) -> None:
+    _configure_blitzball_image_overlay(elements.osd_blitz_bg, BLITZBALL_SCOREBOARD_PNG)
+    _configure_blitzball_image_overlay(elements.osd_blitz_active, BLITZBALL_ACTIVE_PNG)
 
     setup_text_overlay(elements.osd_blitz_quarter, "", xpos=0.710, ypos=0.895, font=FONT_UBUNTU_MONO_BOLD_32,
                        color=0xFFFFFFFF)
