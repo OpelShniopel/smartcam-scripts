@@ -520,84 +520,88 @@ def _milestone_fade_step() -> bool:
     return True
 
 
-def _show_blitzball_end_stats(state: dict, els: dict) -> None:
-    # Step 1 — hide regular scoreboard pixel elements (gdkpixbufoverlay → alpha only)
+def _set_overlay_alpha(els: dict, key: str, alpha: float) -> None:
+    element = els.get(key)
+    if element:
+        element.set_property("alpha", alpha)
+
+
+def _set_overlay_silent(els: dict, key: str, silent: bool) -> None:
+    element = els.get(key)
+    if element:
+        element.set_property("silent", silent)
+
+
+def _show_end_stat_text(els: dict, element_key: str, text: str, color: int | None = None) -> None:
+    text_element = els.get(element_key)
+    if not text_element:
+        return
+    text_element.set_property("text", text)
+    text_element.set_property("silent", False)
+    if color is not None:
+        text_element.set_property("color", color)
+
+
+def _hide_scoreboards_for_end_stats(els: dict) -> None:
     for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
-        el = els.get(key)
-        if el:
-            el.set_property("alpha", 0.0)
-    # Hide regular scoreboard text elements (textoverlay → silent only)
+        _set_overlay_alpha(els, key, 0.0)
     for key in ("osd_quarter", "osd_home", "osd_away",
                 "osd_home_score", "osd_away_score", "osd_clock",
                 "osd_milestone_player", "osd_milestone_text"):
-        el = els.get(key)
-        if el:
-            el.set_property("silent", True)
+        _set_overlay_silent(els, key, True)
 
-    # Step 2 — hide blitz pixel elements (gdkpixbufoverlay → alpha only)
     for key in ("osd_blitz_bg", "osd_blitz_active"):
-        el = els.get(key)
-        if el:
-            el.set_property("alpha", 0.0)
-    # Hide blitz text elements (textoverlay → silent only)
+        _set_overlay_alpha(els, key, 0.0)
     for key in ("osd_blitz_home_name", "osd_blitz_away_name",
                 "osd_blitz_home_pts", "osd_blitz_home_blitz",
                 "osd_blitz_away_pts", "osd_blitz_away_blitz",
                 "osd_blitz_quarter", "osd_blitz_clock",
                 "osd_blitz_home_streak", "osd_blitz_away_streak"):
-        el = els.get(key)
-        if el:
-            el.set_property("silent", True)
+        _set_overlay_silent(els, key, True)
 
-    # Step 3 — show dark background
-    end_bg = els.get("osd_end_bg")
-    if end_bg:
-        end_bg.set_property("alpha", 0.85)
 
-    # Step 4 — populate stats text
+def _end_winner_text(state: dict) -> str:
     winner = state.get("winner", "")
     home_name = state.get("home_name", "HOME")
     away_name = state.get("away_name", "AWAY")
-    home_pts = state.get("home_points", 0)
-    away_pts = state.get("away_points", 0)
-    home_blitz = state.get("home_blitz_score", 0)
-    away_blitz = state.get("away_blitz_score", 0)
-
     if winner == "home":
-        winner_text = f"{home_name} WINS!"
-    elif winner == "away":
-        winner_text = f"{away_name} WINS!"
-    else:
-        winner_text = "DRAW!"
+        return f"{home_name} WINS!"
+    if winner == "away":
+        return f"{away_name} WINS!"
+    return "DRAW!"
 
-    def show_el(element_key: str, text: str, color: int | None = None) -> None:
-        text_element = els.get(element_key)
-        if not text_element:
-            return
-        text_element.set_property("text", text)
-        text_element.set_property("silent", False)
-        if color is not None:
-            text_element.set_property("color", color)
 
-    show_el("osd_end_winner", winner_text, 0xFFFFD700)
-    show_el("osd_end_header_home", home_name)
-    show_el("osd_end_header_away", away_name)
-    show_el("osd_end_home_pts", f"TOTAL  {home_pts} PTS")
-    show_el("osd_end_home_blitz", f"BLITZ  {home_blitz}", 0xFFFFD700)
-    show_el("osd_end_home_inner", f"INNER   {state.get('home_inner_scores', 0)}")
-    show_el("osd_end_home_middle", f"MIDDLE  {state.get('home_middle_scores', 0)}")
-    show_el("osd_end_home_outer", f"OUTER   {state.get('home_outer_scores', 0)}")
-    show_el("osd_end_home_intercept", f"INTERCEPTS  {state.get('home_interceptions', 0)}")
-    show_el("osd_end_away_pts", f"TOTAL  {away_pts} PTS")
-    show_el("osd_end_away_blitz", f"BLITZ  {away_blitz}", 0xFFFFD700)
-    show_el("osd_end_away_inner", f"INNER   {state.get('away_inner_scores', 0)}")
-    show_el("osd_end_away_middle", f"MIDDLE  {state.get('away_middle_scores', 0)}")
-    show_el("osd_end_away_outer", f"OUTER   {state.get('away_outer_scores', 0)}")
-    show_el("osd_end_away_intercept", f"INTERCEPTS  {state.get('away_interceptions', 0)}")
+def _end_stat_rows(state: dict) -> tuple[tuple[str, str, int | None], ...]:
+    return (
+        ("osd_end_winner", _end_winner_text(state), 0xFFFFD700),
+        ("osd_end_header_home", state.get("home_name", "HOME"), None),
+        ("osd_end_header_away", state.get("away_name", "AWAY"), None),
+        ("osd_end_home_pts", f"TOTAL  {state.get('home_points', 0)} PTS", None),
+        ("osd_end_home_blitz", f"BLITZ  {state.get('home_blitz_score', 0)}", 0xFFFFD700),
+        ("osd_end_home_inner", f"INNER   {state.get('home_inner_scores', 0)}", None),
+        ("osd_end_home_middle", f"MIDDLE  {state.get('home_middle_scores', 0)}", None),
+        ("osd_end_home_outer", f"OUTER   {state.get('home_outer_scores', 0)}", None),
+        ("osd_end_home_intercept", f"INTERCEPTS  {state.get('home_interceptions', 0)}", None),
+        ("osd_end_away_pts", f"TOTAL  {state.get('away_points', 0)} PTS", None),
+        ("osd_end_away_blitz", f"BLITZ  {state.get('away_blitz_score', 0)}", 0xFFFFD700),
+        ("osd_end_away_inner", f"INNER   {state.get('away_inner_scores', 0)}", None),
+        ("osd_end_away_middle", f"MIDDLE  {state.get('away_middle_scores', 0)}", None),
+        ("osd_end_away_outer", f"OUTER   {state.get('away_outer_scores', 0)}", None),
+        ("osd_end_away_intercept", f"INTERCEPTS  {state.get('away_interceptions', 0)}", None),
+    )
+
+
+def _populate_blitzball_end_stats(state: dict, els: dict) -> None:
+    for element_key, text, color in _end_stat_rows(state):
+        _show_end_stat_text(els, element_key, text, color)
     for key in ("osd_end_home_blitz_rate", "osd_end_away_blitz_rate"):
-        el = els.get(key)
-        if el:
-            el.set_property("silent", True)
+        _set_overlay_silent(els, key, True)
+
+
+def _show_blitzball_end_stats(state: dict, els: dict) -> None:
+    _hide_scoreboards_for_end_stats(els)
+    _set_overlay_alpha(els, "osd_end_bg", 0.85)
+    _populate_blitzball_end_stats(state, els)
 
 
 def _update_overlay(state: dict) -> None:
