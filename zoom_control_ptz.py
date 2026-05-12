@@ -1,38 +1,41 @@
-import serial
-import time
-import lens_helpers
 import math
+import time
+
+import serial
+
+import lens_helpers
 
 DEBUG = False
 
 # --- CONFIGURATION ---
-CSV_FILE       = "zoom_focus_table.csv"
-SERIAL_PORT_Z  = "/dev/zoom_control"
-ZOOM_SPEED     = 1000
-FOCUS_SPEED    = 1200
+CSV_FILE = "zoom_focus_table.csv"
+SERIAL_PORT_Z = "/dev/zoom_control"
+ZOOM_SPEED = 1000
+FOCUS_SPEED = 1200
 
 # --- LIMITS (Synchronized with fixed) ---
-ZOOM_BASE_POS  = 34700
-ZOOM_RTH_POS   = 34700
-ZOOM_MAX_STEPS = 34700   # 1x (widest FOV)
-ZOOM_MIN_STEPS = 29500   # max optical zoom (~3x)
+ZOOM_BASE_POS = 34700
+ZOOM_RTH_POS = 34700
+ZOOM_MAX_STEPS = 34700  # 1x (widest FOV)
+ZOOM_MIN_STEPS = 29500  # max optical zoom (~3x)
 MAX_OPTICAL_ZOOM = 3
 
 FOCUS_MAX_STEPS = 33300
 FOCUS_MIN_STEPS = 25340
 
 # --- TUNING ---
-TARGET_WIDTH            = 100   # Target ball width in pixels
-ZOOM_K                  = 1500  # Step multiplier: larger = faster zoom response
-NORM_DEADZONE           = 0.15   # Log-ratio deadzone (~±10% of target width)
-MAX_ZOOM_STEP           = 800   # Max steps per frame — keeps focus motor from falling behind
-VELOCITY_ZOOM_THRESHOLD = 35    # Ball horizontal speed (px/frame) that starts triggering zoom-out
-VELOCITY_ZOOM_GAIN      = 6.0   # Zoom-out steps added per px/frame above threshold
-FRAME_W                 = 1280  # Camera frame width in pixels
-FRAME_H                 = 720
-EDGE_MARGIN             = 0.25  # Fraction of frame width from each edge that triggers zoom-out
-EDGE_ZOOM_GAIN          = 4.0   # Zoom-out steps per pixel inside the edge margin
-MAX_SEGMENT             = 50    # Reduced to 50 to match fixed version's stability
+TARGET_WIDTH = 100  # Target ball width in pixels
+ZOOM_K = 1500  # Step multiplier: larger = faster zoom response
+NORM_DEADZONE = 0.15  # Log-ratio deadzone (~±10% of target width)
+MAX_ZOOM_STEP = 800  # Max steps per frame — keeps focus motor from falling behind
+VELOCITY_ZOOM_THRESHOLD = 35  # Ball horizontal speed (px/frame) that starts triggering zoom-out
+VELOCITY_ZOOM_GAIN = 6.0  # Zoom-out steps added per px/frame above threshold
+FRAME_W = 1280  # Camera frame width in pixels
+FRAME_H = 720
+EDGE_MARGIN = 0.25  # Fraction of frame width from each edge that triggers zoom-out
+EDGE_ZOOM_GAIN = 4.0  # Zoom-out steps per pixel inside the edge margin
+MAX_SEGMENT = 50  # Reduced to 50 to match fixed version's stability
+
 
 def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     last_exc = None
@@ -44,18 +47,19 @@ def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
             return s
         except serial.SerialException as e:
             last_exc = e
-            print(f"Port {port_path} not ready (attempt {attempt+1}/{retries}): {e}")
+            print(f"Port {port_path} not ready (attempt {attempt + 1}/{retries}): {e}")
             time.sleep(delay * (attempt + 1))
     raise last_exc
 
+
 class ZoomController:
     def __init__(self):
-        self.current_zoom_pos  = ZOOM_BASE_POS
-        self.target_zoom_pos   = ZOOM_BASE_POS
-        self.focus_bias        = 0
-        self.last_ball_x       = None
-        self.last_cmd_time     = 0
-        self.cmd_interval      = 0.05
+        self.current_zoom_pos = ZOOM_BASE_POS
+        self.target_zoom_pos = ZOOM_BASE_POS
+        self.focus_bias = 0
+        self.last_ball_x = None
+        self.last_cmd_time = 0
+        self.cmd_interval = 0.05
 
         try:
             self.ser_z = open_serial_with_retry(SERIAL_PORT_Z, 115200)
@@ -124,7 +128,7 @@ class ZoomController:
         lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHA_MOVE)
         lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHB_MOVE)
         self.current_zoom_pos = ZOOM_RTH_POS
-        self.target_zoom_pos  = ZOOM_RTH_POS
+        self.target_zoom_pos = ZOOM_RTH_POS
         print("Zoom home reached.")
 
     def apply_focus_bias(self, delta):
@@ -139,7 +143,7 @@ class ZoomController:
         if not self.ser_z:
             return
         self.target_zoom_pos = max(ZOOM_MIN_STEPS, min(ZOOM_MAX_STEPS,
-                                                        self.target_zoom_pos + zoom_steps))
+                                                       self.target_zoom_pos + zoom_steps))
         self._drive_motor()
 
     def process_detection(self, detections):
@@ -172,15 +176,15 @@ class ZoomController:
         # Overrides any size-based zoom-in — keeping ball in frame takes priority.
         dist_h = min(ball['center_x'], FRAME_W - ball['center_x'])
         dist_v = min(ball['center_y'], FRAME_H - ball['center_y'])
-        
+
         edge_margin_h = FRAME_W * EDGE_MARGIN
         edge_margin_v = FRAME_H * EDGE_MARGIN
-        
+
         edge_bias = 0.0
-        
+
         if dist_h < edge_margin_h:
             edge_bias = max(edge_bias, (edge_margin_h - dist_h) * EDGE_ZOOM_GAIN)
-            
+
         if dist_v < edge_margin_v:
             edge_bias = max(edge_bias, (edge_margin_v - dist_v) * EDGE_ZOOM_GAIN)
 

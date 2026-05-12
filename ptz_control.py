@@ -1,11 +1,11 @@
+import atexit
 import json
 import os
-import socket
-import time
-import sys
-import atexit
 import signal
+import socket
+import sys
 import threading
+import time
 
 # ----------------------------------------------------------------
 #  DETECTION SOURCE — set to "ptz" or "fixed"
@@ -23,25 +23,25 @@ else:
 
 _cleanup_done = False
 _cleanup_lock = threading.Lock()
-UNIX_SOCK   = "/tmp/ptz_control.sock"
+UNIX_SOCK = "/tmp/ptz_control.sock"
 MANUAL_SOCK = "/tmp/ptz_manual.sock"
-TARGET_CAM  = DETECTION_SOURCE   # listen for detections from this camera
-DEBUG       = False
-ENABLE_PAN  = True
+TARGET_CAM = DETECTION_SOURCE  # listen for detections from this camera
+DEBUG = False
+ENABLE_PAN = True
 ENABLE_ZOOM = True
 
-STEP_SIZE_STEPS   = 62    # motor steps per Go "step" (0.5° at 125 steps/°)
-JOG_STEPS_PER_SPS = 62    # motor steps/sec per Go stepsPerSecond unit
-STEP_TIMEOUT_S    = 5.0   # max seconds to wait for G command OK response
+STEP_SIZE_STEPS = 62  # motor steps per Go "step" (0.5° at 125 steps/°)
+JOG_STEPS_PER_SPS = 62  # motor steps/sec per Go stepsPerSecond unit
+STEP_TIMEOUT_S = 5.0  # max seconds to wait for G command OK response
 
-ZOOM_STEP_SIZE    = 100   # zoom_pos units per Go "step"
-ZOOM_JOG_INTERVAL = 0.1   # seconds between jog ticks
-ZOOM_JOG_PER_SPS  = 20    # zoom_pos units added per tick per stepsPerSecond unit
+ZOOM_STEP_SIZE = 100  # zoom_pos units per Go "step"
+ZOOM_JOG_INTERVAL = 0.1  # seconds between jog ticks
+ZOOM_JOG_PER_SPS = 20  # zoom_pos units added per tick per stepsPerSecond unit
 
 
 class PTZController:
     def __init__(self):
-        self.pan  = PanController(detection_source=DETECTION_SOURCE)  if ENABLE_PAN  else None
+        self.pan = PanController(detection_source=DETECTION_SOURCE) if ENABLE_PAN else None
         self.zoom = ZoomController() if ENABLE_ZOOM else None
 
         if not self.pan and not self.zoom:
@@ -54,7 +54,8 @@ class PTZController:
     def process_detection(self, detections):
         if self._manual_mode:
             return
-        speed_scale = self.zoom.get_pan_speed_factor() if (self.zoom and hasattr(self.zoom, 'ser_z') and self.zoom.ser_z) else 1.0
+        speed_scale = self.zoom.get_pan_speed_factor() if (
+                    self.zoom and hasattr(self.zoom, 'ser_z') and self.zoom.ser_z) else 1.0
         if self.pan:
             self.pan.process_detection(detections, speed_scale=speed_scale)
         if self.zoom:
@@ -91,7 +92,7 @@ class PTZController:
                 current = int(raw[1:]) if raw.startswith("P") else 0
             except ValueError:
                 current = 0
-            sign   = 1 if direction == "right" else -1
+            sign = 1 if direction == "right" else -1
             target = current + sign * steps * STEP_SIZE_STEPS
             ser.write(f"G{target}\n".encode())
             deadline = time.time() + STEP_TIMEOUT_S
@@ -108,7 +109,7 @@ class PTZController:
             if not self.pan or not self.pan.ser_p:
                 return
             sign = 1 if direction == "right" else -1
-            vel  = steps_per_second * JOG_STEPS_PER_SPS
+            vel = steps_per_second * JOG_STEPS_PER_SPS
             self.pan.ser_p.write(f"V{sign * vel}\n".encode())
 
     def manual_move_stop(self):
@@ -154,7 +155,7 @@ class PTZController:
 
     def set_mode(self, mode):
         if mode == "manual":
-            self._manual_mode = True   # set FIRST — detection thread sees this immediately
+            self._manual_mode = True  # set FIRST — detection thread sees this immediately
             with self._manual_lock:
                 if self.pan and self.pan.ser_p:
                     try:
@@ -307,10 +308,10 @@ def socket_listener(controller):
         try:
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             client.connect(UNIX_SOCK)
-            client.setblocking(False) # Non-blocking for "drain" logic
+            client.setblocking(False)  # Non-blocking for "drain" logic
             print("Connected to socket.")
 
-            buf = b"" # Use bytes, not strings, for raw socket data
+            buf = b""  # Use bytes, not strings, for raw socket data
             while True:
                 try:
                     # 1. Read everything currently available in the OS buffer
@@ -321,10 +322,10 @@ def socket_listener(controller):
                                 raise ConnectionResetError
                             buf += chunk
                         except BlockingIOError:
-                            break # No more data to read right now
+                            break  # No more data to read right now
 
                     if not buf:
-                        time.sleep(0.001) # Nano-sleep to prevent 100% CPU
+                        time.sleep(0.001)  # Nano-sleep to prevent 100% CPU
                         continue
 
                     # 2. Extract all complete lines
@@ -344,7 +345,7 @@ def socket_listener(controller):
                             msg = json.loads(line)
                             if msg.get("camera") == TARGET_CAM:
                                 latest_valid_msg = msg
-                                break # Found the newest one, ignore the rest
+                                break  # Found the newest one, ignore the rest
                         except json.JSONDecodeError:
                             continue
 
@@ -368,9 +369,11 @@ def socket_listener(controller):
 if __name__ == "__main__":
     motor_ctrl = PTZController()
 
+
     def signal_handler(sig, frame):
         motor_ctrl.cleanup()
         sys.exit(0)
+
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)

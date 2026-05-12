@@ -121,10 +121,10 @@ def _get_local_ip() -> str:
 
 
 JETSON_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
-GO_BRIDGE_SOCK   = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
+GO_BRIDGE_SOCK = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
 PTZ_CONTROL_SOCK = "/tmp/ptz_control.sock"
-PTZ_MANUAL_SOCK  = "/tmp/ptz_manual.sock"
-HTTP_PORT        = 9101
+PTZ_MANUAL_SOCK = "/tmp/ptz_manual.sock"
+HTTP_PORT = 9101
 
 # Degrees per Go "step" — matches ESP32: STEP_SIZE_STEPS(62) / STEPS_PER_DEG(125)
 PAN_DEG_PER_STEP = 0.5
@@ -550,7 +550,7 @@ def _apply_score_patch(data: dict) -> None:
 # PTZ manual command relay (pipeline -> ptz_control manual socket)
 # ---------------------------------------------------------------------------
 _ptz_manual_q: queue.SimpleQueue = queue.SimpleQueue()
-_pan_deg      = 0.0
+_pan_deg = 0.0
 _pan_deg_lock = threading.Lock()
 
 
@@ -1631,8 +1631,8 @@ def _worker_role_matches(info: dict) -> bool:
 def _worker_script_matches(info: dict) -> bool:
     script = info.get("script")
     return (
-        script is None
-        or os.path.abspath(str(script)) == os.path.abspath(STREAM_WORKER_WRAPPER)
+            script is None
+            or os.path.abspath(str(script)) == os.path.abspath(STREAM_WORKER_WRAPPER)
     )
 
 
@@ -1668,11 +1668,11 @@ def _worker_start_ticks_match(info: dict, pid: int) -> bool:
 
 def _worker_pid_metadata_matches(info: dict, pid: int) -> bool:
     return (
-        _worker_role_matches(info)
-        and _worker_script_matches(info)
-        and _worker_owner_pid_matches(info)
-        and _worker_owner_start_ticks_match(info)
-        and _worker_start_ticks_match(info, pid)
+            _worker_role_matches(info)
+            and _worker_script_matches(info)
+            and _worker_owner_pid_matches(info)
+            and _worker_owner_start_ticks_match(info)
+            and _worker_start_ticks_match(info, pid)
     )
 
 
@@ -1682,9 +1682,9 @@ def _worker_pid_info_is_current(info: dict | None) -> bool:
 
     pid = _worker_pid_from_info(info)
     return (
-        pid is not None
-        and _worker_pid_metadata_matches(info, pid)
-        and _worker_cmdline_matches(pid)
+            pid is not None
+            and _worker_pid_metadata_matches(info, pid)
+            and _worker_cmdline_matches(pid)
     )
 
 

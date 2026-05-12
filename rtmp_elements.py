@@ -1014,9 +1014,9 @@ def configure_end_stats_overlay(elements: RtmpElements) -> None:
 def _end_stats_active(state: Mapping[str, Any], end_stats: Any) -> bool:
     now_ms = int(time.time() * 1000)
     return (
-        state.get("game_finished", False)
-        and isinstance(end_stats, dict)
-        and end_stats.get("show_until", 0) > now_ms
+            state.get("game_finished", False)
+            and isinstance(end_stats, dict)
+            and end_stats.get("show_until", 0) > now_ms
     )
 
 
@@ -1097,7 +1097,8 @@ def _end_stat_text_pairs(home: Mapping[str, Any], away: Mapping[str, Any]) -> li
     ]
 
 
-def _show_end_stat_texts(end_stats: Mapping[str, Any], els: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+def _show_end_stat_texts(end_stats: Mapping[str, Any], els: Mapping[str, Any]) -> tuple[
+    Mapping[str, Any], Mapping[str, Any]]:
     home = end_stats.get("home_stats", {})
     away = end_stats.get("away_stats", {})
     for key, text in _end_stat_text_pairs(home, away):

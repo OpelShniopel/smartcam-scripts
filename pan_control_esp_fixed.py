@@ -1,16 +1,17 @@
-import serial
 import time
+
+import serial
 
 DEBUG = False
 
 # --- CONFIGURATION ---
 SERIAL_PORT_P = "/dev/pan_control_esp32"
-BAUD_RATE     = 460800
+BAUD_RATE = 460800
 
 ENABLE_HOMING = True
 
 # Stationary camera frame dimensions (must match inference output)
-STATIONARY_FRAME_W  = 1280
+STATIONARY_FRAME_W = 1280
 STATIONARY_CENTER_X = STATIONARY_FRAME_W / 2
 
 # Rogue detection (in stationary-cam pixel space)
@@ -18,7 +19,8 @@ MAX_ERROR_JUMP = 200
 
 # Coasting
 MAX_COAST_FRAMES = 30
-COAST_ERROR_PX   = 60   # px — ghost error to keep gentle momentum during coast
+COAST_ERROR_PX = 60  # px — ghost error to keep gentle momentum during coast
+
 
 def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     last_exc = None
@@ -30,15 +32,16 @@ def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
             return s
         except serial.SerialException as e:
             last_exc = e
-            print(f"Port {port_path} not ready (attempt {attempt+1}/{retries}): {e}")
+            print(f"Port {port_path} not ready (attempt {attempt + 1}/{retries}): {e}")
             time.sleep(delay * (attempt + 1))
     raise last_exc
 
+
 class PanController:
     def __init__(self, detection_source="fixed"):
-        self.jogging        = False
-        self.last_error_x   = 0.0
-        self.lost_frames    = 0
+        self.jogging = False
+        self.last_error_x = 0.0
+        self.lost_frames = 0
         self.last_direction = 0
         self.rogue_patience = 0
 
@@ -65,7 +68,7 @@ class PanController:
     def _configure_mode(self, source):
         if not self.ser_p:
             return
-        cmd   = b"C1\n" if source == "fixed" else b"C0\n"
+        cmd = b"C1\n" if source == "fixed" else b"C0\n"
         label = "STATIONARY (C1)" if source == "fixed" else "PTZ (C0)"
         print(f"  [CONFIG] Setting ESP mode: {label}")
         self.ser_p.reset_input_buffer()
@@ -143,15 +146,15 @@ class PanController:
                 return
 
         self.rogue_patience = 0
-        self.lost_frames    = 0
+        self.lost_frames = 0
 
         if DEBUG:
             print(f"[DET] stationary_err={error_x:.1f}")
 
         self.send_command(error_x, speed_scale=speed_scale)
         self.last_direction = 1 if error_x > 0 else -1
-        self.last_error_x   = error_x
-        self.jogging        = True
+        self.last_error_x = error_x
+        self.jogging = True
 
     # ------------------------------------------------------------------
     def _stop_jog(self):

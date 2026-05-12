@@ -1,10 +1,11 @@
 import csv
 import time
+
 from scipy.interpolate import CubicSpline
 
 # Status field indices for the Kurokesu SCF4 board (!1 response)
-CHA_PI   = 3
-CHB_PI   = 4
+CHA_PI = 3
+CHB_PI = 4
 CHA_MOVE = 6
 CHB_MOVE = 7
 
@@ -16,10 +17,12 @@ def send_command(ser, cmd):
     ser.write(bytes(cmd + "\r\n", 'utf8'))
     return ser.readline().decode('utf-8').strip()
 
+
 def parse_status(ser):
     """Query board status (!1) and return a parsed list of ints."""
     raw = send_command(ser, "!1")
     return [int(v.strip()) for v in raw.split(",")]
+
 
 def wait_homing_and_stop(ser, initial_val, axis_idx, axis_letter, timeout_sec=5.0):
     """Poll until PI triggers, then immediately send stop to minimize overshoot."""
@@ -36,6 +39,7 @@ def wait_homing_and_stop(ser, initial_val, axis_idx, axis_letter, timeout_sec=5.
         print(f"TIMEOUT: status index {axis_idx} did not change within {timeout_sec}s")
     time.sleep(0.05)
 
+
 def wait_homing(ser, initial_val, axis_idx, timeout_sec=10.0):
     """Poll until status[axis_idx] differs from initial_val."""
     start = time.time()
@@ -47,6 +51,7 @@ def wait_homing(ser, initial_val, axis_idx, timeout_sec=10.0):
     else:
         print(f"TIMEOUT: status index {axis_idx} did not change within {timeout_sec}s")
     time.sleep(0.1)
+
 
 def verify_command(ser, cmd):
     """Send a command and return True if the board replies with 'ok'."""
@@ -69,15 +74,15 @@ def init_lens_board(ser, zoom_speed, focus_speed):
     Call after opening the serial port (allow ~1.5 s for STM32 boot first).
     """
     init_cmds = [
-        "$B2",                                          # Boot/Handshake
-        "M243 C6",                                      # Stepping mode
-        "M230",                                         # Normal move mode
-        "G91",                                          # Relative movement
-        "M238",                                         # Energize PI LEDs
-        "M234 A190 B190 C190 D90",                      # Motor power (running)
-        "M235 A120 B120 C120",                          # Motor power (sleep/hold)
-        f"M240 A{zoom_speed} B{focus_speed} C600",      # Drive speeds
-        "M232 A400 B400 C400 E700 F700 G700",           # PI voltage thresholds
+        "$B2",  # Boot/Handshake
+        "M243 C6",  # Stepping mode
+        "M230",  # Normal move mode
+        "G91",  # Relative movement
+        "M238",  # Energize PI LEDs
+        "M234 A190 B190 C190 D90",  # Motor power (running)
+        "M235 A120 B120 C120",  # Motor power (sleep/hold)
+        f"M240 A{zoom_speed} B{focus_speed} C600",  # Drive speeds
+        "M232 A400 B400 C400 E700 F700 G700",  # PI voltage thresholds
     ]
     for cmd in init_cmds:
         ser.write(bytes(cmd + '\r\n', 'utf8'))
@@ -97,9 +102,9 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
     ensure reproducible PI trigger overshoot.
     """
     print("--- Starting Lens Calibration ---")
-    send_command(ser, "M238")           # Energize PI LEDs
-    send_command(ser, "G91")            # Relative mode
-    send_command(ser, "M240 A600 B600") # Slow homing speed — must match focus_zoom_mapping.py
+    send_command(ser, "M238")  # Energize PI LEDs
+    send_command(ser, "G91")  # Relative mode
+    send_command(ser, "M240 A600 B600")  # Slow homing speed — must match focus_zoom_mapping.py
 
     # ── Axis A (Zoom) ──────────────────────────────
     print("Homing Axis A (zoom)")

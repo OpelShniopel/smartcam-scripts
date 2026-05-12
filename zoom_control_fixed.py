@@ -1,26 +1,27 @@
-import serial
 import time
+
+import serial
+
 import lens_helpers
-import math
 
 DEBUG = False
 
 # --- CONFIGURATION ---
-CSV_FILE       = "zoom_focus_table.csv"
-SERIAL_PORT_Z  = "/dev/zoom_control"
-ZOOM_SPEED     = 1000
-FOCUS_SPEED    = 1200
+CSV_FILE = "zoom_focus_table.csv"
+SERIAL_PORT_Z = "/dev/zoom_control"
+ZOOM_SPEED = 1000
+FOCUS_SPEED = 1200
 
 # --- BALL SIZE → ZOOM MAPPING ---
 # Ball width in stationary-cam pixels at the extremes of the court.
 # BALL_MIN_PX: ball appears this small when at max distance → zoom in fully.
 # BALL_MAX_PX: ball appears this large when close → no zoom (1x).
 # Measure these by watching the stationary cam feed with the ball at each extreme.
-BALL_MIN_PX  = 50    # far ball  → ZOOM_MIN_STEPS (max optical zoom)
-BALL_MAX_PX  = 200   # near ball → ZOOM_MAX_STEPS (1x, widest FOV)
+BALL_MIN_PX = 50  # far ball  → ZOOM_MIN_STEPS (max optical zoom)
+BALL_MAX_PX = 200  # near ball → ZOOM_MAX_STEPS (1x, widest FOV)
 
 # Shape of the zoom curve. 1.0 = linear. >1 = more aggressive zoom for distant balls.
-ZOOM_CURVE   = 1.5
+ZOOM_CURVE = 1.5
 
 # --- ZOOM-OUT BIAS ---
 # Combines position and velocity into one zoom-aware signal.
@@ -36,8 +37,8 @@ ZOOM_CURVE   = 1.5
 # Assumes the pan camera is pointing at the stationary cam centre (step 0).
 # This over-triggers when the pan has already rotated, but that only causes
 # extra zoom-out which is the safe failure mode.
-STATIONARY_CENTER_X = 640.0    # half of FRAME_W — used for horizontal pan-relative math
-STATIONARY_CENTER_Y = 360.0    # half of FRAME_H (not used for zoom logic directly)
+STATIONARY_CENTER_X = 640.0  # half of FRAME_W — used for horizontal pan-relative math
+STATIONARY_CENTER_Y = 360.0  # half of FRAME_H (not used for zoom logic directly)
 
 # Where the pan camera is actually pointing vertically, expressed as a y-pixel in the
 # stationary camera's frame.  Pan can only pan (no tilt), so this is fixed by how
@@ -47,26 +48,27 @@ STATIONARY_CENTER_Y = 360.0    # half of FRAME_H (not used for zoom logic direct
 # that maps to the vertical centre of the pan cam's view.
 PAN_CENTER_Y = 300.0
 
-VELOCITY_HORIZON   = 8         # frames ahead to predict ball position
-EDGE_MARGIN        = 0.40      # fraction of FOV half-width inside which we consider safe (higher = more aggressive zoom-out)
-VELOCITY_EMA_ALPHA = 0.40      # smoothing factor for ball velocity (0=frozen, 1=raw)
-ZOOM_IN_ALPHA      = 0.05      # low-pass factor for zoom-in (small = slow zoom-in, suppresses noise oscillation)
+VELOCITY_HORIZON = 8  # frames ahead to predict ball position
+EDGE_MARGIN = 0.40  # fraction of FOV half-width inside which we consider safe (higher = more aggressive zoom-out)
+VELOCITY_EMA_ALPHA = 0.40  # smoothing factor for ball velocity (0=frozen, 1=raw)
+ZOOM_IN_ALPHA = 0.05  # low-pass factor for zoom-in (small = slow zoom-in, suppresses noise oscillation)
 
-FRAME_W = 1280   # stationary cam frame width (px)
+FRAME_W = 1280  # stationary cam frame width (px)
 FRAME_H = 720
 
 # --- LIMITS ---
-ZOOM_BASE_POS  = 34700
-ZOOM_RTH_POS   = 34700
-ZOOM_MAX_STEPS = 34700   # 1x (widest FOV)
-ZOOM_MIN_STEPS = 29500   # max optical zoom (~3x)
+ZOOM_BASE_POS = 34700
+ZOOM_RTH_POS = 34700
+ZOOM_MAX_STEPS = 34700  # 1x (widest FOV)
+ZOOM_MIN_STEPS = 29500  # max optical zoom (~3x)
 MAX_OPTICAL_ZOOM = 3
 
 FOCUS_MAX_STEPS = 33300
 FOCUS_MIN_STEPS = 25340
-FOCUS_BIAS      = 0
+FOCUS_BIAS = 0
 
-MAX_SEGMENT = 50   # max zoom step per serial command
+MAX_SEGMENT = 50  # max zoom step per serial command
+
 
 def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     last_exc = None
@@ -78,21 +80,22 @@ def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
             return s
         except serial.SerialException as e:
             last_exc = e
-            print(f"Port {port_path} not ready (attempt {attempt+1}/{retries}): {e}")
+            print(f"Port {port_path} not ready (attempt {attempt + 1}/{retries}): {e}")
             time.sleep(delay * (attempt + 1))
     raise last_exc
 
+
 class ZoomController:
     def __init__(self):
-        self.current_zoom_pos  = ZOOM_BASE_POS
-        self.target_zoom_pos   = ZOOM_BASE_POS
-        self.focus_bias        = FOCUS_BIAS
-        self.last_ball_x       = None
-        self.last_ball_y       = None
-        self.smooth_velocity   = 0.0
-        self.smooth_vel_y      = 0.0
-        self.last_cmd_time     = 0
-        self.cmd_interval      = 0.05
+        self.current_zoom_pos = ZOOM_BASE_POS
+        self.target_zoom_pos = ZOOM_BASE_POS
+        self.focus_bias = FOCUS_BIAS
+        self.last_ball_x = None
+        self.last_ball_y = None
+        self.smooth_velocity = 0.0
+        self.smooth_vel_y = 0.0
+        self.last_cmd_time = 0
+        self.cmd_interval = 0.05
 
         try:
             self.ser_z = open_serial_with_retry(SERIAL_PORT_Z, 115200)
@@ -165,7 +168,7 @@ class ZoomController:
         lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHA_MOVE)
         lens_helpers.wait_homing(self.ser_z, 1, lens_helpers.CHB_MOVE)
         self.current_zoom_pos = ZOOM_RTH_POS
-        self.target_zoom_pos  = ZOOM_RTH_POS
+        self.target_zoom_pos = ZOOM_RTH_POS
         print("Zoom home reached.")
 
     def apply_focus_bias(self, delta):
@@ -180,16 +183,16 @@ class ZoomController:
         if not self.ser_z:
             return
         self.target_zoom_pos = max(ZOOM_MIN_STEPS, min(ZOOM_MAX_STEPS,
-                                                        self.target_zoom_pos + zoom_steps))
+                                                       self.target_zoom_pos + zoom_steps))
         self._drive_motor()
 
     def process_detection(self, detections, pan_error_x=0.0):
         ball = next((d for d in detections if d['class'] == 'BALL'), None)
         if not ball or ball['width'] <= 0:
-            self.last_ball_x     = None
-            self.last_ball_y     = None
+            self.last_ball_x = None
+            self.last_ball_y = None
             self.smooth_velocity = 0.0
-            self.smooth_vel_y    = 0.0
+            self.smooth_vel_y = 0.0
             self.target_zoom_pos = ZOOM_MAX_STEPS  # widen FOV when ball is lost
             self._drive_motor()
             return
@@ -208,7 +211,7 @@ class ZoomController:
         raw_vel_x = abs(ball_x - self.last_ball_x) if self.last_ball_x is not None else 0.0
         raw_vel_y = abs(ball_y - self.last_ball_y) if self.last_ball_y is not None else 0.0
         self.smooth_velocity = VELOCITY_EMA_ALPHA * raw_vel_x + (1.0 - VELOCITY_EMA_ALPHA) * self.smooth_velocity
-        self.smooth_vel_y    = VELOCITY_EMA_ALPHA * raw_vel_y + (1.0 - VELOCITY_EMA_ALPHA) * self.smooth_vel_y
+        self.smooth_vel_y = VELOCITY_EMA_ALPHA * raw_vel_y + (1.0 - VELOCITY_EMA_ALPHA) * self.smooth_vel_y
         self.last_ball_x = ball_x
         self.last_ball_y = ball_y
 
@@ -217,29 +220,29 @@ class ZoomController:
             predicted = offset + self.smooth_velocity * VELOCITY_HORIZON
             if predicted <= 0.0:
                 return ZOOM_MIN_STEPS
-            max_zr    = center_half * (1.0 - EDGE_MARGIN) / predicted
-            req_t     = max(0.0, min(1.0, (max_zr - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)))
+            max_zr = center_half * (1.0 - EDGE_MARGIN) / predicted
+            req_t = max(0.0, min(1.0, (max_zr - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)))
             return ZOOM_MAX_STEPS - req_t * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
 
         # Horizontal: pan tracks left/right, so offset relative to where the pan is pointing.
         # pan_center_x ≈ ball_x when tracking → offset ≈ 0, only fast balls trigger zoom-out.
-        pan_center_x  = STATIONARY_CENTER_X + pan_error_x
-        horiz_offset  = abs(ball_x - pan_center_x)
-        edge_req_h    = _edge_req(horiz_offset, STATIONARY_CENTER_X)
+        pan_center_x = STATIONARY_CENTER_X + pan_error_x
+        horiz_offset = abs(ball_x - pan_center_x)
+        edge_req_h = _edge_req(horiz_offset, STATIONARY_CENTER_X)
 
         # Vertical: pan cannot tilt, so offset is relative to PAN_CENTER_Y — the actual
         # vertical pointing position of the pan camera in the stationary frame.
         # Use PAN_CENTER_Y (not STATIONARY_CENTER_Y) so top/bottom pressure is symmetric
         # around where the pan cam is actually looking, not the stationary frame midpoint.
-        vert_offset    = abs(ball_y - PAN_CENTER_Y)
+        vert_offset = abs(ball_y - PAN_CENTER_Y)
         vert_predicted = vert_offset + self.smooth_vel_y * VELOCITY_HORIZON
         # The pan cam's vertical FOV half at 1x equals PAN_CENTER_Y pixels to the top
         # and (FRAME_H - PAN_CENTER_Y) pixels to the bottom.  Use the smaller of the two
         # as the effective half-width so we zoom out for whichever edge is closer.
-        pan_vfov_half  = min(PAN_CENTER_Y, FRAME_H - PAN_CENTER_Y)
+        pan_vfov_half = min(PAN_CENTER_Y, FRAME_H - PAN_CENTER_Y)
         if vert_predicted > 0.0:
-            max_zr_v   = pan_vfov_half * (1.0 - EDGE_MARGIN) / vert_predicted
-            req_t_v    = max(0.0, min(1.0, (max_zr_v - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)))
+            max_zr_v = pan_vfov_half * (1.0 - EDGE_MARGIN) / vert_predicted
+            req_t_v = max(0.0, min(1.0, (max_zr_v - 1.0) / (MAX_OPTICAL_ZOOM - 1.0)))
             edge_req_v = ZOOM_MAX_STEPS - req_t_v * (ZOOM_MAX_STEPS - ZOOM_MIN_STEPS)
         else:
             edge_req_v = ZOOM_MIN_STEPS
