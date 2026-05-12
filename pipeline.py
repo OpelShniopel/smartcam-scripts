@@ -901,7 +901,7 @@ def _cmd_fail(action: str, err: str) -> None:
 
 def _normalize_rtmp_url(raw_url: object) -> tuple[str | None, str]:
     if not isinstance(raw_url, str):
-        return None, f"rtmp_url must be string, got {raw_url!r}"
+        return None, f"rtmp_url must be string, got {type(raw_url).__name__}"
     rtmp_url = raw_url.strip()
     if rtmp_url.startswith(("rtmp://", "rtmps://")):
         return rtmp_url, ""
