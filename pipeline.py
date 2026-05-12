@@ -220,7 +220,7 @@ def _ai_stream_enabled(cam_label: str) -> bool:
 # Program outputs:
 # - program_clean: H264 preview for browser WebRTC with restamped timestamps.
 # - program_stream: H264 source for the RTMP worker.
-PROGRAM_CLEAN_BITRATE = 6000
+PROGRAM_CLEAN_BITRATE = 8000
 PROGRAM_CLEAN_KEYINT = 15
 PROGRAM_CLEAN_THREADS = 1
 PROGRAM_CLEAN_PRESET = "ultrafast"
@@ -229,7 +229,7 @@ PROGRAM_WEBRTC_RTSP_PATH = "program_clean"
 PROGRAM_STREAM_RTSP_PATH = "program_stream"
 PROGRAM_WEBRTC_WIDTH = 1920
 PROGRAM_WEBRTC_HEIGHT = 1080
-PROGRAM_WEBRTC_BITRATE = 6000
+PROGRAM_WEBRTC_BITRATE = 8000
 PROGRAM_WEBRTC_KEYINT = 6
 PROGRAM_WEBRTC_THREADS = 1
 PROGRAM_PREVIEW_FRAME_DURATION_NS = Gst.SECOND // 30
@@ -252,7 +252,7 @@ RECORD_FILE_EXTENSION = "mkv"
 RECORD_QUEUE_BUFFERS = 120
 
 # Default RTMP bitrate for worker config and the legacy embedded RTMP branch.
-RTMP_BITRATE = 6800
+RTMP_BITRATE = 9000
 
 # Encoder references populated by build_pipeline().
 _encoders: dict[str, Gst.Element] = {}

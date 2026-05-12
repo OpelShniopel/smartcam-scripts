@@ -57,7 +57,7 @@ from rtmp_elements import (
 )
 from score_utils import DEFAULT_SCORE_STATE, default_score_state, truncate_team_name
 
-RTMP_BITRATE_DEFAULT = 6800
+RTMP_BITRATE_DEFAULT = 9000
 
 VERIFY_TIMEOUT_SEC = 15
 CONFIG_POLL_SEC = 0.2
