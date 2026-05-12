@@ -485,38 +485,54 @@ def update_timeout_overlay(state: dict, els: dict) -> None:
                     el.set_property("draw-shadow", False)
 
 
-def _milestone_fade_step() -> bool:
-    global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
-
+def _milestone_elements() -> tuple:
     els = dict(_osd_elements)
-    player_el = els.get("osd_milestone_player")
-    text_el = els.get("osd_milestone_text")
+    return els.get("osd_milestone_player"), els.get("osd_milestone_text")
 
-    if _milestone_fading_in:
-        _milestone_alpha = min(1.0, _milestone_alpha + 0.1)
-        if _milestone_alpha >= 1.0:
-            _milestone_fading_in = False
-            for el in (player_el, text_el):
-                if el:
-                    el.set_property("draw-shadow", True)
-    elif _milestone_fading_out:
-        _milestone_alpha = max(0.0, _milestone_alpha - 0.05)
-        if _milestone_alpha <= 0.0:
-            _milestone_fading_out = False
-            _milestone_fade_active = False
-            for el in (player_el, text_el):
-                if el:
-                    el.set_property("silent", True)
-            return False
 
+def _set_milestone_elements_property(elements: tuple, prop: str, value) -> None:
+    for element in elements:
+        if element:
+            element.set_property(prop, value)
+
+
+def _apply_milestone_alpha(elements: tuple) -> None:
     a = int(_milestone_alpha * 255)
     fg = (a << 24) | 0x00FFFFFF
     outline = (a << 24) | 0x00000000
-    for el in (player_el, text_el):
-        if el:
-            el.set_property("color", fg)
-            el.set_property("outline-color", outline)
+    for element in elements:
+        if element:
+            element.set_property("color", fg)
+            element.set_property("outline-color", outline)
 
+
+def _advance_milestone_fade_in(elements: tuple) -> None:
+    global _milestone_alpha, _milestone_fading_in
+    _milestone_alpha = min(1.0, _milestone_alpha + 0.1)
+    if _milestone_alpha >= 1.0:
+        _milestone_fading_in = False
+        _set_milestone_elements_property(elements, "draw-shadow", True)
+
+
+def _advance_milestone_fade_out(elements: tuple) -> bool:
+    global _milestone_alpha, _milestone_fading_out, _milestone_fade_active
+    _milestone_alpha = max(0.0, _milestone_alpha - 0.05)
+    if _milestone_alpha > 0.0:
+        return True
+    _milestone_fading_out = False
+    _milestone_fade_active = False
+    _set_milestone_elements_property(elements, "silent", True)
+    return False
+
+
+def _milestone_fade_step() -> bool:
+    elements = _milestone_elements()
+    if _milestone_fading_in:
+        _advance_milestone_fade_in(elements)
+    elif _milestone_fading_out and not _advance_milestone_fade_out(elements):
+        return False
+
+    _apply_milestone_alpha(elements)
     return True
 
 
