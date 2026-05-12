@@ -17,7 +17,7 @@ import socket as _socket
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 import gi
 
@@ -128,7 +128,17 @@ _SCOREBOARD_CROSS_FADE_KEYS: tuple[str, ...] = (
 _last_config: dict | None = None
 _enc_stream: Gst.Element | None = None
 _current_active_camera: str = PTZ_CAMERA
-_osd_elements: dict[str, Gst.Element] = {}
+
+
+class _OverlayPropertyElement(Protocol):
+    def set_property(self, name: str, value: Any) -> None:
+        ...
+
+    def get_property(self, name: str) -> Any:
+        ...
+
+
+_osd_elements: dict[str, _OverlayPropertyElement] = {}
 
 
 def _get_local_ip() -> str:
@@ -680,7 +690,7 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
     _populate_blitzball_end_stats(state, els)
 
 
-def _overlay_elements_snapshot() -> dict:
+def _overlay_elements_snapshot() -> dict[str, _OverlayPropertyElement]:
     return dict(_osd_elements)
 
 
@@ -705,7 +715,12 @@ def _handle_blitzball_finished_stats(state: dict, els: dict, sport_code: str, no
     return True
 
 
-def _set_team_overlay(element, name: str, fallback: str, visible: bool) -> None:
+def _set_team_overlay(
+        element: _OverlayPropertyElement | None,
+        name: str,
+        fallback: str,
+        visible: bool,
+) -> None:
     if not element:
         return
     element.set_property("silent", not visible)
@@ -713,12 +728,17 @@ def _set_team_overlay(element, name: str, fallback: str, visible: bool) -> None:
         element.set_property("text", truncate_team_name(name or fallback))
 
 
-def _set_element_alpha(element, alpha: float) -> None:
+def _set_element_alpha(element: _OverlayPropertyElement | None, alpha: float) -> None:
     if element:
         element.set_property("alpha", alpha)
 
 
-def _update_foul_bar(element, team: str, fouls: int, visible: bool) -> None:
+def _update_foul_bar(
+        element: _OverlayPropertyElement | None,
+        team: str,
+        fouls: int,
+        visible: bool,
+) -> None:
     if not element:
         return
 
@@ -778,7 +798,7 @@ def _update_inactive_milestone(elements: tuple, state: dict) -> None:
         update_milestone_overlays(elements[0], elements[1], state)
 
 
-def _update_milestone_state(state: dict, els: dict) -> None:
+def _update_milestone_state(state: dict, els: dict[str, _OverlayPropertyElement]) -> None:
     elements = els.get("osd_milestone_player"), els.get("osd_milestone_text")
     if int(time.time() * 1000) < _milestone_display_until:
         _update_active_milestone(elements, state)
@@ -786,7 +806,7 @@ def _update_milestone_state(state: dict, els: dict) -> None:
     _update_inactive_milestone(elements, state)
 
 
-def _update_regular_scoreboard(state: dict, els: dict) -> None:
+def _update_regular_scoreboard(state: dict, els: dict[str, _OverlayPropertyElement]) -> None:
     visible = state.get("visible", False)
     update_quarter_overlay(els.get("osd_quarter"), visible, state)
     _set_team_overlay(els.get("osd_home"), state.get("home_name", "HOME"), "HOME", visible)
@@ -804,7 +824,11 @@ def _update_regular_scoreboard(state: dict, els: dict) -> None:
     _update_milestone_state(state, els)
 
 
-def _update_regular_scoreboard_if_needed(state: dict, els: dict, sport_code: str) -> None:
+def _update_regular_scoreboard_if_needed(
+        state: dict,
+        els: dict[str, _OverlayPropertyElement],
+        sport_code: str,
+) -> None:
     if not _timeout_fade_active and sport_code != "BLITZBALL":
         _update_regular_scoreboard(state, els)
 
