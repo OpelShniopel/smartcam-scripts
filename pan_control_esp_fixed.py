@@ -35,7 +35,7 @@ def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     raise last_exc
 
 class PanController:
-    def __init__(self):
+    def __init__(self, detection_source="fixed"):
         self.jogging        = False
         self.last_error_x   = 0.0
         self.lost_frames    = 0
@@ -54,11 +54,34 @@ class PanController:
                 print("Homing skipped. Zeroing position.")
                 self.ser_p.write(b"Z\n")
 
+            self._configure_mode(detection_source)
             print("Controller Ready.")
 
         except Exception as e:
             print(f"WARNING: Pan Motor serial port not found. ({e})")
             self.ser_p = None
+
+    # ------------------------------------------------------------------
+    def _configure_mode(self, source):
+        if not self.ser_p:
+            return
+        cmd   = b"C1\n" if source == "fixed" else b"C0\n"
+        label = "STATIONARY (C1)" if source == "fixed" else "PTZ (C0)"
+        print(f"  [CONFIG] Setting ESP mode: {label}")
+        self.ser_p.reset_input_buffer()
+        self.ser_p.write(cmd)
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            raw = self.ser_p.readline().decode("utf-8", errors="ignore").strip()
+            if not raw:
+                continue
+            if raw == "OK":
+                print(f"  [CONFIG] ESP mode confirmed: {label}")
+                return
+            if raw.startswith("ERR"):
+                print(f"  [CONFIG] ESP mode error: {raw}")
+                return
+        print("  [CONFIG] WARNING: ESP mode config timed out")
 
     # ------------------------------------------------------------------
     def _do_homing(self):

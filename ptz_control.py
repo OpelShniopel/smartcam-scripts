@@ -5,15 +5,27 @@ import time
 import sys
 import atexit
 import signal
-from pan_control_esp_ptz import PanController
-from zoom_control_ptz import ZoomController
 import threading
+
+# ----------------------------------------------------------------
+#  DETECTION SOURCE — set to "ptz" or "fixed"
+#    "ptz"   : detections from the PTZ camera itself (C0 on ESP32)
+#    "fixed" : detections from the stationary/fisheye camera (C1 on ESP32)
+# ----------------------------------------------------------------
+DETECTION_SOURCE = "fixed"
+
+if DETECTION_SOURCE == "fixed":
+    from pan_control_esp_fixed import PanController
+    from zoom_control_fixed import ZoomController
+else:
+    from pan_control_esp_ptz import PanController
+    from zoom_control_ptz import ZoomController
 
 _cleanup_done = False
 _cleanup_lock = threading.Lock()
 UNIX_SOCK   = "/tmp/ptz_control.sock"
 MANUAL_SOCK = "/tmp/ptz_manual.sock"
-TARGET_CAM  = "ptz"
+TARGET_CAM  = DETECTION_SOURCE   # listen for detections from this camera
 DEBUG       = False
 ENABLE_PAN  = True
 ENABLE_ZOOM = True
@@ -29,7 +41,7 @@ ZOOM_JOG_PER_SPS  = 20    # zoom_pos units added per tick per stepsPerSecond uni
 
 class PTZController:
     def __init__(self):
-        self.pan  = PanController()  if ENABLE_PAN  else None
+        self.pan  = PanController(detection_source=DETECTION_SOURCE)  if ENABLE_PAN  else None
         self.zoom = ZoomController() if ENABLE_ZOOM else None
 
         if not self.pan and not self.zoom:
