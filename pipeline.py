@@ -2296,7 +2296,7 @@ def _switch_program_camera(active_camera: str, *, force_keyframe: bool = True) -
             return
 
     pad = _program_selector_pads.get(normalized)
-    selector = _program_selector
+    selector: _OverlayPropertyElement | None = _program_selector
     if selector is None:
         return
     if pad is None:
