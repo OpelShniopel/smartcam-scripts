@@ -6,7 +6,7 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from runtime_paths import (
     BLITZBALL_ACTIVE_PNG, BLITZBALL_SCOREBOARD_PNG, END_STATS_BG_PNG,
@@ -43,6 +43,14 @@ FONT_UBUNTU_MONO_BOLD_22 = "Ubuntu Mono Bold 22"
 FONT_UBUNTU_MONO_BOLD_26 = "Ubuntu Mono Bold 26"
 FONT_UBUNTU_MONO_BOLD_32 = "Ubuntu Mono Bold 32"
 FONT_UBUNTU_MONO_BOLD_42 = "Ubuntu Mono Bold 42"
+
+
+class _OverlayElement(Protocol):
+    def set_property(self, name: str, value: Any) -> None:
+        ...
+
+
+_OverlayMap = Mapping[str, _OverlayElement]
 
 
 def _set_if_supported(el: Any, prop: str, value: Any) -> None:
@@ -598,7 +606,11 @@ TIMEOUT_TEXT_KEYS: tuple[str, ...] = (
 )
 
 
-def _set_overlay_text_by_key(els: Mapping[str, Any], key: str, text: str) -> None:
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _set_overlay_text_by_key(els: _OverlayMap, key: str, text: str) -> None:
     text_element = els.get(key)
     if text_element:
         text_element.set_property("text", text)
@@ -628,7 +640,7 @@ def _timeout_team_rows(prefix: str, stats: Mapping[str, Any]) -> tuple[tuple[str
 
 
 def _populate_timeout_team_texts(
-        els: Mapping[str, Any],
+        els: _OverlayMap,
         prefix: str,
         team_name: str,
         stats: Mapping[str, Any],
@@ -639,7 +651,11 @@ def _populate_timeout_team_texts(
 
 
 def _timeout_team_players(players: list[Any], team_id) -> list[Any]:
-    return [player for player in players if player.get("team_id") == team_id][:3]
+    return [
+        player
+        for player in players
+        if isinstance(player, Mapping) and player.get("team_id") == team_id
+    ][:3]
 
 
 def _timeout_player_text(player: Mapping[str, Any]) -> str:
@@ -649,7 +665,7 @@ def _timeout_player_text(player: Mapping[str, Any]) -> str:
     )
 
 
-def _populate_timeout_player_slots(els: Mapping[str, Any], slots: tuple[str, ...], players: list[Any]) -> None:
+def _populate_timeout_player_slots(els: _OverlayMap, slots: tuple[str, ...], players: list[Any]) -> None:
     for index, slot in enumerate(slots):
         element = els.get(slot)
         if not element:
@@ -662,12 +678,14 @@ def _populate_timeout_player_slots(els: Mapping[str, Any], slots: tuple[str, ...
 
 
 def _populate_timeout_players(
-        els: Mapping[str, Any],
+        els: _OverlayMap,
         timeout_stats: Mapping[str, Any],
         home_stats: Mapping[str, Any],
         away_stats: Mapping[str, Any],
 ) -> None:
     top_players = timeout_stats.get("top_players") or []
+    if not isinstance(top_players, list):
+        top_players = []
     _populate_timeout_player_slots(
         els,
         ("osd_timeout_player_h1", "osd_timeout_player_h2", "osd_timeout_player_h3"),
@@ -683,13 +701,13 @@ def _populate_timeout_players(
 def populate_timeout_texts(
         timeout_stats: Mapping[str, Any],
         state: Mapping[str, Any],
-        els: Mapping[str, Any],
+        els: _OverlayMap,
 ) -> None:
     home_name = str(state.get("home_name", "HOME"))
     away_name = str(state.get("away_name", "AWAY"))
     calling = timeout_stats.get("calling_team", "")
-    home_stats = timeout_stats.get("home_stats") or {}
-    away_stats = timeout_stats.get("away_stats") or {}
+    home_stats = _as_mapping(timeout_stats.get("home_stats"))
+    away_stats = _as_mapping(timeout_stats.get("away_stats"))
 
     calling_name = home_name if calling == "home" else away_name
     _set_overlay_text_by_key(els, "osd_timeout_header", f"TIMEOUT  {calling_name}")
@@ -814,31 +832,31 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
                        color=0xFF4500FF)
 
 
-def _set_element_alpha(element: Any | None, alpha: float) -> None:
+def _set_element_alpha(element: _OverlayElement | None, alpha: float) -> None:
     if element:
         element.set_property("alpha", alpha)
 
 
-def _set_element_silent(element: Any | None, silent: bool) -> None:
+def _set_element_silent(element: _OverlayElement | None, silent: bool) -> None:
     if element:
         element.set_property("silent", silent)
 
 
-def _hide_blitzball_overlay(els: Mapping[str, Any]) -> None:
+def _hide_blitzball_overlay(els: _OverlayMap) -> None:
     for key in BLITZ_TEXT_KEYS:
         _set_element_silent(els.get(key), True)
     for key in BLITZ_PIXEL_KEYS:
         _set_element_alpha(els.get(key), 0.0)
 
 
-def _hide_regular_scoreboard_for_blitzball(els: Mapping[str, Any]) -> None:
+def _hide_regular_scoreboard_for_blitzball(els: _OverlayMap) -> None:
     for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
         _set_element_alpha(els.get(key), 0.0)
     for key in _BLITZ_SCOREBOARD_TEXT_KEYS:
         _set_element_silent(els.get(key), True)
 
 
-def _set_blitz_score_text(els: Mapping[str, Any], team: str, points: Any, blitz_score: Any) -> None:
+def _set_blitz_score_text(els: _OverlayMap, team: str, points: Any, blitz_score: Any) -> None:
     set_overlay_text(els.get(f"osd_blitz_{team}_pts"), True, str(points))
     blitz_element = els.get(f"osd_blitz_{team}_blitz")
     if blitz_element:
@@ -847,21 +865,21 @@ def _set_blitz_score_text(els: Mapping[str, Any], team: str, points: Any, blitz_
         blitz_element.set_property("color", 0xFFFFD700)
 
 
-def _set_blitz_team_texts(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+def _set_blitz_team_texts(state: Mapping[str, Any], els: _OverlayMap) -> None:
     set_overlay_text(els.get("osd_blitz_home_name"), True, str(state.get("home_name", "HOME")))
     set_overlay_text(els.get("osd_blitz_away_name"), True, str(state.get("away_name", "AWAY")))
     _set_blitz_score_text(els, "home", state.get("home_points", 0), state.get("home_blitz_score", 0))
     _set_blitz_score_text(els, "away", state.get("away_points", 0), state.get("away_blitz_score", 0))
 
 
-def _set_blitz_clock_texts(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+def _set_blitz_clock_texts(state: Mapping[str, Any], els: _OverlayMap) -> None:
     quarter = state.get("quarter", 1)
     quarter_text = f"H{quarter}" if quarter <= 2 else "H2"
     set_overlay_text(els.get("osd_blitz_quarter"), True, quarter_text)
     set_overlay_text(els.get("osd_blitz_clock"), True, str(state.get("clock", "10:00")))
 
 
-def _set_blitz_streak_texts(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+def _set_blitz_streak_texts(state: Mapping[str, Any], els: _OverlayMap) -> None:
     set_overlay_text(
         els.get("osd_blitz_home_streak"),
         bool(state.get("home_hot_streak", False)),
@@ -874,7 +892,7 @@ def _set_blitz_streak_texts(state: Mapping[str, Any], els: Mapping[str, Any]) ->
     )
 
 
-def _show_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
+def _show_blitzball_overlay(state: Mapping[str, Any], els: _OverlayMap) -> bool:
     _set_element_alpha(els.get("osd_blitz_bg"), 1.0)
     _set_blitz_team_texts(state, els)
     _set_blitz_clock_texts(state, els)
@@ -885,7 +903,7 @@ def _show_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) ->
     return blitz_active
 
 
-def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
+def update_blitzball_overlay(state: Mapping[str, Any], els: _OverlayMap) -> bool:
     """Update blitzball overlay. Returns True if blitz pulse should be active."""
     sport_code = state.get("sport_code", "")
 
@@ -1023,32 +1041,32 @@ def _active_end_stats(state: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return end_stats
 
 
-def _set_overlay_alpha(els: Mapping[str, Any], key: str, alpha: float) -> None:
+def _set_overlay_alpha(els: _OverlayMap, key: str, alpha: float) -> None:
     element = els.get(key)
     if element:
         element.set_property("alpha", alpha)
 
 
-def _set_overlay_silent(els: Mapping[str, Any], key: str, silent: bool) -> None:
+def _set_overlay_silent(els: _OverlayMap, key: str, silent: bool) -> None:
     element = els.get(key)
     if element:
         element.set_property("silent", silent)
 
 
-def _set_text_overlay(els: Mapping[str, Any], key: str, text: str) -> None:
+def _set_text_overlay(els: _OverlayMap, key: str, text: str) -> None:
     element = els.get(key)
     if element:
         element.set_property("text", text)
         element.set_property("silent", False)
 
 
-def _hide_end_stats_overlay(els: Mapping[str, Any]) -> None:
+def _hide_end_stats_overlay(els: _OverlayMap) -> None:
     _set_overlay_alpha(els, "osd_end_bg", 0.0)
     for key in END_STATS_TEXT_KEYS:
         _set_overlay_silent(els, key, True)
 
 
-def _hide_scoreboards_for_end_stats(els: Mapping[str, Any]) -> None:
+def _hide_scoreboards_for_end_stats(els: _OverlayMap) -> None:
     for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
         _set_overlay_alpha(els, key, 0.0)
     for key in (*_BLITZ_SCOREBOARD_TEXT_KEYS, *BLITZ_TEXT_KEYS):
@@ -1065,7 +1083,7 @@ def _blitzball_winner_text(winner: str, home_name: str, away_name: str) -> str:
     return "BLITZ  DRAW!"
 
 
-def _show_end_stats_winner(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+def _show_end_stats_winner(state: Mapping[str, Any], els: _OverlayMap) -> None:
     winner = state.get("winner", "")
     home_name = state.get("home_name", "HOME")
     away_name = state.get("away_name", "AWAY")
@@ -1076,7 +1094,7 @@ def _show_end_stats_winner(state: Mapping[str, Any], els: Mapping[str, Any]) -> 
         winner_el.set_property("color", 0xFFFFD700)
 
 
-def _show_end_stats_headers(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+def _show_end_stats_headers(state: Mapping[str, Any], els: _OverlayMap) -> None:
     _set_text_overlay(els, "osd_end_header_home", str(state.get("home_name", "HOME")))
     _set_text_overlay(els, "osd_end_header_away", str(state.get("away_name", "AWAY")))
 
@@ -1100,17 +1118,21 @@ def _end_stat_text_pairs(home: Mapping[str, Any], away: Mapping[str, Any]) -> li
     ]
 
 
-def _show_end_stat_texts(end_stats: Mapping[str, Any], els: Mapping[str, Any]) -> tuple[
+def _show_end_stat_texts(end_stats: Mapping[str, Any], els: _OverlayMap) -> tuple[
     Mapping[str, Any], Mapping[str, Any]]:
-    home = end_stats.get("home_stats", {})
-    away = end_stats.get("away_stats", {})
+    home = _as_mapping(end_stats.get("home_stats"))
+    away = _as_mapping(end_stats.get("away_stats"))
     for key, text in _end_stat_text_pairs(home, away):
         _set_text_overlay(els, key, text)
     return home, away
 
 
-def _top_team_players(players, team_id) -> list[Any]:
-    return [player for player in players if player.get("team_id") == team_id][:3]
+def _top_team_players(players: list[Any], team_id) -> list[Any]:
+    return [
+        player
+        for player in players
+        if isinstance(player, Mapping) and player.get("team_id") == team_id
+    ][:3]
 
 
 def _player_end_stat_text(player: Mapping[str, Any]) -> str:
@@ -1120,7 +1142,7 @@ def _player_end_stat_text(player: Mapping[str, Any]) -> str:
     )
 
 
-def _show_player_slots(els: Mapping[str, Any], slots: list[str], players: list[Any]) -> None:
+def _show_player_slots(els: _OverlayMap, slots: list[str], players: list[Any]) -> None:
     for index, slot in enumerate(slots):
         element = els.get(slot)
         if not element:
@@ -1136,9 +1158,11 @@ def _show_end_stats_players(
         end_stats: Mapping[str, Any],
         home: Mapping[str, Any],
         away: Mapping[str, Any],
-        els: Mapping[str, Any],
+        els: _OverlayMap,
 ) -> None:
     players = end_stats.get("players", [])
+    if not isinstance(players, list):
+        players = []
     _show_player_slots(
         els,
         ["osd_end_player_h1", "osd_end_player_h2", "osd_end_player_h3"],
@@ -1152,7 +1176,7 @@ def _show_end_stats_players(
     _set_text_overlay(els, "osd_end_players_header", "TOP PLAYERS")
 
 
-def _show_end_stats_overlay(state: Mapping[str, Any], end_stats: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+def _show_end_stats_overlay(state: Mapping[str, Any], end_stats: Mapping[str, Any], els: _OverlayMap) -> None:
     _set_overlay_alpha(els, "osd_end_bg", 0.85)
     _hide_scoreboards_for_end_stats(els)
     _show_end_stats_winner(state, els)
@@ -1161,7 +1185,7 @@ def _show_end_stats_overlay(state: Mapping[str, Any], end_stats: Mapping[str, An
     _show_end_stats_players(end_stats, home, away, els)
 
 
-def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
+def update_blitzball_end_stats(state: Mapping[str, Any], els: _OverlayMap) -> bool:
     """Show end-game stats overlay. Returns True if the overlay is active."""
     end_stats = _active_end_stats(state)
     if end_stats is None:
@@ -1190,7 +1214,7 @@ def configure_rtmp_branch(
     configure_rtmp_output(elements, rtmp_url)
 
 
-def set_overlay_text(element: Any | None, visible: bool, text: str) -> None:
+def set_overlay_text(element: _OverlayElement | None, visible: bool, text: str) -> None:
     if not element:
         return
     element.set_property("silent", not visible)
@@ -1199,9 +1223,9 @@ def set_overlay_text(element: Any | None, visible: bool, text: str) -> None:
 
 
 def update_score_clock_overlays(
-        home_score_element: Any | None,
-        away_score_element: Any | None,
-        clock_element: Any | None,
+        home_score_element: _OverlayElement | None,
+        away_score_element: _OverlayElement | None,
+        clock_element: _OverlayElement | None,
         visible: bool,
         state: Mapping[str, Any],
 ) -> None:
@@ -1223,7 +1247,7 @@ def update_score_clock_overlays(
 
 
 def update_quarter_overlay(
-        quarter_element: Any | None,
+        quarter_element: _OverlayElement | None,
         visible: bool,
         state: Mapping[str, Any],
 ) -> None:
@@ -1251,18 +1275,18 @@ def _milestone_show_until(milestone: Mapping[str, Any]) -> float:
 
 
 def update_milestone_overlays(
-        player_element: Any | None,
-        text_element: Any | None,
+        player_element: _OverlayElement | None,
+        text_element: _OverlayElement | None,
         state: Mapping[str, Any],
         force_visible: bool = False,
 ) -> None:
     milestone = state.get("milestone")
-    show_milestone = force_visible or (
-            isinstance(milestone, Mapping)
-            and _milestone_show_until(milestone) > int(time.time() * 1000)
-    )
+    if not isinstance(milestone, Mapping):
+        set_overlay_text(player_element, False, "")
+        set_overlay_text(text_element, False, "")
+        return
 
-    if not show_milestone:
+    if not force_visible and _milestone_show_until(milestone) <= int(time.time() * 1000):
         set_overlay_text(player_element, False, "")
         set_overlay_text(text_element, False, "")
         return
