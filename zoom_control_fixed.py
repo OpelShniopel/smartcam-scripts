@@ -56,17 +56,17 @@ FRAME_W = 1280   # stationary cam frame width (px)
 FRAME_H = 720
 
 # --- LIMITS ---
-ZOOM_BASE_POS  = 40000
-ZOOM_RTH_POS   = 38000
-ZOOM_MAX_STEPS = 41000   # 1x (widest FOV)
-ZOOM_MIN_STEPS = 30000   # max optical zoom (~8x)
-MAX_OPTICAL_ZOOM = 8
+ZOOM_BASE_POS  = 34700
+ZOOM_RTH_POS   = 34700
+ZOOM_MAX_STEPS = 34700   # 1x (widest FOV)
+ZOOM_MIN_STEPS = 29500   # max optical zoom (~3x)
+MAX_OPTICAL_ZOOM = 3
 
-FOCUS_MAX_STEPS = 37000
-FOCUS_MIN_STEPS = 32000
+FOCUS_MAX_STEPS = 33300
+FOCUS_MIN_STEPS = 25340
 FOCUS_BIAS      = 0
 
-MAX_SEGMENT = 250   # max zoom step per serial command
+MAX_SEGMENT = 50   # max zoom step per serial command
 
 def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     last_exc = None
@@ -167,6 +167,14 @@ class ZoomController:
         self.current_zoom_pos = ZOOM_RTH_POS
         self.target_zoom_pos  = ZOOM_RTH_POS
         print("Zoom home reached.")
+
+    def apply_focus_bias(self, delta):
+        self.focus_bias += delta
+        if not self.ser_z:
+            return
+        new_focus = self.get_focus_for_zoom(self.current_zoom_pos)
+        lens_helpers.send_command(self.ser_z, f"G0 B{int(new_focus)}")
+        self.last_cmd_time = time.time()
 
     def send_zoom(self, zoom_steps):
         if not self.ser_z:

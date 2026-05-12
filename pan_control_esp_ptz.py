@@ -7,18 +7,20 @@ DEBUG = False
 SERIAL_PORT_P = "/dev/pan_control_esp32"
 BAUD_RATE     = 460800
 
+# Enable homing on startup — requires limit switch on GPIO 27
 ENABLE_HOMING = True
 
-# Stationary camera frame dimensions (must match inference output)
-STATIONARY_FRAME_W  = 1280
-STATIONARY_CENTER_X = STATIONARY_FRAME_W / 2
+# Frame dimensions (must match inference output)
+FRAME_W  = 1280
+FRAME_H  = 720
+CENTER_X = FRAME_W / 2
 
-# Rogue detection (in stationary-cam pixel space)
-MAX_ERROR_JUMP = 200
+# Rogue detection
+MAX_ERROR_JUMP = 200   # pixels — reject detections that jump more than this per frame
 
-# Coasting
+# Coasting — keep sending updates for this many frames after ball disappears
 MAX_COAST_FRAMES = 30
-COAST_ERROR_PX   = 60   # px — ghost error to keep gentle momentum during coast
+COAST_ERROR_PX   = 60  # small ghost error to keep gentle momentum during coast
 
 def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     last_exc = None
@@ -35,7 +37,7 @@ def open_serial_with_retry(port_path, baud, retries=5, delay=0.5):
     raise last_exc
 
 class PanController:
-    def __init__(self, detection_source="fixed"):
+    def __init__(self, detection_source="ptz"):
         self.jogging        = False
         self.last_error_x   = 0.0
         self.lost_frames    = 0
@@ -117,10 +119,6 @@ class PanController:
 
     # ------------------------------------------------------------------
     def process_detection(self, detections, speed_scale=1.0):
-        """Detections come from the stationary camera.
-        Sends raw pixel error from stationary-cam centre to the ESP32.
-        The ESP32 (tmc_control_stationary) maps this to a target step
-        position and closes the loop internally."""
         ball = next((d for d in detections if d["class"] == "BALL"), None)
 
         if not ball:
@@ -128,13 +126,13 @@ class PanController:
             if self.lost_frames > MAX_COAST_FRAMES:
                 self._stop_jog()
                 return
+            # Gentle coasting momentum for a few frames after losing ball
             if self.jogging and self.lost_frames <= 8:
                 ghost_error = COAST_ERROR_PX * self.last_direction
                 self.send_command(ghost_error, speed_scale=speed_scale)
             return
 
-        # Error in stationary-cam pixel space — sent as-is, ESP32 handles mapping
-        error_x = ball["center_x"] - STATIONARY_CENTER_X
+        error_x = ball["center_x"] - CENTER_X
 
         # Rogue jump rejection
         if self.lost_frames < 1 and self.rogue_patience < 3 and self.last_error_x != 0.0:
@@ -146,7 +144,7 @@ class PanController:
         self.lost_frames    = 0
 
         if DEBUG:
-            print(f"[DET] stationary_err={error_x:.1f}")
+            print(f"[DET] ptz_err={error_x:.1f}")
 
         self.send_command(error_x, speed_scale=speed_scale)
         self.last_direction = 1 if error_x > 0 else -1
@@ -167,3 +165,8 @@ class PanController:
         self.ser_p.write(b"S\n")
         time.sleep(0.05)
         self.ser_p.write(b"G0\n")
+
+
+if __name__ == "__main__":
+    ctrl = PanController()
+    ctrl.return_home()

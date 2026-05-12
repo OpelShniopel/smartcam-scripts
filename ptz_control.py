@@ -5,15 +5,27 @@ import time
 import sys
 import atexit
 import signal
-from pan_control_esp_fixed import PanController
-from zoom_control_fixed import ZoomController
 import threading
+
+# ----------------------------------------------------------------
+#  DETECTION SOURCE — set to "ptz" or "fixed"
+#    "ptz"   : detections from the PTZ camera itself (C0 on ESP32)
+#    "fixed" : detections from the stationary/fisheye camera (C1 on ESP32)
+# ----------------------------------------------------------------
+DETECTION_SOURCE = "fixed"
+
+if DETECTION_SOURCE == "fixed":
+    from pan_control_esp_fixed import PanController
+    from zoom_control_fixed import ZoomController
+else:
+    from pan_control_esp_ptz import PanController
+    from zoom_control_ptz import ZoomController
 
 _cleanup_done = False
 _cleanup_lock = threading.Lock()
 UNIX_SOCK   = "/tmp/ptz_control.sock"
 MANUAL_SOCK = "/tmp/ptz_manual.sock"
-TARGET_CAM  = "fixed"
+TARGET_CAM  = DETECTION_SOURCE   # listen for detections from this camera
 DEBUG       = False
 ENABLE_PAN  = True
 ENABLE_ZOOM = True
@@ -29,7 +41,7 @@ ZOOM_JOG_PER_SPS  = 20    # zoom_pos units added per tick per stepsPerSecond uni
 
 class PTZController:
     def __init__(self):
-        self.pan  = PanController()  if ENABLE_PAN  else None
+        self.pan  = PanController(detection_source=DETECTION_SOURCE)  if ENABLE_PAN  else None
         self.zoom = ZoomController() if ENABLE_ZOOM else None
 
         if not self.pan and not self.zoom:
@@ -46,8 +58,14 @@ class PTZController:
         if self.pan:
             self.pan.process_detection(detections, speed_scale=speed_scale)
         if self.zoom:
-            pan_error_x = self.pan.last_error_x if self.pan else 0.0
-            self.zoom.process_detection(detections, pan_error_x=pan_error_x)
+            # Check if zoom controller expects pan_error_x (Fixed version) or not (PTZ version)
+            import inspect
+            sig = inspect.signature(self.zoom.process_detection)
+            if 'pan_error_x' in sig.parameters:
+                pan_error_x = self.pan.last_error_x if self.pan else 0.0
+                self.zoom.process_detection(detections, pan_error_x=pan_error_x)
+            else:
+                self.zoom.process_detection(detections)
 
     def _send_stop(self):
         if self.pan and self.pan.ser_p:
@@ -182,11 +200,10 @@ class PTZController:
         if not self._manual_mode:
             print("[ptz] focus_offset ignored: not in manual mode")
             return
-        if not offset or not self.zoom or not self.zoom.ser_z:
+        if not offset or not self.zoom:
             return
-        self.zoom.focus_bias += offset
+        self.zoom.apply_focus_bias(offset)
         print(f"[ptz] focus_bias -> {self.zoom.focus_bias}")
-        self.zoom._drive_motor()
 
     def return_home(self):
         self._send_stop()

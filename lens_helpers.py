@@ -107,16 +107,16 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
 
     send_command(ser, "G91")
     send_command(ser, "M231 A")
-    send_command(ser, "G0 A-100" if status[CHA_PI] == 1 else "G0 A+100")
+    send_command(ser, "G0 A+100" if status[CHA_PI] == 1 else "G0 A-100")
     wait_homing(ser, status[CHA_PI], CHA_PI)
 
     send_command(ser, "M230 A")
-    send_command(ser, "G0 A+200")
+    send_command(ser, "G0 A-200")
     wait_homing(ser, 1, CHA_MOVE)
 
     send_command(ser, "G91")
     send_command(ser, "M231 A")
-    send_command(ser, "G0 A-100")
+    send_command(ser, "G0 A+100")
     wait_homing(ser, status[CHA_PI], CHA_PI)
 
     send_command(ser, "G92 A32000")
@@ -129,7 +129,7 @@ def calibrate_lens(ser, zoom_speed=1000, focus_speed=3000):
 
     send_command(ser, "G91")
     send_command(ser, "M231 B")
-    send_command(ser, "G0 B+100" if status[CHB_PI] == 0 else "G0 B-100")
+    send_command(ser, "G0 B+100" if status[CHB_PI] == 1 else "G0 B-100")
     wait_homing(ser, status[CHB_PI], CHB_PI)
 
     send_command(ser, "M230 B")
