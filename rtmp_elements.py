@@ -36,6 +36,12 @@ TEXT_HALIGN_CENTER = 1
 TEXT_HALIGN_POSITION = 4
 TEXT_VALIGN_TOP = 2
 TEXT_VALIGN_POSITION = 3
+FONT_SANS_BOLD_20 = "Sans Bold 20"
+FONT_SANS_16 = "Sans 16"
+FONT_UBUNTU_MONO_BOLD_22 = "Ubuntu Mono Bold 22"
+FONT_UBUNTU_MONO_BOLD_26 = "Ubuntu Mono Bold 26"
+FONT_UBUNTU_MONO_BOLD_32 = "Ubuntu Mono Bold 32"
+FONT_UBUNTU_MONO_BOLD_42 = "Ubuntu Mono Bold 42"
 
 
 def _set_if_supported(el: Any, prop: str, value) -> None:
@@ -483,7 +489,7 @@ def setup_text_overlay(
         text: str,
         xpos: float,
         ypos: float,
-        font: str = "Sans Bold 20",
+        font: str = FONT_SANS_BOLD_20,
         color: int = 0xFFFFFFFF,
         shadow: bool = True,
         anchor_top_left: bool = False,
@@ -513,7 +519,7 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         "Q1",
         xpos=0.073,
         ypos=0.933,
-        font="Sans Bold 20",
+        font=FONT_SANS_BOLD_20,
         color=0xFFFFFFFF,
     )
     setup_text_overlay(
@@ -553,7 +559,7 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         "10:00",
         xpos=0.130,
         ypos=0.933,
-        font="Sans Bold 20",
+        font=FONT_SANS_BOLD_20,
         color=0xFFFFFFFF,
     )
     setup_text_overlay(
@@ -561,7 +567,7 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         "",
         xpos=0.200,
         ypos=0.755,
-        font="Sans Bold 20",
+        font=FONT_SANS_BOLD_20,
         color=0xFFFFFFFF,
     )
     setup_text_overlay(
@@ -569,7 +575,7 @@ def configure_scoreboard_texts(elements: RtmpElements) -> None:
         "",
         xpos=0.200,
         ypos=0.790,
-        font="Sans Bold 20",
+        font=FONT_SANS_BOLD_20,
         color=0xFFFFFFFF,
     )
 
@@ -719,27 +725,27 @@ def configure_timeout_overlay(elements: RtmpElements) -> None:
 
     setup_text_overlay(elements.osd_timeout_header, "", xpos=0.510, ypos=0.138, font="Sans Bold 32", color=0xFFFFFFFF)
 
-    setup_text_overlay(elements.osd_timeout_home_name, "", xpos=0.370, ypos=0.225, font="Sans Bold 20",
+    setup_text_overlay(elements.osd_timeout_home_name, "", xpos=0.370, ypos=0.225, font=FONT_SANS_BOLD_20,
                        color=0xFF6B00FF)
     setup_text_overlay(elements.osd_timeout_home_pts, "", xpos=0.370, ypos=0.290, font="Sans Bold 18", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_home_fg, "", xpos=0.370, ypos=0.340, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_3p, "", xpos=0.370, ypos=0.385, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_reb, "", xpos=0.370, ypos=0.430, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_ast, "", xpos=0.370, ypos=0.475, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_stl, "", xpos=0.370, ypos=0.520, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_blk, "", xpos=0.370, ypos=0.565, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_home_foul, "", xpos=0.370, ypos=0.610, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_fg, "", xpos=0.370, ypos=0.340, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_3p, "", xpos=0.370, ypos=0.385, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_reb, "", xpos=0.370, ypos=0.430, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_ast, "", xpos=0.370, ypos=0.475, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_stl, "", xpos=0.370, ypos=0.520, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_blk, "", xpos=0.370, ypos=0.565, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_home_foul, "", xpos=0.370, ypos=0.610, font=FONT_SANS_16, color=0xCCCCCCFF)
 
-    setup_text_overlay(elements.osd_timeout_away_name, "", xpos=0.640, ypos=0.225, font="Sans Bold 20",
+    setup_text_overlay(elements.osd_timeout_away_name, "", xpos=0.640, ypos=0.225, font=FONT_SANS_BOLD_20,
                        color=0xFF6B00FF)
     setup_text_overlay(elements.osd_timeout_away_pts, "", xpos=0.640, ypos=0.290, font="Sans Bold 18", color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_timeout_away_fg, "", xpos=0.640, ypos=0.340, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_3p, "", xpos=0.640, ypos=0.385, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_reb, "", xpos=0.640, ypos=0.430, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_ast, "", xpos=0.640, ypos=0.475, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_stl, "", xpos=0.640, ypos=0.520, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_blk, "", xpos=0.640, ypos=0.565, font="Sans 16", color=0xCCCCCCFF)
-    setup_text_overlay(elements.osd_timeout_away_foul, "", xpos=0.640, ypos=0.610, font="Sans 16", color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_fg, "", xpos=0.640, ypos=0.340, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_3p, "", xpos=0.640, ypos=0.385, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_reb, "", xpos=0.640, ypos=0.430, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_ast, "", xpos=0.640, ypos=0.475, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_stl, "", xpos=0.640, ypos=0.520, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_blk, "", xpos=0.640, ypos=0.565, font=FONT_SANS_16, color=0xCCCCCCFF)
+    setup_text_overlay(elements.osd_timeout_away_foul, "", xpos=0.640, ypos=0.610, font=FONT_SANS_16, color=0xCCCCCCFF)
 
     setup_text_overlay(elements.osd_timeout_player_h1, "", xpos=0.270, ypos=0.740, font="Sans Bold 15",
                        color=0xFFFFFFFF, anchor_top_left=True)
@@ -789,25 +795,25 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
     active.set_property("overlay-height", 180)
     active.set_property("alpha", 0.0)
 
-    setup_text_overlay(elements.osd_blitz_quarter, "", xpos=0.710, ypos=0.895, font="Ubuntu Mono Bold 32",
+    setup_text_overlay(elements.osd_blitz_quarter, "", xpos=0.710, ypos=0.895, font=FONT_UBUNTU_MONO_BOLD_32,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_clock, "", xpos=0.710, ypos=0.945, font="Ubuntu Mono Bold 32",
+    setup_text_overlay(elements.osd_blitz_clock, "", xpos=0.710, ypos=0.945, font=FONT_UBUNTU_MONO_BOLD_32,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_name, "", xpos=0.450, ypos=0.888, font="Ubuntu Mono Bold 32",
+    setup_text_overlay(elements.osd_blitz_home_name, "", xpos=0.450, ypos=0.888, font=FONT_UBUNTU_MONO_BOLD_32,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_name, "", xpos=0.450, ypos=0.950, font="Ubuntu Mono Bold 32",
+    setup_text_overlay(elements.osd_blitz_away_name, "", xpos=0.450, ypos=0.950, font=FONT_UBUNTU_MONO_BOLD_32,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_pts, "", xpos=0.614, ypos=0.895, font="Ubuntu Mono Bold 42",
+    setup_text_overlay(elements.osd_blitz_home_pts, "", xpos=0.614, ypos=0.895, font=FONT_UBUNTU_MONO_BOLD_42,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_home_blitz, "", xpos=0.640, ypos=0.895, font="Ubuntu Mono Bold 42",
+    setup_text_overlay(elements.osd_blitz_home_blitz, "", xpos=0.640, ypos=0.895, font=FONT_UBUNTU_MONO_BOLD_42,
                        color=0xFFFFD700)  # gold
-    setup_text_overlay(elements.osd_blitz_away_pts, "", xpos=0.614, ypos=0.952, font="Ubuntu Mono Bold 42",
+    setup_text_overlay(elements.osd_blitz_away_pts, "", xpos=0.614, ypos=0.952, font=FONT_UBUNTU_MONO_BOLD_42,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_blitz_away_blitz, "", xpos=0.640, ypos=0.952, font="Ubuntu Mono Bold 42",
+    setup_text_overlay(elements.osd_blitz_away_blitz, "", xpos=0.640, ypos=0.952, font=FONT_UBUNTU_MONO_BOLD_42,
                        color=0xFFFFD700)  # gold
-    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_blitz_home_streak, "", xpos=0.500, ypos=0.845, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFF4500FF)
-    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_blitz_away_streak, "", xpos=0.500, ypos=0.888, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFF4500FF)
 
 
@@ -969,35 +975,35 @@ def configure_end_stats_overlay(elements: RtmpElements) -> None:
 
     # Two-column layout: left col at 0.080 (154px), right col at 0.520 (998px)
     # Each column is left-aligned; together they span symmetrically around center.
-    setup_text_overlay(elements.osd_end_header_home, "", xpos=0.180, ypos=0.200, font="Ubuntu Mono Bold 32",
+    setup_text_overlay(elements.osd_end_header_home, "", xpos=0.180, ypos=0.200, font=FONT_UBUNTU_MONO_BOLD_32,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_header_away, "", xpos=0.720, ypos=0.200, font="Ubuntu Mono Bold 32",
+    setup_text_overlay(elements.osd_end_header_away, "", xpos=0.720, ypos=0.200, font=FONT_UBUNTU_MONO_BOLD_32,
                        color=0xFFFFFFFF)
 
-    setup_text_overlay(elements.osd_end_home_pts, "", xpos=0.180, ypos=0.290, font="Ubuntu Mono Bold 26",
+    setup_text_overlay(elements.osd_end_home_pts, "", xpos=0.180, ypos=0.290, font=FONT_UBUNTU_MONO_BOLD_26,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_home_blitz, "", xpos=0.180, ypos=0.360, font="Ubuntu Mono Bold 26",
+    setup_text_overlay(elements.osd_end_home_blitz, "", xpos=0.180, ypos=0.360, font=FONT_UBUNTU_MONO_BOLD_26,
                        color=0xFFFFD700)
-    setup_text_overlay(elements.osd_end_home_inner, "", xpos=0.180, ypos=0.430, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_end_home_inner, "", xpos=0.180, ypos=0.430, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_middle, "", xpos=0.180, ypos=0.490, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_end_home_middle, "", xpos=0.180, ypos=0.490, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_outer, "", xpos=0.180, ypos=0.550, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_end_home_outer, "", xpos=0.180, ypos=0.550, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_home_intercept, "", xpos=0.180, ypos=0.610, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_end_home_intercept, "", xpos=0.180, ypos=0.610, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFFCCCCCC)
 
-    setup_text_overlay(elements.osd_end_away_pts, "", xpos=0.720, ypos=0.290, font="Ubuntu Mono Bold 26",
+    setup_text_overlay(elements.osd_end_away_pts, "", xpos=0.720, ypos=0.290, font=FONT_UBUNTU_MONO_BOLD_26,
                        color=0xFFFFFFFF)
-    setup_text_overlay(elements.osd_end_away_blitz, "", xpos=0.720, ypos=0.360, font="Ubuntu Mono Bold 26",
+    setup_text_overlay(elements.osd_end_away_blitz, "", xpos=0.720, ypos=0.360, font=FONT_UBUNTU_MONO_BOLD_26,
                        color=0xFFFFD700)
-    setup_text_overlay(elements.osd_end_away_inner, "", xpos=0.720, ypos=0.430, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_end_away_inner, "", xpos=0.720, ypos=0.430, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_middle, "", xpos=0.720, ypos=0.490, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_end_away_middle, "", xpos=0.720, ypos=0.490, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_outer, "", xpos=0.720, ypos=0.550, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_end_away_outer, "", xpos=0.720, ypos=0.550, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFFCCCCCC)
-    setup_text_overlay(elements.osd_end_away_intercept, "", xpos=0.720, ypos=0.610, font="Ubuntu Mono Bold 22",
+    setup_text_overlay(elements.osd_end_away_intercept, "", xpos=0.720, ypos=0.610, font=FONT_UBUNTU_MONO_BOLD_22,
                        color=0xFFCCCCCC)
 
     # Unused elements — silenced
