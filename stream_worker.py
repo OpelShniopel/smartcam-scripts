@@ -570,14 +570,14 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
     else:
         winner_text = "DRAW!"
 
-    def show_el(key: str, text: str, color: int | None = None) -> None:
-        el = els.get(key)
-        if not el:
+    def show_el(element_key: str, text: str, color: int | None = None) -> None:
+        text_element = els.get(element_key)
+        if not text_element:
             return
-        el.set_property("text", text)
-        el.set_property("silent", False)
+        text_element.set_property("text", text)
+        text_element.set_property("silent", False)
         if color is not None:
-            el.set_property("color", color)
+            text_element.set_property("color", color)
 
     show_el("osd_end_winner", winner_text, 0xFFFFD700)
     show_el("osd_end_header_home", home_name)
