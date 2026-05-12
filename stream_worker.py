@@ -646,22 +646,14 @@ def _update_overlay(state: dict) -> None:
             if visible:
                 home.set_property(
                     "text",
-                    truncate_team_name(
-                        "home_name",
-                        state.get("home_name", "HOME"),
-                        log_prefix="[worker]",
-                    ),
+                    truncate_team_name(state.get("home_name", "HOME")),
                 )
         if away:
             away.set_property("silent", not visible)
             if visible:
                 away.set_property(
                     "text",
-                    truncate_team_name(
-                        "away_name",
-                        state.get("away_name", "AWAY"),
-                        log_prefix="[worker]",
-                    ),
+                    truncate_team_name(state.get("away_name", "AWAY")),
                 )
         update_score_clock_overlays(home_score, away_score, clock, visible, state)
         if home_fouls_bar:

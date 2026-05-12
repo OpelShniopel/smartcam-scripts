@@ -394,22 +394,14 @@ def _update_osd_texts(state: dict) -> None:
             if visible:
                 home.set_property(
                     "text",
-                    truncate_team_name(
-                        "home_name",
-                        state.get("home_name", "HOME"),
-                        log_prefix="[score]",
-                    ),
+                    truncate_team_name(state.get("home_name", "HOME")),
                 )
         if away:
             away.set_property("silent", not visible)
             if visible:
                 away.set_property(
                     "text",
-                    truncate_team_name(
-                        "away_name",
-                        state.get("away_name", "AWAY"),
-                        log_prefix="[score]",
-                    ),
+                    truncate_team_name(state.get("away_name", "AWAY")),
                 )
         update_score_clock_overlays(home_score, away_score, clock, visible, state)
         if home_fouls_bar:
@@ -479,7 +471,7 @@ def _apply_score_patch(data: dict) -> None:
         for k in allowed_str:
             if k in data and isinstance(data[k], str):
                 if k in {"home_name", "away_name"}:
-                    score_state[k] = truncate_team_name(k, data[k], log_prefix="[score]")
+                    score_state[k] = truncate_team_name(data[k])
                 else:
                     score_state[k] = data[k]
         for k in allowed_int:

@@ -38,7 +38,7 @@ def default_score_state() -> dict:
     return DEFAULT_SCORE_STATE.copy()
 
 
-def truncate_team_name(field: str, value, *, log_prefix: str) -> str:
+def truncate_team_name(value) -> str:
     text = str(value)
     first_word = text.split()[0] if text.strip() else text
     return first_word
