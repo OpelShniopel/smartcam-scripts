@@ -287,138 +287,160 @@ def _blitz_pulse_step() -> bool:
     return True
 
 
-def _timeout_fade_step() -> bool:
-    global _timeout_alpha, _timeout_fade_in, _timeout_fade_out, _timeout_fade_active
-    global _sb_timeout_alpha, _timeout_pause_ticks
+def _alpha_color(alpha: float, rgb: int) -> int:
+    return (int(alpha * 255) << 24) | rgb
 
+
+def _set_overlay_key_property(els: dict, key: str, prop: str, value) -> None:
+    element = els.get(key)
+    if element:
+        element.set_property(prop, value)
+
+
+def _set_overlay_keys_property(els: dict, keys: tuple[str, ...], prop: str, value) -> None:
+    for key in keys:
+        _set_overlay_key_property(els, key, prop, value)
+
+
+def _set_scoreboard_pixel_alpha(els: dict, alpha: float) -> None:
+    _set_overlay_key_property(els, "osd_bg", "alpha", _pre_timeout_bg_alpha * alpha)
+    _set_overlay_key_property(els, "osd_home_fouls_bar", "alpha", _pre_timeout_home_foul_alpha * alpha)
+    _set_overlay_key_property(els, "osd_away_fouls_bar", "alpha", _pre_timeout_away_foul_alpha * alpha)
+
+
+def _set_scoreboard_text_alpha(els: dict, visible: bool, alpha: float) -> None:
+    if not visible:
+        return
+    color = _alpha_color(alpha, 0x00FFFFFF)
+    outline = _alpha_color(alpha, 0x00000000)
+    for key in _SCOREBOARD_CROSS_FADE_KEYS:
+        _set_overlay_key_property(els, key, "color", color)
+        _set_overlay_key_property(els, key, "outline-color", outline)
+
+
+def _set_timeout_alpha(els: dict, timeout_bg, alpha: float) -> None:
+    if timeout_bg:
+        timeout_bg.set_property("alpha", alpha)
+    color = _alpha_color(alpha, 0x00FFFFFF)
+    outline = _alpha_color(alpha, 0x00000000)
+    for key in TIMEOUT_TEXT_KEYS:
+        _set_overlay_key_property(els, key, "color", color)
+        _set_overlay_key_property(els, key, "outline-color", outline)
+
+
+def _pause_timeout_transition() -> bool:
+    global _timeout_pause_ticks
+    if _timeout_pause_ticks <= 0:
+        return False
+    _timeout_pause_ticks -= 1
+    return True
+
+
+def _fade_scoreboard_out_for_timeout(els: dict, visible: bool) -> bool:
+    global _sb_timeout_alpha, _timeout_pause_ticks
+    if _sb_timeout_alpha <= 0.0:
+        return False
+
+    _sb_timeout_alpha = max(0.0, _sb_timeout_alpha - 0.05)
+    _set_scoreboard_pixel_alpha(els, _sb_timeout_alpha)
+    _set_scoreboard_text_alpha(els, visible, _sb_timeout_alpha)
+    if _sb_timeout_alpha <= 0.0:
+        if visible:
+            _set_overlay_keys_property(els, _SCOREBOARD_CROSS_FADE_KEYS, "silent", True)
+        _timeout_pause_ticks = TIMEOUT_TRANSITION_PAUSE_TICKS
+    return True
+
+
+def _fade_timeout_in(els: dict, timeout_bg) -> None:
+    global _timeout_alpha, _timeout_fade_in
+    _timeout_alpha = min(1.0, _timeout_alpha + 0.05)
+    _set_timeout_alpha(els, timeout_bg, _timeout_alpha)
+    if _timeout_alpha >= 1.0:
+        _timeout_fade_in = False
+        _set_overlay_keys_property(els, TIMEOUT_TEXT_KEYS, "draw-shadow", True)
+
+
+def _timeout_fade_in_step(els: dict, timeout_bg, visible: bool) -> bool:
+    if _fade_scoreboard_out_for_timeout(els, visible):
+        return True
+    if _pause_timeout_transition():
+        return True
+    _fade_timeout_in(els, timeout_bg)
+    return True
+
+
+def _restore_scoreboard_for_timeout_out(els: dict, visible: bool) -> None:
+    if not visible:
+        return
+    for key in _SCOREBOARD_CROSS_FADE_KEYS:
+        _set_overlay_key_property(els, key, "draw-shadow", False)
+        _set_overlay_key_property(els, key, "color", 0x00FFFFFF)
+        _set_overlay_key_property(els, key, "outline-color", 0x00000000)
+        _set_overlay_key_property(els, key, "silent", False)
+
+
+def _fade_timeout_out(els: dict, timeout_bg, visible: bool) -> bool:
+    global _timeout_alpha, _timeout_pause_ticks
+    if _timeout_alpha <= 0.0:
+        return False
+
+    _timeout_alpha = max(0.0, _timeout_alpha - 0.05)
+    _set_timeout_alpha(els, timeout_bg, _timeout_alpha)
+    if _timeout_alpha <= 0.0:
+        _set_overlay_keys_property(els, TIMEOUT_TEXT_KEYS, "silent", True)
+        if timeout_bg:
+            timeout_bg.set_property("alpha", 0.0)
+        _restore_scoreboard_for_timeout_out(els, visible)
+        _timeout_pause_ticks = TIMEOUT_TRANSITION_PAUSE_TICKS
+    return True
+
+
+def _restore_scoreboard_after_timeout(els: dict, visible: bool) -> None:
+    if not visible:
+        return
+    for key in _SCOREBOARD_CROSS_FADE_KEYS:
+        _set_overlay_key_property(els, key, "color", 0xFFFFFFFF)
+        _set_overlay_key_property(els, key, "outline-color", 0xFF000000)
+        _set_overlay_key_property(els, key, "draw-shadow", True)
+
+
+def _finish_timeout_fade_out(els: dict, visible: bool) -> bool:
+    global _timeout_fade_out, _timeout_fade_active
+    _restore_scoreboard_after_timeout(els, visible)
+    _timeout_fade_out = False
+    _timeout_fade_active = False
+    if _last_score_state:
+        _update_overlay(_last_score_state)
+    return False
+
+
+def _fade_scoreboard_in_after_timeout(els: dict, visible: bool) -> bool:
+    global _sb_timeout_alpha
+    _sb_timeout_alpha = min(1.0, _sb_timeout_alpha + 0.05)
+    _set_scoreboard_pixel_alpha(els, _sb_timeout_alpha)
+    _set_scoreboard_text_alpha(els, visible, _sb_timeout_alpha)
+    if _sb_timeout_alpha >= 1.0:
+        return _finish_timeout_fade_out(els, visible)
+    return True
+
+
+def _timeout_fade_out_step(els: dict, timeout_bg, visible: bool) -> bool:
+    if _fade_timeout_out(els, timeout_bg, visible):
+        return True
+    if _pause_timeout_transition():
+        return True
+    return _fade_scoreboard_in_after_timeout(els, visible)
+
+
+def _timeout_fade_step() -> bool:
     els = dict(_osd_elements)
     timeout_bg = els.get("osd_timeout_bg")
     visible = _last_score_state.get("visible", False) if _last_score_state else False
 
     if _timeout_fade_in:
-        # Phase 1 — scoreboard fades out
-        if _sb_timeout_alpha > 0.0:
-            _sb_timeout_alpha = max(0.0, _sb_timeout_alpha - 0.05)
-            bg_el = els.get("osd_bg")
-            if bg_el:
-                bg_el.set_property("alpha", _pre_timeout_bg_alpha * _sb_timeout_alpha)
-            home_foul_el = els.get("osd_home_fouls_bar")
-            if home_foul_el:
-                home_foul_el.set_property("alpha", _pre_timeout_home_foul_alpha * _sb_timeout_alpha)
-            away_foul_el = els.get("osd_away_fouls_bar")
-            if away_foul_el:
-                away_foul_el.set_property("alpha", _pre_timeout_away_foul_alpha * _sb_timeout_alpha)
-            if visible:
-                sb_a = int(_sb_timeout_alpha * 255)
-                sb_fg = (sb_a << 24) | 0x00FFFFFF
-                sb_outline = (sb_a << 24) | 0x00000000
-                for key in _SCOREBOARD_CROSS_FADE_KEYS:
-                    el = els.get(key)
-                    if el:
-                        el.set_property("color", sb_fg)
-                        el.set_property("outline-color", sb_outline)
-            if _sb_timeout_alpha <= 0.0:
-                if visible:
-                    for key in _SCOREBOARD_CROSS_FADE_KEYS:
-                        el = els.get(key)
-                        if el:
-                            el.set_property("silent", True)
-                _timeout_pause_ticks = TIMEOUT_TRANSITION_PAUSE_TICKS
-
-        # Phase 2 — pause between scoreboard out and timeout in
-        elif _timeout_pause_ticks > 0:
-            _timeout_pause_ticks -= 1
-
-        # Phase 3 — timeout fades in
-        else:
-            _timeout_alpha = min(1.0, _timeout_alpha + 0.05)
-            if timeout_bg:
-                timeout_bg.set_property("alpha", _timeout_alpha)
-            t_a = int(_timeout_alpha * 255)
-            t_fg = (t_a << 24) | 0x00FFFFFF
-            t_outline = (t_a << 24) | 0x00000000
-            for key in TIMEOUT_TEXT_KEYS:
-                el = els.get(key)
-                if el:
-                    el.set_property("color", t_fg)
-                    el.set_property("outline-color", t_outline)
-            if _timeout_alpha >= 1.0:
-                _timeout_fade_in = False
-                for key in TIMEOUT_TEXT_KEYS:
-                    el = els.get(key)
-                    if el:
-                        el.set_property("draw-shadow", True)
-
-    elif _timeout_fade_out:
-        # Phase 1 — timeout fades out
-        if _timeout_alpha > 0.0:
-            _timeout_alpha = max(0.0, _timeout_alpha - 0.05)
-            if timeout_bg:
-                timeout_bg.set_property("alpha", _timeout_alpha)
-            t_a = int(_timeout_alpha * 255)
-            t_fg = (t_a << 24) | 0x00FFFFFF
-            t_outline = (t_a << 24) | 0x00000000
-            for key in TIMEOUT_TEXT_KEYS:
-                el = els.get(key)
-                if el:
-                    el.set_property("color", t_fg)
-                    el.set_property("outline-color", t_outline)
-            if _timeout_alpha <= 0.0:
-                for key in TIMEOUT_TEXT_KEYS:
-                    el = els.get(key)
-                    if el:
-                        el.set_property("silent", True)
-                if timeout_bg:
-                    timeout_bg.set_property("alpha", 0.0)
-                if visible:
-                    for key in _SCOREBOARD_CROSS_FADE_KEYS:
-                        el = els.get(key)
-                        if el:
-                            el.set_property("draw-shadow", False)
-                            el.set_property("color", 0x00FFFFFF)
-                            el.set_property("outline-color", 0x00000000)
-                            el.set_property("silent", False)
-                _timeout_pause_ticks = TIMEOUT_TRANSITION_PAUSE_TICKS
-
-        # Phase 2 — pause between timeout out and scoreboard in
-        elif _timeout_pause_ticks > 0:
-            _timeout_pause_ticks -= 1
-
-        # Phase 3 — scoreboard fades in
-        else:
-            _sb_timeout_alpha = min(1.0, _sb_timeout_alpha + 0.05)
-            bg_el = els.get("osd_bg")
-            if bg_el:
-                bg_el.set_property("alpha", _pre_timeout_bg_alpha * _sb_timeout_alpha)
-            home_foul_el = els.get("osd_home_fouls_bar")
-            if home_foul_el:
-                home_foul_el.set_property("alpha", _pre_timeout_home_foul_alpha * _sb_timeout_alpha)
-            away_foul_el = els.get("osd_away_fouls_bar")
-            if away_foul_el:
-                away_foul_el.set_property("alpha", _pre_timeout_away_foul_alpha * _sb_timeout_alpha)
-            if visible:
-                sb_a = int(_sb_timeout_alpha * 255)
-                sb_fg = (sb_a << 24) | 0x00FFFFFF
-                sb_outline = (sb_a << 24) | 0x00000000
-                for key in _SCOREBOARD_CROSS_FADE_KEYS:
-                    el = els.get(key)
-                    if el:
-                        el.set_property("color", sb_fg)
-                        el.set_property("outline-color", sb_outline)
-            if _sb_timeout_alpha >= 1.0:
-                if visible:
-                    for key in _SCOREBOARD_CROSS_FADE_KEYS:
-                        el = els.get(key)
-                        if el:
-                            el.set_property("color", 0xFFFFFFFF)
-                            el.set_property("outline-color", 0xFF000000)
-                            el.set_property("draw-shadow", True)
-                _timeout_fade_out = False
-                _timeout_fade_active = False
-                if _last_score_state:
-                    _update_overlay(_last_score_state)
-                return False
-
+        return _timeout_fade_in_step(els, timeout_bg, visible)
+    if _timeout_fade_out:
+        return _timeout_fade_out_step(els, timeout_bg, visible)
     return True
 
 
