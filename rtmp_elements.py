@@ -1011,13 +1011,16 @@ def configure_end_stats_overlay(elements: RtmpElements) -> None:
         el.set_property("silent", True)
 
 
-def _end_stats_active(state: Mapping[str, Any], end_stats: Any) -> bool:
+def _active_end_stats(state: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    end_stats = state.get("end_stats")
     now_ms = int(time.time() * 1000)
-    return (
-            state.get("game_finished", False)
-            and isinstance(end_stats, dict)
-            and end_stats.get("show_until", 0) > now_ms
-    )
+    if not state.get("game_finished", False):
+        return None
+    if not isinstance(end_stats, Mapping):
+        return None
+    if end_stats.get("show_until", 0) <= now_ms:
+        return None
+    return end_stats
 
 
 def _set_overlay_alpha(els: Mapping[str, Any], key: str, alpha: float) -> None:
@@ -1160,8 +1163,8 @@ def _show_end_stats_overlay(state: Mapping[str, Any], end_stats: Mapping[str, An
 
 def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
     """Show end-game stats overlay. Returns True if the overlay is active."""
-    end_stats = state.get("end_stats")
-    if not _end_stats_active(state, end_stats):
+    end_stats = _active_end_stats(state)
+    if end_stats is None:
         _hide_end_stats_overlay(els)
         return False
 
