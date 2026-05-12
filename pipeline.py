@@ -899,7 +899,7 @@ def _cmd_fail(action: str, err: str) -> None:
     _ack(action, False, err)
 
 
-def _normalize_rtmp_url(raw_url) -> tuple[str | None, str]:
+def _normalize_rtmp_url(raw_url: object) -> tuple[str | None, str]:
     if not isinstance(raw_url, str):
         return None, f"rtmp_url must be string, got {raw_url!r}"
     rtmp_url = raw_url.strip()
