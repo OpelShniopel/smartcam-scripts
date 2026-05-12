@@ -1736,7 +1736,7 @@ def _start_stream_worker() -> tuple[bool, str]:
 def _stop_stream_worker(timeout_sec: float = 5.0) -> tuple[bool, str]:
     with _worker_ctl_lock:
         pid_info = _read_worker_pid_info()
-        if not _worker_pid_info_is_current(pid_info):
+        if pid_info is None or not _worker_pid_info_is_current(pid_info):
             try:
                 os.unlink(STREAM_WORKER_PID)
             except FileNotFoundError:
@@ -1744,7 +1744,10 @@ def _stop_stream_worker(timeout_sec: float = 5.0) -> tuple[bool, str]:
             _set_worker_status(worker_alive=False, stream_active=False, last_error="")
             return True, "already stopped"
 
-        pid = int(pid_info["pid"])
+        pid = _worker_pid_from_info(pid_info)
+        if pid is None:
+            return True, "already stopped"
+
         try:
             _signal_worker_process(pid, signal.SIGTERM)
         except OSError as e:
@@ -1872,7 +1875,8 @@ def pgie_src_pad_buffer_probe(_pad, info, cam_label):
     if not batch_meta:
         return Gst.PadProbeReturn.OK
 
-    for frame_meta in _iter_nvds_meta_list(batch_meta.frame_meta_list, pyds.NvDsFrameMeta.cast):
+    frame_meta_list = getattr(batch_meta, "frame_meta_list", None)
+    for frame_meta in _iter_nvds_meta_list(frame_meta_list, pyds.NvDsFrameMeta.cast):
         _process_detection_frame(frame_meta, cam_label)
 
     return Gst.PadProbeReturn.OK
@@ -2270,15 +2274,16 @@ def _switch_program_camera(active_camera: str, *, force_keyframe: bool = True) -
             return
 
     pad = _program_selector_pads.get(normalized)
-    if _program_selector is None or pad is None:
+    selector = _program_selector
+    if selector is None or pad is None:
         return
 
-    current = _program_selector.get_property("active-pad")
+    current = selector.get_property("active-pad")
     if current == pad and _program_active_camera == normalized:
         return
 
     previous_camera = _program_active_camera
-    _program_selector.set_property("active-pad", pad)
+    selector.set_property("active-pad", pad)
     _program_previous_camera = previous_camera
     _program_active_camera = normalized
     _program_switch_seq += 1
@@ -2440,9 +2445,10 @@ def _build_program_clean_branch(
     _program_selector = selector
     _program_enc = enc_stream
     _program_preview_enc = enc_preview
-    _last_program_cfg = _read_stream_worker_config()
+    program_cfg = _read_stream_worker_config()
+    _last_program_cfg = program_cfg
     _switch_program_camera(
-        _last_program_cfg.get("activeCamera", PTZ_CAMERA),
+        program_cfg.get("activeCamera", PTZ_CAMERA),
         force_keyframe=False,
     )
 
