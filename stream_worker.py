@@ -620,118 +620,165 @@ def _show_blitzball_end_stats(state: dict, els: dict) -> None:
     _populate_blitzball_end_stats(state, els)
 
 
-def _update_overlay(state: dict) -> None:
-    global _last_score_state, _end_stats_show_until
-    _last_score_state = dict(state)
-    els = dict(_osd_elements)
-    if not els:
-        return
+def _overlay_elements_snapshot() -> dict:
+    return dict(_osd_elements)
 
+
+def _handle_blitzball_finished_stats(state: dict, els: dict, sport_code: str, now_ms: int) -> bool:
+    global _end_stats_show_until
     game_finished = state.get("game_finished", False)
-    sport_code = state.get("sport_code", "")
-    now_ms = int(time.time() * 1000)
-
     if not game_finished:
         _end_stats_show_until = 0
+        return False
 
-    if game_finished and sport_code == "BLITZBALL":
-        if _end_stats_show_until == 0:
-            _end_stats_show_until = now_ms + 20000
-        if now_ms < _end_stats_show_until:
-            _show_blitzball_end_stats(state, els)
-            return
-        else:
-            _end_stats_show_until = 0
+    if sport_code != "BLITZBALL":
+        return False
 
-    end_showing = update_blitzball_end_stats(state, els)
-    if end_showing:
+    if _end_stats_show_until == 0:
+        _end_stats_show_until = now_ms + 20000
+
+    if now_ms >= _end_stats_show_until:
+        _end_stats_show_until = 0
+        return False
+
+    _show_blitzball_end_stats(state, els)
+    return True
+
+
+def _set_team_overlay(element, name: str, fallback: str, visible: bool) -> None:
+    if not element:
+        return
+    element.set_property("silent", not visible)
+    if visible:
+        element.set_property("text", truncate_team_name(name or fallback))
+
+
+def _set_element_alpha(element, alpha: float) -> None:
+    if element:
+        element.set_property("alpha", alpha)
+
+
+def _update_foul_bar(element, team: str, fouls: int, visible: bool) -> None:
+    if not element:
         return
 
+    path = foul_png_path(team, fouls)
+    if path is None:
+        element.set_property("alpha", 0.0)
+        return
+
+    element.set_property("location", path)
+    element.set_property("alpha", 1.0 if visible else 0.0)
+
+
+def _prepare_milestone_fade_elements(elements: tuple, reset_color: bool) -> None:
+    _set_milestone_elements_property(elements, "draw-shadow", False)
+    if reset_color:
+        _set_milestone_elements_property(elements, "color", 0x00FFFFFF)
+        _set_milestone_elements_property(elements, "outline-color", 0x00000000)
+
+
+def _start_milestone_fade_in(elements: tuple, state: dict) -> None:
+    global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
+    _milestone_fading_in = True
+    _milestone_fading_out = False
+    _milestone_fade_active = True
+    _milestone_alpha = 0.0
+    update_milestone_overlays(elements[0], elements[1], state, force_visible=True)
+    _prepare_milestone_fade_elements(elements, reset_color=True)
+    GLib.timeout_add(100, _milestone_fade_step)
+
+
+def _resume_milestone_fade_in(elements: tuple, state: dict) -> None:
+    global _milestone_fading_in, _milestone_fading_out
+    _milestone_fading_in = True
+    _milestone_fading_out = False
+    _prepare_milestone_fade_elements(elements, reset_color=False)
+    update_milestone_overlays(elements[0], elements[1], state, force_visible=True)
+
+
+def _start_milestone_fade_out() -> None:
+    global _milestone_fading_in, _milestone_fading_out
+    _milestone_fading_in = False
+    _milestone_fading_out = True
+
+
+def _update_active_milestone(elements: tuple, state: dict) -> None:
+    if not _milestone_fade_active:
+        _start_milestone_fade_in(elements, state)
+    elif _milestone_fading_out:
+        _resume_milestone_fade_in(elements, state)
+
+
+def _update_inactive_milestone(elements: tuple, state: dict) -> None:
+    if _milestone_fade_active and not _milestone_fading_out:
+        _start_milestone_fade_out()
+        return
+    if not _milestone_fade_active:
+        update_milestone_overlays(elements[0], elements[1], state)
+
+
+def _update_milestone_state(state: dict, els: dict) -> None:
+    elements = els.get("osd_milestone_player"), els.get("osd_milestone_text")
+    if int(time.time() * 1000) < _milestone_display_until:
+        _update_active_milestone(elements, state)
+        return
+    _update_inactive_milestone(elements, state)
+
+
+def _update_regular_scoreboard(state: dict, els: dict) -> None:
+    visible = state.get("visible", False)
+    update_quarter_overlay(els.get("osd_quarter"), visible, state)
+    _set_team_overlay(els.get("osd_home"), state.get("home_name", "HOME"), "HOME", visible)
+    _set_team_overlay(els.get("osd_away"), state.get("away_name", "AWAY"), "AWAY", visible)
+    update_score_clock_overlays(
+        els.get("osd_home_score"),
+        els.get("osd_away_score"),
+        els.get("osd_clock"),
+        visible,
+        state,
+    )
+    _update_foul_bar(els.get("osd_home_fouls_bar"), "home", state.get("home_fouls", 0), visible)
+    _update_foul_bar(els.get("osd_away_fouls_bar"), "away", state.get("away_fouls", 0), visible)
+    _set_element_alpha(els.get("osd_bg"), 1.0 if visible else 0.0)
+    _update_milestone_state(state, els)
+
+
+def _update_regular_scoreboard_if_needed(state: dict, els: dict, sport_code: str) -> None:
     if not _timeout_fade_active and sport_code != "BLITZBALL":
-        visible = state.get("visible", False)
-        quarter = els.get("osd_quarter")
-        home = els.get("osd_home")
-        away = els.get("osd_away")
-        home_score = els.get("osd_home_score")
-        away_score = els.get("osd_away_score")
-        clock = els.get("osd_clock")
-        home_fouls_bar = els.get("osd_home_fouls_bar")
-        away_fouls_bar = els.get("osd_away_fouls_bar")
-        bg = els.get("osd_bg")
-        milestone_player = els.get("osd_milestone_player")
-        milestone_text = els.get("osd_milestone_text")
+        _update_regular_scoreboard(state, els)
 
-        update_quarter_overlay(quarter, visible, state)
-        if home:
-            home.set_property("silent", not visible)
-            if visible:
-                home.set_property(
-                    "text",
-                    truncate_team_name(state.get("home_name", "HOME")),
-                )
-        if away:
-            away.set_property("silent", not visible)
-            if visible:
-                away.set_property(
-                    "text",
-                    truncate_team_name(state.get("away_name", "AWAY")),
-                )
-        update_score_clock_overlays(home_score, away_score, clock, visible, state)
-        if home_fouls_bar:
-            path = foul_png_path("home", state.get("home_fouls", 0))
-            if path is None:
-                home_fouls_bar.set_property("alpha", 0.0)
-            else:
-                home_fouls_bar.set_property("location", path)
-                home_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
-        if away_fouls_bar:
-            path = foul_png_path("away", state.get("away_fouls", 0))
-            if path is None:
-                away_fouls_bar.set_property("alpha", 0.0)
-            else:
-                away_fouls_bar.set_property("location", path)
-                away_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
-        if bg:
-            bg.set_property("alpha", 1.0 if visible else 0.0)
 
-        global _milestone_alpha, _milestone_fading_in, _milestone_fading_out, _milestone_fade_active
-        milestone_active = int(time.time() * 1000) < _milestone_display_until
-
-        if milestone_active:
-            if not _milestone_fade_active:
-                _milestone_fading_in = True
-                _milestone_fading_out = False
-                _milestone_fade_active = True
-                _milestone_alpha = 0.0
-                update_milestone_overlays(milestone_player, milestone_text, state, force_visible=True)
-                for el in (milestone_player, milestone_text):
-                    if el:
-                        el.set_property("draw-shadow", False)
-                        el.set_property("color", 0x00FFFFFF)
-                        el.set_property("outline-color", 0x00000000)
-                GLib.timeout_add(100, _milestone_fade_step)
-            elif _milestone_fading_out:
-                _milestone_fading_in = True
-                _milestone_fading_out = False
-                for el in (milestone_player, milestone_text):
-                    if el:
-                        el.set_property("draw-shadow", False)
-                update_milestone_overlays(milestone_player, milestone_text, state, force_visible=True)
-        elif _milestone_fade_active and not _milestone_fading_out:
-            _milestone_fading_in = False
-            _milestone_fading_out = True
-        elif not _milestone_fade_active:
-            update_milestone_overlays(milestone_player, milestone_text, state)
-
+def _update_blitz_pulse(state: dict, els: dict) -> None:
     global _blitz_pulse_active, _blitz_pulse_alpha
     blitz_pulse_needed = update_blitzball_overlay(state, els)
     if blitz_pulse_needed and not _blitz_pulse_active:
         _blitz_pulse_active = True
         _blitz_pulse_alpha = 0.6
         GLib.timeout_add(50, _blitz_pulse_step)
-    elif not blitz_pulse_needed:
+        return
+    if not blitz_pulse_needed:
         _blitz_pulse_active = False
 
+
+def _update_overlay(state: dict) -> None:
+    global _last_score_state
+    _last_score_state = dict(state)
+    els = _overlay_elements_snapshot()
+    if not els:
+        return
+
+    sport_code = state.get("sport_code", "")
+    now_ms = int(time.time() * 1000)
+
+    if _handle_blitzball_finished_stats(state, els, sport_code, now_ms):
+        return
+
+    if update_blitzball_end_stats(state, els):
+        return
+
+    _update_regular_scoreboard_if_needed(state, els, sport_code)
+    _update_blitz_pulse(state, els)
     update_timeout_overlay(state, els)
 
 
