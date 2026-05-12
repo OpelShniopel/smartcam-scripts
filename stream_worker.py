@@ -455,7 +455,9 @@ def _active_timeout_stats(state: dict, now_ms: int) -> dict | None:
 
 def _element_alpha(els: dict, key: str) -> float:
     element = els.get(key)
-    return element.get_property("alpha") if element else 0.0
+    if element is None:
+        return 0.0
+    return element.get_property("alpha")
 
 
 def _capture_pre_timeout_alphas(els: dict) -> None:
@@ -890,8 +892,9 @@ def _poll_worker_config() -> bool:
         previous = _last_config or {}
         _last_config = dict(cfg)
         bitrate = cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)
-        if _enc_stream is not None and bitrate != previous.get("bitrateKbps", RTMP_BITRATE_DEFAULT):
-            _enc_stream.set_property("bitrate", int(bitrate))
+        enc_stream = _enc_stream
+        if enc_stream is not None and bitrate != previous.get("bitrateKbps", RTMP_BITRATE_DEFAULT):
+            enc_stream.set_property("bitrate", int(bitrate))
             print(f"[worker] updated stream bitrate -> {bitrate} kbps")
         _switch_active_camera(cfg.get("activeCamera", PTZ_CAMERA))
     return True

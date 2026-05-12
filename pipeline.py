@@ -2275,7 +2275,9 @@ def _switch_program_camera(active_camera: str, *, force_keyframe: bool = True) -
 
     pad = _program_selector_pads.get(normalized)
     selector = _program_selector
-    if selector is None or pad is None:
+    if selector is None:
+        return
+    if pad is None:
         return
 
     current = selector.get_property("active-pad")
