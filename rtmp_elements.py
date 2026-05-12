@@ -603,9 +603,9 @@ def populate_timeout_texts(
     away_stats = timeout_stats.get("away_stats") or {}
 
     def _set(key: str, text: str) -> None:
-        el = els.get(key)
-        if el:
-            el.set_property("text", text)
+        text_element = els.get(key)
+        if text_element:
+            text_element.set_property("text", text)
 
     def _format_pct(value: Any) -> str:
         try:
