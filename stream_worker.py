@@ -360,13 +360,12 @@ def _fade_timeout_in(els: dict, timeout_bg) -> None:
         _set_overlay_keys_property(els, TIMEOUT_TEXT_KEYS, "draw-shadow", True)
 
 
-def _timeout_fade_in_step(els: dict, timeout_bg, visible: bool) -> bool:
+def _timeout_fade_in_step(els: dict, timeout_bg, visible: bool) -> None:
     if _fade_scoreboard_out_for_timeout(els, visible):
-        return True
+        return
     if _pause_timeout_transition():
-        return True
+        return
     _fade_timeout_in(els, timeout_bg)
-    return True
 
 
 def _restore_scoreboard_for_timeout_out(els: dict, visible: bool) -> None:
@@ -438,7 +437,8 @@ def _timeout_fade_step() -> bool:
     visible = _last_score_state.get("visible", False) if _last_score_state else False
 
     if _timeout_fade_in:
-        return _timeout_fade_in_step(els, timeout_bg, visible)
+        _timeout_fade_in_step(els, timeout_bg, visible)
+        return True
     if _timeout_fade_out:
         return _timeout_fade_out_step(els, timeout_bg, visible)
     return True
