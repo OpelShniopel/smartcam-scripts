@@ -64,7 +64,7 @@ import time
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 import gi
 
@@ -363,7 +363,15 @@ _SCORE_BOOL_FIELDS = frozenset({"visible"})
 # ---------------------------------------------------------------------------
 # Scoreboard overlay elements
 # ---------------------------------------------------------------------------
-_osd_elements: dict[str, Gst.Element] = {}
+class _OverlayPropertyElement(Protocol):
+    def set_property(self, name: str, value: Any) -> None:
+        ...
+
+    def get_property(self, name: str) -> Any:
+        ...
+
+
+_osd_elements: dict[str, _OverlayPropertyElement] = {}
 _osd_lock = threading.Lock()
 
 
@@ -373,33 +381,38 @@ def _render_scoreboard_bg() -> None:
         print("         Place scoreboard.png next to pipeline.py")
 
 
-def _osd_elements_snapshot() -> dict[str, Gst.Element]:
+def _osd_elements_snapshot() -> dict[str, _OverlayPropertyElement]:
     with _osd_lock:
         return dict(_osd_elements)
 
 
-def _osd_element(els: dict, key: str):
+def _osd_element(els: dict[str, _OverlayPropertyElement], key: str) -> _OverlayPropertyElement | None:
     return els.get(key)
 
 
-def _set_osd_silent(els: dict, key: str, silent: bool) -> None:
+def _set_osd_silent(els: dict[str, _OverlayPropertyElement], key: str, silent: bool) -> None:
     el = _osd_element(els, key)
     if el:
         el.set_property("silent", silent)
 
 
-def _set_osd_alpha(els: dict, key: str, alpha: float) -> None:
+def _set_osd_alpha(els: dict[str, _OverlayPropertyElement], key: str, alpha: float) -> None:
     el = _osd_element(els, key)
     if el:
         el.set_property("alpha", alpha)
 
 
-def _set_many_osd_silent(els: dict, keys, silent: bool) -> None:
+def _set_many_osd_silent(els: dict[str, _OverlayPropertyElement], keys, silent: bool) -> None:
     for key in keys:
         _set_osd_silent(els, key, silent)
 
 
-def _update_team_name_text(el, value, fallback: str, visible: bool) -> None:
+def _update_team_name_text(
+        el: _OverlayPropertyElement | None,
+        value,
+        fallback: str,
+        visible: bool,
+) -> None:
     if not el:
         return
     el.set_property("silent", not visible)
@@ -407,7 +420,12 @@ def _update_team_name_text(el, value, fallback: str, visible: bool) -> None:
         el.set_property("text", truncate_team_name(value or fallback))
 
 
-def _update_foul_bar(el, team: str, fouls, visible: bool) -> None:
+def _update_foul_bar(
+        el: _OverlayPropertyElement | None,
+        team: str,
+        fouls,
+        visible: bool,
+) -> None:
     if not el:
         return
     path = foul_png_path(team, fouls)
@@ -418,7 +436,11 @@ def _update_foul_bar(el, team: str, fouls, visible: bool) -> None:
     el.set_property("alpha", 1.0 if visible else 0.0)
 
 
-def _update_standard_scoreboard_overlays(state: dict, els: dict, visible: bool) -> None:
+def _update_standard_scoreboard_overlays(
+        state: dict,
+        els: dict[str, _OverlayPropertyElement],
+        visible: bool,
+) -> None:
     update_quarter_overlay(_osd_element(els, "osd_quarter"), visible, state)
     _update_team_name_text(_osd_element(els, "osd_home"), state.get("home_name", "HOME"), "HOME", visible)
     _update_team_name_text(_osd_element(els, "osd_away"), state.get("away_name", "AWAY"), "AWAY", visible)
