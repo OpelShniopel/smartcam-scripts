@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Protocol
 
 import gi
 
@@ -11,7 +11,12 @@ gi.require_version("GstVideo", "1.0")
 from gi.repository import Gst, GstVideo
 
 
-def force_key_unit(enc: Any | None, label: str, log_prefix: str) -> None:
+class _KeyUnitElement(Protocol):
+    def get_static_pad(self, name: str) -> Gst.Pad | None:
+        ...
+
+
+def force_key_unit(enc: _KeyUnitElement | None, label: str, log_prefix: str) -> None:
     if enc is None:
         return
     sink_pad = enc.get_static_pad("sink")
