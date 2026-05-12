@@ -990,80 +990,75 @@ def configure_end_stats_overlay(elements: RtmpElements) -> None:
         el.set_property("silent", True)
 
 
-def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
-    """Show end-game stats overlay. Returns True if the overlay is active."""
-    end_stats = state.get("end_stats")
-    game_finished = state.get("game_finished", False)
+def _end_stats_active(state: Mapping[str, Any], end_stats: Any) -> bool:
     now_ms = int(time.time() * 1000)
-
-    active = (
-            game_finished
-            and isinstance(end_stats, dict)
-            and end_stats.get("show_until", 0) > now_ms
+    return (
+        state.get("game_finished", False)
+        and isinstance(end_stats, dict)
+        and end_stats.get("show_until", 0) > now_ms
     )
 
-    if not active:
-        end_bg = els.get("osd_end_bg")
-        if end_bg:
-            end_bg.set_property("alpha", 0.0)
-        for key in END_STATS_TEXT_KEYS:
-            el = els.get(key)
-            if el:
-                el.set_property("silent", True)
-        return False
 
-    end_bg = els.get("osd_end_bg")
-    if end_bg:
-        end_bg.set_property("alpha", 0.85)
+def _set_overlay_alpha(els: Mapping[str, Any], key: str, alpha: float) -> None:
+    element = els.get(key)
+    if element:
+        element.set_property("alpha", alpha)
 
-    # Hide regular and blitz scoreboards
+
+def _set_overlay_silent(els: Mapping[str, Any], key: str, silent: bool) -> None:
+    element = els.get(key)
+    if element:
+        element.set_property("silent", silent)
+
+
+def _set_text_overlay(els: Mapping[str, Any], key: str, text: str) -> None:
+    element = els.get(key)
+    if element:
+        element.set_property("text", text)
+        element.set_property("silent", False)
+
+
+def _hide_end_stats_overlay(els: Mapping[str, Any]) -> None:
+    _set_overlay_alpha(els, "osd_end_bg", 0.0)
+    for key in END_STATS_TEXT_KEYS:
+        _set_overlay_silent(els, key, True)
+
+
+def _hide_scoreboards_for_end_stats(els: Mapping[str, Any]) -> None:
     for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
-        el = els.get(key)
-        if el:
-            el.set_property("alpha", 0.0)
-    for key in _BLITZ_SCOREBOARD_TEXT_KEYS:
-        el = els.get(key)
-        if el:
-            el.set_property("silent", True)
-    for key in BLITZ_TEXT_KEYS:
-        el = els.get(key)
-        if el:
-            el.set_property("silent", True)
+        _set_overlay_alpha(els, key, 0.0)
+    for key in (*_BLITZ_SCOREBOARD_TEXT_KEYS, *BLITZ_TEXT_KEYS):
+        _set_overlay_silent(els, key, True)
     for key in BLITZ_PIXEL_KEYS:
-        el = els.get(key)
-        if el:
-            el.set_property("alpha", 0.0)
+        _set_overlay_alpha(els, key, 0.0)
 
+
+def _blitzball_winner_text(winner: str, home_name: str, away_name: str) -> str:
+    if winner == "home":
+        return f"BLITZ  {home_name} WINS!"
+    if winner == "away":
+        return f"BLITZ  {away_name} WINS!"
+    return "BLITZ  DRAW!"
+
+
+def _show_end_stats_winner(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
     winner = state.get("winner", "")
     home_name = state.get("home_name", "HOME")
     away_name = state.get("away_name", "AWAY")
-
-    if winner == "home":
-        winner_text = f"BLITZ  {home_name} WINS!"
-    elif winner == "away":
-        winner_text = f"BLITZ  {away_name} WINS!"
-    else:
-        winner_text = "BLITZ  DRAW!"
-
     winner_el = els.get("osd_end_winner")
     if winner_el:
-        winner_el.set_property("text", winner_text)
+        winner_el.set_property("text", _blitzball_winner_text(str(winner), str(home_name), str(away_name)))
         winner_el.set_property("silent", False)
         winner_el.set_property("color", 0xFFFFD700)
 
-    header_home = els.get("osd_end_header_home")
-    if header_home:
-        header_home.set_property("text", home_name)
-        header_home.set_property("silent", False)
-    header_away = els.get("osd_end_header_away")
-    if header_away:
-        header_away.set_property("text", away_name)
-        header_away.set_property("silent", False)
 
-    home = end_stats.get("home_stats", {})
-    away = end_stats.get("away_stats", {})
+def _show_end_stats_headers(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+    _set_text_overlay(els, "osd_end_header_home", str(state.get("home_name", "HOME")))
+    _set_text_overlay(els, "osd_end_header_away", str(state.get("away_name", "AWAY")))
 
-    _end_stat_pairs = [
+
+def _end_stat_text_pairs(home: Mapping[str, Any], away: Mapping[str, Any]) -> list[tuple[str, str]]:
+    return [
         ("osd_end_home_pts", f"TOTAL  {home.get('total_points', 0)} PTS"),
         ("osd_end_home_inner", f"INNER  {home.get('inner_scores', 0)}"),
         ("osd_end_home_middle", f"MIDDLE {home.get('middle_scores', 0)}"),
@@ -1079,49 +1074,76 @@ def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any])
         ("osd_end_away_blitz_rate", f"BLITZ% {away.get('blitz_conversion_rate', 0):.0f}%"),
         ("osd_end_away_intercept", f"INTERCEPTS {away.get('interceptions', 0)}"),
     ]
-    for key, text in _end_stat_pairs:
-        el = els.get(key)
-        if el:
-            el.set_property("text", text)
-            el.set_property("silent", False)
 
+
+def _show_end_stat_texts(end_stats: Mapping[str, Any], els: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    home = end_stats.get("home_stats", {})
+    away = end_stats.get("away_stats", {})
+    for key, text in _end_stat_text_pairs(home, away):
+        _set_text_overlay(els, key, text)
+    return home, away
+
+
+def _top_team_players(players, team_id) -> list[Any]:
+    return [player for player in players if player.get("team_id") == team_id][:3]
+
+
+def _player_end_stat_text(player: Mapping[str, Any]) -> str:
+    return (
+        f"{player.get('player_name', '')}  {player.get('points', 0)}pts  "
+        f"BLITZ:{player.get('blitz_scores', 0)}"
+    )
+
+
+def _show_player_slots(els: Mapping[str, Any], slots: list[str], players: list[Any]) -> None:
+    for index, slot in enumerate(slots):
+        element = els.get(slot)
+        if not element:
+            continue
+        if index < len(players):
+            element.set_property("text", _player_end_stat_text(players[index]))
+            element.set_property("silent", False)
+        else:
+            element.set_property("silent", True)
+
+
+def _show_end_stats_players(
+        end_stats: Mapping[str, Any],
+        home: Mapping[str, Any],
+        away: Mapping[str, Any],
+        els: Mapping[str, Any],
+) -> None:
     players = end_stats.get("players", [])
-    home_team_id = home.get("team_id")
-    away_team_id = away.get("team_id")
-    home_players = [p for p in players if p.get("team_id") == home_team_id][:3]
-    away_players = [p for p in players if p.get("team_id") == away_team_id][:3]
+    _show_player_slots(
+        els,
+        ["osd_end_player_h1", "osd_end_player_h2", "osd_end_player_h3"],
+        _top_team_players(players, home.get("team_id")),
+    )
+    _show_player_slots(
+        els,
+        ["osd_end_player_a1", "osd_end_player_a2", "osd_end_player_a3"],
+        _top_team_players(players, away.get("team_id")),
+    )
+    _set_text_overlay(els, "osd_end_players_header", "TOP PLAYERS")
 
-    home_slots = ["osd_end_player_h1", "osd_end_player_h2", "osd_end_player_h3"]
-    away_slots = ["osd_end_player_a1", "osd_end_player_a2", "osd_end_player_a3"]
 
-    for i, slot in enumerate(home_slots):
-        el = els.get(slot)
-        if not el:
-            continue
-        if i < len(home_players):
-            p = home_players[i]
-            el.set_property("text",
-                            f"{p.get('player_name', '')}  {p.get('points', 0)}pts  BLITZ:{p.get('blitz_scores', 0)}")
-            el.set_property("silent", False)
-        else:
-            el.set_property("silent", True)
+def _show_end_stats_overlay(state: Mapping[str, Any], end_stats: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+    _set_overlay_alpha(els, "osd_end_bg", 0.85)
+    _hide_scoreboards_for_end_stats(els)
+    _show_end_stats_winner(state, els)
+    _show_end_stats_headers(state, els)
+    home, away = _show_end_stat_texts(end_stats, els)
+    _show_end_stats_players(end_stats, home, away, els)
 
-    for i, slot in enumerate(away_slots):
-        el = els.get(slot)
-        if not el:
-            continue
-        if i < len(away_players):
-            p = away_players[i]
-            el.set_property("text",
-                            f"{p.get('player_name', '')}  {p.get('points', 0)}pts  BLITZ:{p.get('blitz_scores', 0)}")
-            el.set_property("silent", False)
-        else:
-            el.set_property("silent", True)
 
-    players_header = els.get("osd_end_players_header")
-    if players_header:
-        players_header.set_property("text", "TOP PLAYERS")
-        players_header.set_property("silent", False)
+def update_blitzball_end_stats(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
+    """Show end-game stats overlay. Returns True if the overlay is active."""
+    end_stats = state.get("end_stats")
+    if not _end_stats_active(state, end_stats):
+        _hide_end_stats_overlay(els)
+        return False
+
+    _show_end_stats_overlay(state, end_stats, els)
 
     return True
 
