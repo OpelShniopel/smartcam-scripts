@@ -64,7 +64,7 @@ import time
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import gi
 
@@ -351,6 +351,14 @@ def _fps_report() -> bool:
 # ---------------------------------------------------------------------------
 score_state = default_score_state()
 score_lock = threading.Lock()
+_SCORE_STR_FIELDS = frozenset({"home_name", "away_name", "clock"})
+_SCORE_TEAM_NAME_FIELDS = frozenset({"home_name", "away_name"})
+_SCORE_INT_FIELDS = frozenset({
+    "home_points", "away_points", "home_fouls", "away_fouls",
+    "home_timeouts", "away_timeouts", "quarter", "game_id",
+})
+_SCORE_NUMBER_FIELDS = frozenset({"updated_at"})
+_SCORE_BOOL_FIELDS = frozenset({"visible"})
 
 # ---------------------------------------------------------------------------
 # Scoreboard overlay elements
@@ -365,135 +373,174 @@ def _render_scoreboard_bg() -> None:
         print("         Place scoreboard.png next to pipeline.py")
 
 
-def _update_osd_texts(state: dict) -> None:
+def _osd_elements_snapshot() -> dict[str, Gst.Element]:
     with _osd_lock:
-        els = dict(_osd_elements)
+        return dict(_osd_elements)
+
+
+def _osd_element(els: dict, key: str):
+    return els.get(key)
+
+
+def _set_osd_silent(els: dict, key: str, silent: bool) -> None:
+    el = _osd_element(els, key)
+    if el:
+        el.set_property("silent", silent)
+
+
+def _set_osd_alpha(els: dict, key: str, alpha: float) -> None:
+    el = _osd_element(els, key)
+    if el:
+        el.set_property("alpha", alpha)
+
+
+def _set_many_osd_silent(els: dict, keys, silent: bool) -> None:
+    for key in keys:
+        _set_osd_silent(els, key, silent)
+
+
+def _update_team_name_text(el, value, fallback: str, visible: bool) -> None:
+    if not el:
+        return
+    el.set_property("silent", not visible)
+    if visible:
+        el.set_property("text", truncate_team_name(value or fallback))
+
+
+def _update_foul_bar(el, team: str, fouls, visible: bool) -> None:
+    if not el:
+        return
+    path = foul_png_path(team, fouls)
+    if path is None:
+        el.set_property("alpha", 0.0)
+        return
+    el.set_property("location", path)
+    el.set_property("alpha", 1.0 if visible else 0.0)
+
+
+def _update_standard_scoreboard_overlays(state: dict, els: dict, visible: bool) -> None:
+    update_quarter_overlay(_osd_element(els, "osd_quarter"), visible, state)
+    _update_team_name_text(_osd_element(els, "osd_home"), state.get("home_name", "HOME"), "HOME", visible)
+    _update_team_name_text(_osd_element(els, "osd_away"), state.get("away_name", "AWAY"), "AWAY", visible)
+    update_score_clock_overlays(
+        _osd_element(els, "osd_home_score"),
+        _osd_element(els, "osd_away_score"),
+        _osd_element(els, "osd_clock"),
+        visible,
+        state,
+    )
+    _update_foul_bar(_osd_element(els, "osd_home_fouls_bar"), "home", state.get("home_fouls", 0), visible)
+    _update_foul_bar(_osd_element(els, "osd_away_fouls_bar"), "away", state.get("away_fouls", 0), visible)
+    _set_osd_alpha(els, "osd_bg", 1.0 if visible else 0.0)
+    update_milestone_overlays(
+        _osd_element(els, "osd_milestone_player"),
+        _osd_element(els, "osd_milestone_text"),
+        state,
+    )
+
+
+def _active_timeout_stats(state: dict) -> dict | None:
+    timeout_stats = state.get("timeout_stats")
+    if not isinstance(timeout_stats, dict):
+        return None
+    if timeout_stats.get("show_until", 0) <= int(time.time() * 1000):
+        return None
+    return timeout_stats
+
+
+def _show_timeout_overlays(timeout_stats: dict, state: dict, els: dict) -> None:
+    for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
+        _set_osd_alpha(els, key, 0.0)
+    _set_many_osd_silent(
+        els,
+        (
+            "osd_quarter", "osd_home", "osd_away", "osd_home_score",
+            "osd_away_score", "osd_clock", "osd_milestone_player",
+            "osd_milestone_text",
+        ),
+        True,
+    )
+    populate_timeout_texts(timeout_stats, state, els)
+    _set_osd_alpha(els, "osd_timeout_bg", 1.0)
+    _set_many_osd_silent(els, TIMEOUT_TEXT_KEYS, False)
+
+
+def _hide_timeout_overlays(els: dict) -> None:
+    _set_osd_alpha(els, "osd_timeout_bg", 0.0)
+    _set_many_osd_silent(els, TIMEOUT_TEXT_KEYS, True)
+
+
+def _update_timeout_overlays(state: dict, els: dict) -> None:
+    timeout_stats = _active_timeout_stats(state)
+    if timeout_stats is None:
+        _hide_timeout_overlays(els)
+        return
+    _show_timeout_overlays(timeout_stats, state, els)
+
+
+def _update_osd_texts(state: dict) -> None:
+    els = _osd_elements_snapshot()
     if not els:
         return
 
-    end_showing = update_blitzball_end_stats(state, els)
-    if end_showing:
+    if update_blitzball_end_stats(state, els):
         return
 
     visible = state.get("visible", False)
-
     if state.get("sport_code", "") != "BLITZBALL":
-        home = els.get("osd_home")
-        away = els.get("osd_away")
-        home_score = els.get("osd_home_score")
-        away_score = els.get("osd_away_score")
-        clock = els.get("osd_clock")
-        quarter = els.get("osd_quarter")
-        home_fouls_bar = els.get("osd_home_fouls_bar")
-        away_fouls_bar = els.get("osd_away_fouls_bar")
-        bg = els.get("osd_bg")
-        milestone_player = els.get("osd_milestone_player")
-        milestone_text = els.get("osd_milestone_text")
-
-        update_quarter_overlay(quarter, visible, state)
-        if home:
-            home.set_property("silent", not visible)
-            if visible:
-                home.set_property(
-                    "text",
-                    truncate_team_name(state.get("home_name", "HOME")),
-                )
-        if away:
-            away.set_property("silent", not visible)
-            if visible:
-                away.set_property(
-                    "text",
-                    truncate_team_name(state.get("away_name", "AWAY")),
-                )
-        update_score_clock_overlays(home_score, away_score, clock, visible, state)
-        if home_fouls_bar:
-            path = foul_png_path("home", state.get("home_fouls", 0))
-            if path is None:
-                home_fouls_bar.set_property("alpha", 0.0)
-            else:
-                home_fouls_bar.set_property("location", path)
-                home_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
-        if away_fouls_bar:
-            path = foul_png_path("away", state.get("away_fouls", 0))
-            if path is None:
-                away_fouls_bar.set_property("alpha", 0.0)
-            else:
-                away_fouls_bar.set_property("location", path)
-                away_fouls_bar.set_property("alpha", 1.0 if visible else 0.0)
-        if bg:
-            bg.set_property("alpha", 1.0 if visible else 0.0)
-        update_milestone_overlays(milestone_player, milestone_text, state)
+        _update_standard_scoreboard_overlays(state, els, visible)
 
     update_blitzball_overlay(state, els)
+    _update_timeout_overlays(state, els)
 
-    timeout_stats = state.get("timeout_stats")
-    now_ms = int(time.time() * 1000)
-    timeout_active = (
-            isinstance(timeout_stats, dict)
-            and timeout_stats.get("show_until", 0) > now_ms
-    )
-    timeout_bg = els.get("osd_timeout_bg")
-    if timeout_active:
-        for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
-            el = els.get(key)
-            if el:
-                el.set_property("alpha", 0.0)
-        for key in ("osd_quarter", "osd_home", "osd_away", "osd_home_score",
-                    "osd_away_score", "osd_clock", "osd_milestone_player", "osd_milestone_text"):
-            el = els.get(key)
-            if el:
-                el.set_property("silent", True)
-        populate_timeout_texts(timeout_stats, state, els)
-        if timeout_bg:
-            timeout_bg.set_property("alpha", 1.0)
-        for key in TIMEOUT_TEXT_KEYS:
-            el = els.get(key)
-            if el:
-                el.set_property("silent", False)
-    else:
-        if timeout_bg:
-            timeout_bg.set_property("alpha", 0.0)
-        for key in TIMEOUT_TEXT_KEYS:
-            el = els.get(key)
-            if el:
-                el.set_property("silent", True)
+
+def _is_score_str(value) -> bool:
+    return isinstance(value, str)
+
+
+def _is_score_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_score_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_score_bool(value) -> bool:
+    return isinstance(value, bool)
+
+
+def _normalize_score_str_field(field: str, value: str) -> str:
+    if field in _SCORE_TEAM_NAME_FIELDS:
+        return truncate_team_name(value)
+    return value
+
+
+def _apply_score_fields(data: dict, fields, predicate: Callable[[Any], bool], normalize=None) -> None:
+    for field in fields:
+        value = data.get(field)
+        if predicate(value):
+            score_state[field] = normalize(field, value) if normalize else value
+
+
+def _apply_score_milestone(data: dict) -> None:
+    if "milestone" not in data:
+        return
+    milestone = data["milestone"]
+    if milestone is None or isinstance(milestone, dict):
+        score_state["milestone"] = milestone
 
 
 def _apply_score_patch(data: dict) -> None:
     if not isinstance(data, dict):
         raise ValueError("score patch must be a JSON object")
 
-    allowed_str = {"home_name", "away_name", "clock"}
-    allowed_int = {"home_points", "away_points", "home_fouls",
-                   "away_fouls", "home_timeouts", "away_timeouts", "quarter",
-                   "game_id"}
-    allowed_number = {"updated_at"}
-    allowed_bool = {"visible"}
     with score_lock:
-        for k in allowed_str:
-            if k in data and isinstance(data[k], str):
-                if k in {"home_name", "away_name"}:
-                    score_state[k] = truncate_team_name(data[k])
-                else:
-                    score_state[k] = data[k]
-        for k in allowed_int:
-            if k in data and isinstance(data[k], int) and not isinstance(data[k], bool):
-                score_state[k] = data[k]
-        for k in allowed_number:
-            if (
-                    k in data
-                    and isinstance(data[k], (int, float))
-                    and not isinstance(data[k], bool)
-            ):
-                score_state[k] = data[k]
-        for k in allowed_bool:
-            if k in data and isinstance(data[k], bool):
-                score_state[k] = data[k]
-        if (
-                "milestone" in data
-                and (data["milestone"] is None or isinstance(data["milestone"], dict))
-        ):
-            score_state["milestone"] = data["milestone"]
+        _apply_score_fields(data, _SCORE_STR_FIELDS, _is_score_str, _normalize_score_str_field)
+        _apply_score_fields(data, _SCORE_INT_FIELDS, _is_score_int)
+        _apply_score_fields(data, _SCORE_NUMBER_FIELDS, _is_score_number)
+        _apply_score_fields(data, _SCORE_BOOL_FIELDS, _is_score_bool)
+        _apply_score_milestone(data)
         state = score_state.copy()
     _update_osd_texts(state)
     _persist_score_state()
@@ -507,119 +554,165 @@ _pan_deg      = 0.0
 _pan_deg_lock = threading.Lock()
 
 
-def start_ptz_manual_relay() -> None:
-    def _relay():
-        while True:
-            conn = None
-            try:
-                conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                conn.connect(PTZ_MANUAL_SOCK)
-                print("[ptz-manual] relay connected")
-                while True:
-                    msg = _ptz_manual_q.get()
-                    conn.sendall((json.dumps(msg) + "\n").encode())
-            except (ConnectionRefusedError, FileNotFoundError):
-                time.sleep(1)
-            except OSError:
-                time.sleep(1)
-            finally:
-                if conn:
-                    try:
-                        conn.close()
-                    except OSError:
-                        pass
+def _close_socket_quietly(conn: socket.socket | None) -> None:
+    if not conn:
+        return
+    try:
+        conn.close()
+    except OSError:
+        pass
 
-    threading.Thread(target=_relay, daemon=True, name="ptz-manual-relay").start()
+
+def _connect_ptz_manual_socket() -> socket.socket:
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.connect(PTZ_MANUAL_SOCK)
+    print("[ptz-manual] relay connected")
+    return conn
+
+
+def _send_ptz_manual_messages(conn: socket.socket) -> None:
+    while True:
+        msg = _ptz_manual_q.get()
+        conn.sendall((json.dumps(msg) + "\n").encode())
+
+
+def _ptz_manual_relay_loop() -> None:
+    while True:
+        conn = None
+        try:
+            conn = _connect_ptz_manual_socket()
+            _send_ptz_manual_messages(conn)
+        except (ConnectionRefusedError, FileNotFoundError, OSError):
+            time.sleep(1)
+        finally:
+            _close_socket_quietly(conn)
+
+
+def start_ptz_manual_relay() -> None:
+    threading.Thread(target=_ptz_manual_relay_loop, daemon=True, name="ptz-manual-relay").start()
+
+
+def _send_ptz_manual_ack(
+        msg_type: str,
+        msg_id,
+        ok: bool,
+        resp: dict | None = None,
+        error: str = "",
+) -> None:
+    ack: dict = {"type": "ack", "action": msg_type, "id": msg_id, "ok": ok}
+    if resp is not None:
+        ack["payload"] = resp
+    if error:
+        ack["error"] = error
+    _go_bridge_out_q.put(ack)
+
+
+def _ptz_payload(msg: dict) -> dict:
+    payload = msg.get("payload") or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _ptz_ack_error(msg_type: str, msg_id, error: str) -> None:
+    _send_ptz_manual_ack(msg_type, msg_id, False, error=error)
+
+
+def _handle_ptz_pan_step(payload: dict, msg_type: str, msg_id) -> None:
+    global _pan_deg
+    direction = payload.get("direction")
+    if direction not in ("left", "right"):
+        _ptz_ack_error(msg_type, msg_id, f"direction must be left|right, got {direction!r}")
+        return
+    steps = payload.get("steps", 1)
+    if not isinstance(steps, int) or isinstance(steps, bool) or steps < 1:
+        steps = 1
+    sign = 1 if direction == "right" else -1
+    with _pan_deg_lock:
+        _pan_deg += sign * steps * PAN_DEG_PER_STEP
+        pan_deg = _pan_deg
+    _ptz_manual_q.put({"type": "pan_step", "direction": direction, "steps": steps})
+    _send_ptz_manual_ack(msg_type, msg_id, True, {"panDeg": round(pan_deg, 2)})
+
+
+def _handle_ptz_move_start(payload: dict, msg_type: str, msg_id) -> None:
+    direction = payload.get("direction")
+    if direction not in ("left", "right"):
+        _ptz_ack_error(msg_type, msg_id, f"direction must be left|right, got {direction!r}")
+        return
+    sps = payload.get("stepsPerSecond", 10)
+    if not isinstance(sps, (int, float)) or isinstance(sps, bool) or sps <= 0:
+        sps = 10
+    _ptz_manual_q.put({"type": "move_start", "direction": direction, "steps_per_second": int(sps)})
+    _send_ptz_manual_ack(msg_type, msg_id, True, {})
+
+
+def _handle_ptz_move_stop(_payload: dict, msg_type: str, msg_id) -> None:
+    _ptz_manual_q.put({"type": "move_stop"})
+    _send_ptz_manual_ack(msg_type, msg_id, True, {})
+
+
+def _handle_ptz_set_mode(payload: dict, msg_type: str, msg_id) -> None:
+    mode = payload.get("mode")
+    if mode not in ("manual", "automatic"):
+        _ptz_ack_error(msg_type, msg_id, f"mode must be manual|automatic, got {mode!r}")
+        return
+    _ptz_manual_q.put({"type": "set_mode", "mode": mode})
+    _send_ptz_manual_ack(msg_type, msg_id, True)
+
+
+def _handle_ptz_zoom_step(payload: dict, msg_type: str, msg_id) -> None:
+    direction = payload.get("direction")
+    if direction not in ("in", "out"):
+        _ptz_ack_error(msg_type, msg_id, f"direction must be in|out, got {direction!r}")
+        return
+    steps = int(payload.get("steps", 1))
+    if steps <= 0:
+        _ptz_ack_error(msg_type, msg_id, "steps must be > 0")
+        return
+    _ptz_manual_q.put({"type": "zoom_step", "direction": direction, "steps": steps})
+    _send_ptz_manual_ack(msg_type, msg_id, True, {})
+
+
+def _handle_ptz_zoom_start(payload: dict, msg_type: str, msg_id) -> None:
+    direction = payload.get("direction")
+    if direction not in ("in", "out"):
+        _ptz_ack_error(msg_type, msg_id, f"direction must be in|out, got {direction!r}")
+        return
+    sps = max(1, int(payload.get("stepsPerSecond", 10)))
+    _ptz_manual_q.put({"type": "zoom_start", "direction": direction, "steps_per_second": sps})
+    _send_ptz_manual_ack(msg_type, msg_id, True, {})
+
+
+def _handle_ptz_zoom_stop(_payload: dict, msg_type: str, msg_id) -> None:
+    _ptz_manual_q.put({"type": "zoom_stop"})
+    _send_ptz_manual_ack(msg_type, msg_id, True, {})
+
+
+def _handle_ptz_focus_offset(payload: dict, msg_type: str, msg_id) -> None:
+    offset = payload.get("offset", 0)
+    if not isinstance(offset, int) or offset == 0:
+        _ptz_ack_error(msg_type, msg_id, "offset must be a non-zero integer")
+        return
+    _ptz_manual_q.put({"type": "focus_offset", "offset": offset})
+    _send_ptz_manual_ack(msg_type, msg_id, True, {})
+
+
+_PTZ_MANUAL_HANDLERS = {
+    "cmd.cam_pan_step": _handle_ptz_pan_step,
+    "cmd.cam_move_start": _handle_ptz_move_start,
+    "cmd.cam_move_stop": _handle_ptz_move_stop,
+    "cmd.set_cam_mode": _handle_ptz_set_mode,
+    "cmd.cam_zoom_step": _handle_ptz_zoom_step,
+    "cmd.cam_zoom_start": _handle_ptz_zoom_start,
+    "cmd.cam_zoom_stop": _handle_ptz_zoom_stop,
+    "cmd.cam_focus_offset": _handle_ptz_focus_offset,
+}
 
 
 def _dispatch_ptz_manual_cmd(msg: dict) -> None:
-    global _pan_deg
     msg_type = msg.get("type", "")
-    msg_id   = msg.get("id", "")
-    payload  = msg.get("payload") or {}
-    if not isinstance(payload, dict):
-        payload = {}
-
-    def _send_ptz_ack(ok: bool, resp: dict | None = None, error: str = "") -> None:
-        ack: dict = {"type": "ack", "action": msg_type, "id": msg_id, "ok": ok}
-        if resp is not None:
-            ack["payload"] = resp
-        if error:
-            ack["error"] = error
-        _go_bridge_out_q.put(ack)
-
-    if msg_type == "cmd.cam_pan_step":
-        direction = payload.get("direction")
-        if direction not in ("left", "right"):
-            _send_ptz_ack(False, error=f"direction must be left|right, got {direction!r}")
-            return
-        steps = payload.get("steps", 1)
-        if not isinstance(steps, int) or isinstance(steps, bool) or steps < 1:
-            steps = 1
-        sign = 1 if direction == "right" else -1
-        with _pan_deg_lock:
-            _pan_deg += sign * steps * PAN_DEG_PER_STEP
-            pan_deg = _pan_deg
-        _ptz_manual_q.put({"type": "pan_step", "direction": direction, "steps": steps})
-        _send_ptz_ack(True, {"panDeg": round(pan_deg, 2)})
-
-    elif msg_type == "cmd.cam_move_start":
-        direction = payload.get("direction")
-        if direction not in ("left", "right"):
-            _send_ptz_ack(False, error=f"direction must be left|right, got {direction!r}")
-            return
-        sps = payload.get("stepsPerSecond", 10)
-        if not isinstance(sps, (int, float)) or isinstance(sps, bool) or sps <= 0:
-            sps = 10
-        _ptz_manual_q.put({"type": "move_start", "direction": direction,
-                            "steps_per_second": int(sps)})
-        _send_ptz_ack(True, {})
-
-    elif msg_type == "cmd.cam_move_stop":
-        _ptz_manual_q.put({"type": "move_stop"})
-        _send_ptz_ack(True, {})
-
-    elif msg_type == "cmd.set_cam_mode":
-        mode = payload.get("mode")
-        if mode not in ("manual", "automatic"):
-            _send_ptz_ack(False, error=f"mode must be manual|automatic, got {mode!r}")
-            return
-        _ptz_manual_q.put({"type": "set_mode", "mode": mode})
-        _send_ptz_ack(True)
-
-    elif msg_type == "cmd.cam_zoom_step":
-        direction = payload.get("direction")
-        if direction not in ("in", "out"):
-            _send_ptz_ack(False, error=f"direction must be in|out, got {direction!r}")
-            return
-        steps = int(payload.get("steps", 1))
-        if steps <= 0:
-            _send_ptz_ack(False, error="steps must be > 0")
-            return
-        _ptz_manual_q.put({"type": "zoom_step", "direction": direction, "steps": steps})
-        _send_ptz_ack(True, {})
-
-    elif msg_type == "cmd.cam_zoom_start":
-        direction = payload.get("direction")
-        if direction not in ("in", "out"):
-            _send_ptz_ack(False, error=f"direction must be in|out, got {direction!r}")
-            return
-        sps = max(1, int(payload.get("stepsPerSecond", 10)))
-        _ptz_manual_q.put({"type": "zoom_start", "direction": direction,
-                           "steps_per_second": sps})
-        _send_ptz_ack(True, {})
-
-    elif msg_type == "cmd.cam_zoom_stop":
-        _ptz_manual_q.put({"type": "zoom_stop"})
-        _send_ptz_ack(True, {})
-
-    elif msg_type == "cmd.cam_focus_offset":
-        offset = payload.get("offset", 0)
-        if not isinstance(offset, int) or offset == 0:
-            _send_ptz_ack(False, error="offset must be a non-zero integer")
-            return
-        _ptz_manual_q.put({"type": "focus_offset", "offset": offset})
-        _send_ptz_ack(True, {})
+    handler = _PTZ_MANUAL_HANDLERS.get(msg_type)
+    if handler:
+        handler(_ptz_payload(msg), msg_type, msg.get("id", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -700,57 +793,76 @@ _go_bridge_clients_lock = threading.Lock()
 _go_bridge_out_q: queue.SimpleQueue = queue.SimpleQueue()
 
 
-def _handle_go_connection(conn: socket.socket) -> None:
+def _register_go_connection(conn: socket.socket) -> None:
     with _go_bridge_clients_lock:
         _go_bridge_clients.append(conn)
     _push_state()
+    _replay_cached_stream_status()
 
-    # Replay cached stream_status if already determined.
-    # Fixes the race where stream_status fired before Go reconnected
-    # (Python restarts faster than Go's 2s reconnect delay, so the
-    # original stream_status was sent to an empty _go_bridge_clients list).
+
+def _replay_cached_stream_status() -> None:
     cached_status = _get_cached_stream_status()
-    if cached_status is not None:
-        _go_bridge_out_q.put(cached_status)
-        print(f"[stream_status] replayed to new Go connection: active={cached_status.get('active')}")
+    if cached_status is None:
+        return
+    _go_bridge_out_q.put(cached_status)
+    print(f"[stream_status] replayed to new Go connection: active={cached_status.get('active')}")
 
-    buf = b""
+
+def _decode_go_message(line: bytes) -> dict | None:
+    line = line.strip()
+    if not line:
+        return None
     try:
-        while True:
-            chunk = conn.recv(4096)
-            if not chunk:
-                break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(msg, dict):
-                    print(f"[go] ignoring non-object message: {msg!r}")
-                    continue
-                if msg.get("type") == "cmd":
-                    _dispatch_cmd(msg)
-                elif msg.get("type") == "ping":
-                    _go_bridge_out_q.put({"type": "pong"})
-                elif msg.get("type") in _PTZ_CMD_TYPES:
-                    _dispatch_ptz_manual_cmd(msg)
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(msg, dict):
+        return msg
+    print(f"[go] ignoring non-object message: {msg!r}")
+    return None
+
+
+def _dispatch_go_message(msg: dict) -> None:
+    msg_type = msg.get("type")
+    if msg_type == "cmd":
+        _dispatch_cmd(msg)
+    elif msg_type == "ping":
+        _go_bridge_out_q.put({"type": "pong"})
+    elif msg_type in _PTZ_CMD_TYPES:
+        _dispatch_ptz_manual_cmd(msg)
+
+
+def _read_go_messages(conn: socket.socket) -> None:
+    buf = b""
+    while True:
+        chunk = conn.recv(4096)
+        if not chunk:
+            return
+        buf += chunk
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            msg = _decode_go_message(line)
+            if msg is not None:
+                _dispatch_go_message(msg)
+
+
+def _unregister_go_connection(conn: socket.socket) -> None:
+    with _go_bridge_clients_lock:
+        try:
+            _go_bridge_clients.remove(conn)
+        except ValueError:
+            pass
+    _close_socket_quietly(conn)
+
+
+def _handle_go_connection(conn: socket.socket) -> None:
+    _register_go_connection(conn)
+    try:
+        _read_go_messages(conn)
     except OSError:
         pass
     finally:
-        with _go_bridge_clients_lock:
-            try:
-                _go_bridge_clients.remove(conn)
-            except ValueError:
-                pass
-        try:
-            conn.close()
-        except OSError:
-            pass
+        _unregister_go_connection(conn)
 
 
 def _ack(action: str, ok: bool, error: str = "") -> None:
@@ -760,106 +872,123 @@ def _ack(action: str, ok: bool, error: str = "") -> None:
     _go_bridge_out_q.put(msg)
 
 
+def _cmd_fail(action: str, err: str) -> None:
+    print(f"[cmd] {action}: {err}")
+    _ack(action, False, err)
+
+
+def _normalize_rtmp_url(raw_url) -> tuple[str | None, str]:
+    if not isinstance(raw_url, str):
+        return None, f"rtmp_url must be string, got {raw_url!r}"
+    rtmp_url = raw_url.strip()
+    if rtmp_url.startswith(("rtmp://", "rtmps://")):
+        return rtmp_url, ""
+    return None, f"invalid rtmp_url: {rtmp_url!r}"
+
+
+def _handle_start_stream_cmd(msg: dict) -> None:
+    raw_url = msg.get("rtmp_url")
+    rtmp_url, err = _normalize_rtmp_url(raw_url)
+    if rtmp_url is None:
+        _cmd_fail("start_stream", err)
+        return
+
+    _atomic_write_text(STREAM_CONF, rtmp_url + "\n")
+    ok, info = _start_stream_worker()
+    if not ok:
+        _cmd_fail("start_stream", f"failed to start stream worker: {info}")
+        return
+
+    print(f"[cmd] start_stream -> {rtmp_url[:60]} ({info})")
+    _ack("start_stream", True)
+    _push_state()
+    _poll_stream_worker_status()
+
+
+def _handle_stop_stream_cmd(_msg: dict) -> None:
+    _atomic_write_text(STREAM_CONF, "# disabled\n")
+    ok, info = _stop_stream_worker()
+    print(f"[cmd] stop_stream ({info})")
+    _ack("stop_stream", ok, "" if ok else info)
+    _push_state()
+    _sync_stream_status_cache(False)
+
+
+def _handle_set_config_cmd(msg: dict) -> None:
+    bitrate = msg.get("bitrateKbps")
+    if not isinstance(bitrate, int) or isinstance(bitrate, bool) or not (100 <= bitrate <= 50000):
+        _cmd_fail("set_config", f"bitrateKbps must be int 100-50000, got {bitrate!r}")
+        return
+    _persist_stream_worker_config(bitrate_kbps=bitrate)
+    running = _is_stream_worker_running()
+    print(f"[cmd] set_config bitrateKbps={bitrate} -> worker config (running={running})")
+    _ack("set_config", True)
+
+
+def _handle_switch_cam_cmd(msg: dict) -> None:
+    raw_cam = msg.get("camId", msg.get("camera", msg.get("cam")))
+    normalized = _normalize_stream_camera(raw_cam)
+    if normalized is None:
+        err = (
+            "camId must be fixed or ptz "
+            f"(legacy aliases 0,2,cam0,cam2,camera0,camera2 also work); got {raw_cam!r}"
+        )
+        _cmd_fail("switch_cam", err)
+        return
+    _persist_stream_worker_config(active_camera=normalized)
+    _request_program_camera_switch(normalized)
+    running = _is_stream_worker_running()
+    print(f"[cmd] switch_cam -> {normalized} (running={running})")
+    _ack("switch_cam", True)
+    _push_state()
+
+
+def _handle_set_osd_cmd(msg: dict) -> None:
+    visible = msg.get("visible")
+    if not isinstance(visible, bool):
+        _cmd_fail("set_osd", f"visible must be bool, got {visible!r}")
+        return
+    _apply_score_patch({"visible": visible})
+    print(f"[cmd] set_osd visible={visible}")
+    _ack("set_osd", True)
+
+
+def _handle_set_score_cmd(msg: dict) -> None:
+    try:
+        _apply_score_patch(msg)
+    except ValueError as e:
+        _cmd_fail("set_score", str(e))
+        return
+    print("[cmd] set_score applied")
+    _ack("set_score", True)
+
+
+_CMD_HANDLERS = {
+    "start_stream": _handle_start_stream_cmd,
+    "stop_stream": _handle_stop_stream_cmd,
+    "set_config": _handle_set_config_cmd,
+    "switch_cam": _handle_switch_cam_cmd,
+    "set_osd": _handle_set_osd_cmd,
+    "set_score": _handle_set_score_cmd,
+}
+
+
 def _dispatch_cmd(msg: dict) -> None:
-    raw_action = msg.get("action", "")
-    if not isinstance(raw_action, str):
-        err = f"action must be string, got {raw_action!r}"
+    action = msg.get("action", "")
+    if not isinstance(action, str):
+        err = f"action must be string, got {action!r}"
         print(f"[cmd] {err}")
         _ack("", False, err)
         return
-    action = raw_action
 
-    if action == "start_stream":
-        raw_url = msg.get("rtmp_url")
-        if not isinstance(raw_url, str):
-            err = f"rtmp_url must be string, got {raw_url!r}"
-            print(f"[cmd] start_stream: {err}")
-            _ack("start_stream", False, err)
-            return
-        rtmp_url = raw_url.strip()
-        if not (rtmp_url.startswith("rtmp://") or rtmp_url.startswith("rtmps://")):
-            err = f"invalid rtmp_url: {rtmp_url!r}"
-            print(f"[cmd] start_stream: {err}")
-            _ack("start_stream", False, err)
-            return
+    handler = _CMD_HANDLERS.get(action)
+    if handler:
+        handler(msg)
+        return
 
-        _atomic_write_text(STREAM_CONF, rtmp_url + "\n")
-
-        ok, info = _start_stream_worker()
-        if ok:
-            print(f"[cmd] start_stream -> {rtmp_url[:60]} ({info})")
-            _ack("start_stream", True)
-            _push_state()
-            _poll_stream_worker_status()
-        else:
-            err = f"failed to start stream worker: {info}"
-            print(f"[cmd] start_stream: {err}")
-            _ack("start_stream", False, err)
-
-    elif action == "stop_stream":
-        _atomic_write_text(STREAM_CONF, "# disabled\n")
-        ok, info = _stop_stream_worker()
-        print(f"[cmd] stop_stream ({info})")
-        _ack("stop_stream", ok, "" if ok else info)
-        _push_state()
-        _sync_stream_status_cache(False)
-
-    elif action == "set_config":
-        bitrate = msg.get("bitrateKbps")
-        if not isinstance(bitrate, int) or isinstance(bitrate, bool) or not (100 <= bitrate <= 50000):
-            err = f"bitrateKbps must be int 100-50000, got {bitrate!r}"
-            print(f"[cmd] set_config: {err}")
-            _ack("set_config", False, err)
-            return
-        _persist_stream_worker_config(bitrate_kbps=bitrate)
-        running = _is_stream_worker_running()
-        print(f"[cmd] set_config bitrateKbps={bitrate} -> worker config (running={running})")
-        _ack("set_config", True)
-
-    elif action == "switch_cam":
-        raw_cam = msg.get("camId", msg.get("camera", msg.get("cam")))
-        normalized = _normalize_stream_camera(raw_cam)
-        if normalized is None:
-            err = (
-                "camId must be fixed or ptz "
-                f"(legacy aliases 0,2,cam0,cam2,camera0,camera2 also work); got {raw_cam!r}"
-            )
-            print(f"[cmd] switch_cam: {err}")
-            _ack("switch_cam", False, err)
-            return
-        _persist_stream_worker_config(active_camera=normalized)
-        _request_program_camera_switch(normalized)
-        running = _is_stream_worker_running()
-        print(f"[cmd] switch_cam -> {normalized} (running={running})")
-        _ack("switch_cam", True)
-        _push_state()
-
-    elif action == "set_osd":
-        visible = msg.get("visible")
-        if not isinstance(visible, bool):
-            err = f"visible must be bool, got {visible!r}"
-            print(f"[cmd] set_osd: {err}")
-            _ack("set_osd", False, err)
-            return
-        _apply_score_patch({"visible": visible})
-        print(f"[cmd] set_osd visible={visible}")
-        _ack("set_osd", True)
-
-    elif action == "set_score":
-        try:
-            _apply_score_patch(msg)
-        except ValueError as e:
-            err = str(e)
-            print(f"[cmd] set_score: {err}")
-            _ack("set_score", False, err)
-            return
-        print("[cmd] set_score applied")
-        _ack("set_score", True)
-
-    else:
-        err = f"unknown action: {action!r}"
-        print(f"[cmd] {err}")
-        _ack(action, False, err)
+    err = f"unknown action: {action!r}"
+    print(f"[cmd] {err}")
+    _ack(action, False, err)
 
 
 MODEL_NAME = "Basketball"
