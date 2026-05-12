@@ -790,83 +790,54 @@ def configure_blitzball_overlay(elements: RtmpElements) -> None:
                        color=0xFF4500FF)
 
 
-def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
-    """Update blitzball overlay. Returns True if blitz pulse should be active."""
-    sport_code = state.get("sport_code", "")
+def _set_element_alpha(element: Any | None, alpha: float) -> None:
+    if element:
+        element.set_property("alpha", alpha)
 
-    if sport_code != "BLITZBALL":
-        for key in BLITZ_TEXT_KEYS:
-            el = els.get(key)
-            if el:
-                el.set_property("silent", True)
-        for key in BLITZ_PIXEL_KEYS:
-            el = els.get(key)
-            if el:
-                el.set_property("alpha", 0.0)
-        return False
 
-    # Hide regular scoreboard elements
-    osd_bg = els.get("osd_bg")
-    if osd_bg:
-        osd_bg.set_property("alpha", 0.0)
-    for key in ("osd_home_fouls_bar", "osd_away_fouls_bar"):
-        el = els.get(key)
-        if el:
-            el.set_property("alpha", 0.0)
+def _set_element_silent(element: Any | None, silent: bool) -> None:
+    if element:
+        element.set_property("silent", silent)
+
+
+def _hide_blitzball_overlay(els: Mapping[str, Any]) -> None:
+    for key in BLITZ_TEXT_KEYS:
+        _set_element_silent(els.get(key), True)
+    for key in BLITZ_PIXEL_KEYS:
+        _set_element_alpha(els.get(key), 0.0)
+
+
+def _hide_regular_scoreboard_for_blitzball(els: Mapping[str, Any]) -> None:
+    for key in ("osd_bg", "osd_home_fouls_bar", "osd_away_fouls_bar"):
+        _set_element_alpha(els.get(key), 0.0)
     for key in _BLITZ_SCOREBOARD_TEXT_KEYS:
-        el = els.get(key)
-        if el:
-            el.set_property("silent", True)
+        _set_element_silent(els.get(key), True)
 
-    visible = state.get("visible", False)
-    blitz_bg = els.get("osd_blitz_bg")
-    if blitz_bg:
-        blitz_bg.set_property("alpha", 1.0 if visible else 0.0)
 
-    if not visible:
-        for key in BLITZ_TEXT_KEYS:
-            el = els.get(key)
-            if el:
-                el.set_property("silent", True)
-        blitz_active_el = els.get("osd_blitz_active")
-        if blitz_active_el:
-            blitz_active_el.set_property("alpha", 0.0)
-        return False
+def _set_blitz_score_text(els: Mapping[str, Any], team: str, points: Any, blitz_score: Any) -> None:
+    set_overlay_text(els.get(f"osd_blitz_{team}_pts"), True, str(points))
+    blitz_element = els.get(f"osd_blitz_{team}_blitz")
+    if blitz_element:
+        blitz_element.set_property("silent", False)
+        blitz_element.set_property("text", f":{blitz_score}")
+        blitz_element.set_property("color", 0xFFFFD700)
 
-    home_name = str(state.get("home_name", "HOME"))
-    away_name = str(state.get("away_name", "AWAY"))
 
-    set_overlay_text(els.get("osd_blitz_home_name"), True, home_name)
-    set_overlay_text(els.get("osd_blitz_away_name"), True, away_name)
+def _set_blitz_team_texts(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
+    set_overlay_text(els.get("osd_blitz_home_name"), True, str(state.get("home_name", "HOME")))
+    set_overlay_text(els.get("osd_blitz_away_name"), True, str(state.get("away_name", "AWAY")))
+    _set_blitz_score_text(els, "home", state.get("home_points", 0), state.get("home_blitz_score", 0))
+    _set_blitz_score_text(els, "away", state.get("away_points", 0), state.get("away_blitz_score", 0))
 
-    home_pts = state.get("home_points", 0)
-    away_pts = state.get("away_points", 0)
-    home_blitz = state.get("home_blitz_score", 0)
-    away_blitz = state.get("away_blitz_score", 0)
-    set_overlay_text(els.get("osd_blitz_home_pts"), True, str(home_pts))
-    home_blitz_el = els.get("osd_blitz_home_blitz")
-    if home_blitz_el:
-        home_blitz_el.set_property("silent", False)
-        home_blitz_el.set_property("text", f":{home_blitz}")
-        home_blitz_el.set_property("color", 0xFFFFD700)  # gold
-    set_overlay_text(els.get("osd_blitz_away_pts"), True, str(away_pts))
-    away_blitz_el = els.get("osd_blitz_away_blitz")
-    if away_blitz_el:
-        away_blitz_el.set_property("silent", False)
-        away_blitz_el.set_property("text", f":{away_blitz}")
-        away_blitz_el.set_property("color", 0xFFFFD700)  # gold
 
+def _set_blitz_clock_texts(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
     quarter = state.get("quarter", 1)
     quarter_text = f"H{quarter}" if quarter <= 2 else "H2"
     set_overlay_text(els.get("osd_blitz_quarter"), True, quarter_text)
     set_overlay_text(els.get("osd_blitz_clock"), True, str(state.get("clock", "10:00")))
 
-    blitz_active = bool(state.get("blitz_active", False))
-    if not blitz_active:
-        blitz_active_el = els.get("osd_blitz_active")
-        if blitz_active_el:
-            blitz_active_el.set_property("alpha", 0.0)
 
+def _set_blitz_streak_texts(state: Mapping[str, Any], els: Mapping[str, Any]) -> None:
     set_overlay_text(
         els.get("osd_blitz_home_streak"),
         bool(state.get("home_hot_streak", False)),
@@ -878,7 +849,33 @@ def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -
         "🔥",
     )
 
+
+def _show_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
+    _set_element_alpha(els.get("osd_blitz_bg"), 1.0)
+    _set_blitz_team_texts(state, els)
+    _set_blitz_clock_texts(state, els)
+    blitz_active = bool(state.get("blitz_active", False))
+    if not blitz_active:
+        _set_element_alpha(els.get("osd_blitz_active"), 0.0)
+    _set_blitz_streak_texts(state, els)
     return blitz_active
+
+
+def update_blitzball_overlay(state: Mapping[str, Any], els: Mapping[str, Any]) -> bool:
+    """Update blitzball overlay. Returns True if blitz pulse should be active."""
+    sport_code = state.get("sport_code", "")
+
+    if sport_code != "BLITZBALL":
+        _hide_blitzball_overlay(els)
+        return False
+
+    _hide_regular_scoreboard_for_blitzball(els)
+    visible = state.get("visible", False)
+    if not visible:
+        _hide_blitzball_overlay(els)
+        return False
+
+    return _show_blitzball_overlay(state, els)
 
 
 def configure_rtmp_encoder(enc: Any, bitrate: int) -> None:
