@@ -36,6 +36,7 @@ TEXT_HALIGN_CENTER = 1
 TEXT_HALIGN_POSITION = 4
 TEXT_VALIGN_TOP = 2
 TEXT_VALIGN_POSITION = 3
+FONT_SANS_BOLD_15 = "Sans Bold 15"
 FONT_SANS_BOLD_20 = "Sans Bold 20"
 FONT_SANS_16 = "Sans 16"
 FONT_UBUNTU_MONO_BOLD_22 = "Ubuntu Mono Bold 22"
@@ -747,18 +748,18 @@ def configure_timeout_overlay(elements: RtmpElements) -> None:
     setup_text_overlay(elements.osd_timeout_away_blk, "", xpos=0.640, ypos=0.565, font=FONT_SANS_16, color=0xCCCCCCFF)
     setup_text_overlay(elements.osd_timeout_away_foul, "", xpos=0.640, ypos=0.610, font=FONT_SANS_16, color=0xCCCCCCFF)
 
-    setup_text_overlay(elements.osd_timeout_player_h1, "", xpos=0.270, ypos=0.740, font="Sans Bold 15",
+    setup_text_overlay(elements.osd_timeout_player_h1, "", xpos=0.270, ypos=0.740, font=FONT_SANS_BOLD_15,
                        color=0xFFFFFFFF, anchor_top_left=True)
-    setup_text_overlay(elements.osd_timeout_player_h2, "", xpos=0.270, ypos=0.800, font="Sans Bold 15",
+    setup_text_overlay(elements.osd_timeout_player_h2, "", xpos=0.270, ypos=0.800, font=FONT_SANS_BOLD_15,
                        color=0xFFFFFFFF, anchor_top_left=True)
-    setup_text_overlay(elements.osd_timeout_player_h3, "", xpos=0.270, ypos=0.860, font="Sans Bold 15",
+    setup_text_overlay(elements.osd_timeout_player_h3, "", xpos=0.270, ypos=0.860, font=FONT_SANS_BOLD_15,
                        color=0xFFFFFFFF, anchor_top_left=True)
 
-    setup_text_overlay(elements.osd_timeout_player_a1, "", xpos=0.515, ypos=0.740, font="Sans Bold 15",
+    setup_text_overlay(elements.osd_timeout_player_a1, "", xpos=0.515, ypos=0.740, font=FONT_SANS_BOLD_15,
                        color=0xFFFFFFFF, anchor_top_left=True)
-    setup_text_overlay(elements.osd_timeout_player_a2, "", xpos=0.515, ypos=0.800, font="Sans Bold 15",
+    setup_text_overlay(elements.osd_timeout_player_a2, "", xpos=0.515, ypos=0.800, font=FONT_SANS_BOLD_15,
                        color=0xFFFFFFFF, anchor_top_left=True)
-    setup_text_overlay(elements.osd_timeout_player_a3, "", xpos=0.515, ypos=0.860, font="Sans Bold 15",
+    setup_text_overlay(elements.osd_timeout_player_a3, "", xpos=0.515, ypos=0.860, font=FONT_SANS_BOLD_15,
                        color=0xFFFFFFFF, anchor_top_left=True)
 
 
