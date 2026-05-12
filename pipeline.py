@@ -93,6 +93,7 @@ from runtime_paths import (
     STREAM_WORKER_STATUS,
     STREAM_WORKER_WRAPPER,
 )
+from unix_socket_utils import create_unix_stream_server
 from rtmp_elements import (
     foul_png_path,
     populate_timeout_texts,
@@ -769,15 +770,7 @@ def _json_socket_sender_loop(
 
 
 def start_ptz_control_server() -> None:
-    try:
-        os.unlink(PTZ_CONTROL_SOCK)
-    except FileNotFoundError:
-        pass
-    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(PTZ_CONTROL_SOCK)
-    os.chmod(PTZ_CONTROL_SOCK, 0o660)
-    srv.listen(2)
-    print(f"PTZ control socket -> {PTZ_CONTROL_SOCK}")
+    srv = create_unix_stream_server(PTZ_CONTROL_SOCK, "PTZ control socket")
 
     def _accept_loop():
         while True:

@@ -7,6 +7,8 @@ import sys
 import threading
 import time
 
+from unix_socket_utils import create_unix_stream_server
+
 # ----------------------------------------------------------------
 #  DETECTION SOURCE — set to "ptz" or "fixed"
 #    "ptz"   : detections from the PTZ camera itself (C0 on ESP32)
@@ -254,15 +256,7 @@ class PTZController:
 
 
 def manual_socket_server(controller):
-    try:
-        os.unlink(MANUAL_SOCK)
-    except FileNotFoundError:
-        pass
-    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(MANUAL_SOCK)
-    os.chmod(MANUAL_SOCK, 0o660)
-    srv.listen(2)
-    print(f"PTZ manual socket -> {MANUAL_SOCK}")
+    srv = create_unix_stream_server(MANUAL_SOCK, "PTZ manual socket")
 
     def _handle_conn(conn):
         buf = b""
