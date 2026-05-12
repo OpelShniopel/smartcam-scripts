@@ -966,7 +966,7 @@ def _poll_worker_config() -> bool:
         previous = _last_config or {}
         _last_config = dict(cfg)
         bitrate = cfg.get("bitrateKbps", RTMP_BITRATE_DEFAULT)
-        enc_stream = _enc_stream
+        enc_stream: _OverlayPropertyElement | None = _enc_stream
         if enc_stream is not None and bitrate != previous.get("bitrateKbps", RTMP_BITRATE_DEFAULT):
             enc_stream.set_property("bitrate", int(bitrate))
             print(f"[worker] updated stream bitrate -> {bitrate} kbps")
