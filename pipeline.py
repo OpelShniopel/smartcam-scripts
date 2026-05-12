@@ -44,10 +44,6 @@ SERVICES (for Go backend):
   Unix socket  /tmp/ptz-control.sock  — outbound only, newline-delimited JSON
     Python -> PTZ control: {"camera":"fixed","frame":N,"timestamp":T,"detections":[...]}
 
-HTTP API (internal / debug only):
-  GET  /status
-  POST /score
-
 Class IDs (model v9):  0=RIM  1=BALL
 """
 
@@ -62,7 +58,6 @@ import sys
 import threading
 import time
 from datetime import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -125,7 +120,6 @@ JETSON_HOST = os.environ.get("JETSON_HOST") or _get_local_ip()
 GO_BRIDGE_SOCK = os.environ.get("SMARTCAM_SOCK", "/tmp/smartcam.sock")
 PTZ_CONTROL_SOCK = "/tmp/ptz_control.sock"
 PTZ_MANUAL_SOCK = "/tmp/ptz_manual.sock"
-HTTP_PORT = 9101
 
 # Degrees per Go "step" — matches ESP32: STEP_SIZE_STEPS(62) / STEPS_PER_DEG(125)
 PAN_DEG_PER_STEP = 0.5
@@ -260,7 +254,7 @@ RECORD_QUEUE_BUFFERS = 120
 # Default RTMP bitrate for worker config and the legacy embedded RTMP branch.
 RTMP_BITRATE = 6800
 
-# Encoder references populated by build_pipeline() and reported by /status.
+# Encoder references populated by build_pipeline().
 _encoders: dict[str, Gst.Element] = {}
 _program_selector: Gst.Element | None = None
 _program_selector_pads: dict[str, Gst.Pad] = {}
@@ -1109,131 +1103,6 @@ def start_go_bridge_server() -> None:
                 break
 
     threading.Thread(target=_accept_loop, daemon=True, name="go-bridge-accept").start()
-
-
-# ---------------------------------------------------------------------------
-# HTTP API
-# ---------------------------------------------------------------------------
-class ControlHandler(BaseHTTPRequestHandler):
-
-    def do_GET(self):
-        if self.path == "/status":
-            url = read_stream_url()
-            with score_lock:
-                score_visible = score_state["visible"]
-            cameras: dict[str, dict[str, str]] = {
-                FIXED_CAMERA: {
-                    "device": FIXED_CAMERA_DEVICE,
-                },
-                "cam0": {
-                    "device": FIXED_CAMERA_DEVICE,
-                },
-                PTZ_CAMERA: {
-                    "device": PTZ_CAMERA_DEVICE,
-                },
-                "cam2": {
-                    "device": PTZ_CAMERA_DEVICE,
-                },
-            }
-            payload: dict[str, Any] = {
-                "alive": True,
-                "pid": os.getpid(),
-                "streaming": bool(url) and _is_stream_worker_running(),
-                "stream_configured": bool(url),
-                "stream_worker_running": _is_stream_worker_running(),
-                "stream_active_camera": _program_active_camera,
-                "stream_switch_seq": _program_switch_seq,
-                "stream_switch_at_ms": _program_last_switch_at_ms,
-                "stream_previous_camera": _program_previous_camera,
-                "rtmp_url": url or "",
-                "score_overlay": score_visible,
-                "go_bridge_sock": GO_BRIDGE_SOCK,
-                "ptz_control_sock": PTZ_CONTROL_SOCK,
-                "unix_sock": GO_BRIDGE_SOCK,
-                "pycam_sock": PTZ_CONTROL_SOCK,
-                "encoders": list(_encoders.keys()),
-                "program": {
-                    "rtsp_clean": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_WEBRTC_RTSP_PATH}",
-                    "webrtc_clean": f"http://{JETSON_HOST}:8889/{PROGRAM_WEBRTC_RTSP_PATH}",
-                    "rtsp_stream": f"rtsp://{JETSON_HOST}:8554/{PROGRAM_STREAM_RTSP_PATH}",
-                    "active_camera": _program_active_camera,
-                    "switch_seq": _program_switch_seq,
-                    "switch_at_ms": _program_last_switch_at_ms,
-                    "previous_camera": _program_previous_camera,
-                },
-                "cameras": cameras,
-            }
-            if _ai_stream_enabled("CAM0"):
-                ai_urls = {
-                    "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera0_ai",
-                    "webrtc_ai": f"http://{JETSON_HOST}:8889/camera0_ai",
-                }
-                cameras[FIXED_CAMERA].update(ai_urls)
-                cameras["cam0"].update(ai_urls)
-            if _ai_stream_enabled("CAM2"):
-                ai_urls = {
-                    "rtsp_ai": f"rtsp://{JETSON_HOST}:8554/camera2_ai",
-                    "webrtc_ai": f"http://{JETSON_HOST}:8889/camera2_ai",
-                }
-                cameras[PTZ_CAMERA].update(ai_urls)
-                cameras["cam2"].update(ai_urls)
-            self._json(200, payload)
-        else:
-            self._json(404, {"error": "not found"})
-
-    def do_POST(self):
-        if self.path == "/score":
-            body = self._read_body()
-            try:
-                data = json.loads(body)
-            except (json.JSONDecodeError, AttributeError):
-                self._json(400, {"error": "invalid json"})
-                return
-            try:
-                _apply_score_patch(data)
-            except ValueError as e:
-                self._json(400, {"error": str(e)})
-                return
-            with score_lock:
-                self._json(200, score_state.copy())
-        else:
-            self._json(404, {"error": "not found"})
-
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self._cors()
-        self.end_headers()
-
-    def _json(self, code, data):
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self._cors()
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
-
-    def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-
-    def _read_body(self):
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-        except ValueError:
-            length = 0
-        return self.rfile.read(length).decode() if length else ""
-
-    def log_message(self, format_string, *args):
-        # Silence BaseHTTPRequestHandler's default access log; the pipeline
-        # uses its own structured/explicit logging and these per-request lines
-        # add noise without useful signal.
-        pass
-
-
-def start_http_server() -> None:
-    server = HTTPServer(("127.0.0.1", HTTP_PORT), ControlHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"HTTP API -> http://127.0.0.1:{HTTP_PORT}")
 
 
 # ---------------------------------------------------------------------------
@@ -2619,7 +2488,6 @@ def _install_restart_signal_handler() -> None:
 
 def _start_control_services() -> None:
     start_go_bridge_server()
-    start_http_server()
     start_ptz_control_server()
     start_ptz_manual_relay()
 
