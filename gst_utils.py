@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 import gi
 
@@ -11,8 +11,13 @@ gi.require_version("GstVideo", "1.0")
 from gi.repository import Gst, GstVideo
 
 
+class _EventSinkPad(Protocol):
+    def send_event(self, event: Any) -> bool:
+        ...
+
+
 class _KeyUnitElement(Protocol):
-    def get_static_pad(self, name: str) -> Gst.Pad | None:
+    def get_static_pad(self, name: str) -> _EventSinkPad | None:
         ...
 
 
